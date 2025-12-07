@@ -251,3 +251,101 @@ func TestClaudeAgentOptions_Plugins(t *testing.T) {
 		}
 	})
 }
+
+// TestWithBetas tests the WithBetas builder method.
+func TestWithBetas(t *testing.T) {
+	t.Run("WithBetas sets multiple beta flags", func(t *testing.T) {
+		opts := NewClaudeAgentOptions()
+		betas := []string{"context-1m-2025-08-07"}
+
+		result := opts.WithBetas(betas)
+
+		// Verify the method returns the same instance for chaining
+		if result != opts {
+			t.Error("WithBetas should return the same instance for chaining")
+		}
+
+		// Verify the values are set correctly
+		if len(opts.Betas) != 1 {
+			t.Errorf("expected 1 beta, got %d", len(opts.Betas))
+		}
+
+		if opts.Betas[0] != "context-1m-2025-08-07" {
+			t.Errorf("expected beta 'context-1m-2025-08-07', got %s", opts.Betas[0])
+		}
+	})
+
+	t.Run("WithBetas empty list", func(t *testing.T) {
+		opts := NewClaudeAgentOptions().WithBetas([]string{})
+
+		if len(opts.Betas) != 0 {
+			t.Errorf("expected 0 betas, got %d", len(opts.Betas))
+		}
+	})
+
+	t.Run("WithBetas replaces existing betas", func(t *testing.T) {
+		opts := NewClaudeAgentOptions().
+			WithBeta("beta-1").
+			WithBeta("beta-2").
+			WithBetas([]string{"beta-3", "beta-4"})
+
+		if len(opts.Betas) != 2 {
+			t.Errorf("expected 2 betas after WithBetas, got %d", len(opts.Betas))
+		}
+
+		if opts.Betas[0] != "beta-3" || opts.Betas[1] != "beta-4" {
+			t.Errorf("expected betas [beta-3, beta-4], got %v", opts.Betas)
+		}
+	})
+}
+
+// TestWithBeta tests the WithBeta builder method.
+func TestWithBeta(t *testing.T) {
+	t.Run("WithBeta adds single beta flag", func(t *testing.T) {
+		opts := NewClaudeAgentOptions()
+
+		result := opts.WithBeta("context-1m-2025-08-07")
+
+		// Verify the method returns the same instance for chaining
+		if result != opts {
+			t.Error("WithBeta should return the same instance for chaining")
+		}
+
+		// Verify the value is set correctly
+		if len(opts.Betas) != 1 {
+			t.Errorf("expected 1 beta, got %d", len(opts.Betas))
+		}
+
+		if opts.Betas[0] != "context-1m-2025-08-07" {
+			t.Errorf("expected beta 'context-1m-2025-08-07', got %s", opts.Betas[0])
+		}
+	})
+
+	t.Run("WithBeta multiple calls accumulate", func(t *testing.T) {
+		opts := NewClaudeAgentOptions().
+			WithBeta("beta-1").
+			WithBeta("beta-2").
+			WithBeta("beta-3")
+
+		if len(opts.Betas) != 3 {
+			t.Errorf("expected 3 betas, got %d", len(opts.Betas))
+		}
+
+		expectedBetas := []string{"beta-1", "beta-2", "beta-3"}
+		for i, beta := range opts.Betas {
+			if beta != expectedBetas[i] {
+				t.Errorf("beta[%d] = %s, expected %s", i, beta, expectedBetas[i])
+			}
+		}
+	})
+
+	t.Run("empty betas by default", func(t *testing.T) {
+		opts := NewClaudeAgentOptions()
+		if opts.Betas == nil {
+			t.Error("Betas should not be nil")
+		}
+		if len(opts.Betas) != 0 {
+			t.Errorf("expected 0 betas by default, got %d", len(opts.Betas))
+		}
+	})
+}
