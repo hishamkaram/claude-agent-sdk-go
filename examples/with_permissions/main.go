@@ -18,7 +18,7 @@ func main() {
 
 	// Create options with permission callback
 	opts := types.NewClaudeAgentOptions().
-		WithModel("claude-3-5-sonnet-latest").
+		WithModel("claude-sonnet-4-5-20250929").
 		WithAllowedTools("Bash", "Read", "Write").
 		WithCanUseTool(permissionHandler)
 

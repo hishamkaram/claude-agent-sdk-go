@@ -313,14 +313,90 @@ Define custom tools via SDK MCP servers:
 // TODO: Implement custom MCP server support
 ```
 
+## Debugging and Stderr Logging
+
+The SDK provides flexible options for capturing and logging stderr output from the Claude CLI subprocess.
+
+### SDK-Managed File Logging (Simple)
+
+For basic use cases, enable automatic file logging with SDK-managed file handling:
+
+```go
+// Use default location: ~/.claude/agents_server/cli_stderr.log
+opts := NewClaudeAgentOptions().
+	WithDefaultStderrLogFile()
+
+// Or use custom path
+opts := NewClaudeAgentOptions().
+	WithCustomStderrLogFile("/tmp/claude-stderr.log")
+```
+
+The SDK will:
+- Create parent directories if they don't exist
+- Log all stderr output with timestamps
+- Provide helpful error messages if logging fails
+- Continue execution even if file logging fails
+
+### Runtime Control with Stderr Callback (Advanced)
+
+For runtime control over what gets logged, use the `Stderr` callback:
+
+```go
+type App struct {
+	enableLogging atomic.Bool
+	logFile       *os.File
+}
+
+func (app *App) setup() {
+	opts := NewClaudeAgentOptions().
+		WithStderr(func(line string) {
+			// Full runtime control over stderr handling
+			if app.enableLogging.Load() {
+				fmt.Fprintf(app.logFile, "[stderr] %s\n", line)
+			}
+
+			// Can also filter, transform, or send to monitoring
+			if strings.Contains(line, "ERROR") {
+				app.sendAlert(line)
+			}
+		})
+}
+
+// Toggle logging at runtime
+func (app *App) EnableLogging()  { app.enableLogging.Store(true) }
+func (app *App) DisableLogging() { app.enableLogging.Store(false) }
+```
+
+### Combined Approach
+
+You can use both SDK-managed file logging AND a custom callback:
+
+```go
+opts := NewClaudeAgentOptions().
+	WithDefaultStderrLogFile().  // SDK logs to file
+	WithStderr(func(line string) {
+		// Your custom logic (monitoring, filtering, etc.)
+		if strings.Contains(line, "CRITICAL") {
+			alert.Send(line)
+		}
+	})
+```
+
+**Benefits:**
+- **Simple things simple**: Just enable file logging for basic debugging
+- **Complex things possible**: Use callbacks for filtering, monitoring, alerts
+- **Non-intrusive**: Disabled by default, no files created unless requested
+- **Helpful errors**: Clear messages if directory creation or file opening fails
+
 ## Environment Variables
 
 | Variable | Purpose |
 |----------|---------|
 | `CLAUDE_API_KEY` | Claude API key (required) |
-| `CLAUDE_AGENT_VERBOSE` | Enable verbose debug logging to file at `~/.claude/agents_server/cli_stderr.log` |
 | `CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK` | Skip CLI version validation (dev only) |
 | Custom variables | Passed to CLI process via `WithEnv()` |
+
+**Note:** For stderr logging, use the options-based approach (`WithDefaultStderrLogFile()` or `WithStderr()`) instead of environment variables. See [Debugging and Stderr Logging](#debugging-and-stderr-logging).
 
 ## Error Handling
 

@@ -16,7 +16,7 @@ func main() {
 
 	// Create options with a simple model
 	opts := types.NewClaudeAgentOptions().
-		WithModel("claude-3-5-sonnet-latest")
+		WithModel("claude-sonnet-4-5-20250929")
 
 	// Simple query
 	fmt.Println("Sending query: 'What is 2 + 2?'")

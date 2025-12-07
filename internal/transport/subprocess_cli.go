@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 
 	"github.com/schlunsen/claude-agent-sdk-go/internal/log"
@@ -469,18 +470,49 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context) {
 		return
 	}
 
-	// Open log file for stderr output
-	homeDir, _ := os.UserHomeDir()
-	logPath := fmt.Sprintf("%s/.claude/agents_server/cli_stderr.log", homeDir)
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		// Fallback to stderr if file can't be opened
-		fmt.Fprintf(os.Stderr, "[SDK] Failed to open stderr log file: %v\n", err)
-		return
+	// Determine if file logging is enabled via StderrLogFile option
+	var logFile *os.File
+	if t.options != nil && t.options.StderrLogFile != nil {
+		// Resolve log file path
+		logPath := *t.options.StderrLogFile
+		if logPath == "" {
+			// Use default location
+			homeDir, _ := os.UserHomeDir()
+			logPath = fmt.Sprintf("%s/.claude/agents_server/cli_stderr.log", homeDir)
+		}
+
+		// Create parent directory if it doesn't exist
+		logDir := filepath.Dir(logPath)
+		if err := os.MkdirAll(logDir, 0755); err != nil {
+			fmt.Fprintf(os.Stderr,
+				"[SDK] Failed to create stderr log directory %s: %v\n"+
+					"Stderr file logging disabled. To fix, create directory:\n"+
+					"  mkdir -p %s\n",
+				logDir, err, logDir)
+		} else {
+			// Try to open log file
+			var err error
+			logFile, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+			if err != nil {
+				fmt.Fprintf(os.Stderr,
+					"[SDK] Failed to open stderr log file %s: %v\n"+
+						"Stderr file logging disabled. Possible fixes:\n"+
+						"  1. Ensure directory exists: mkdir -p %s\n"+
+						"  2. Check file permissions: chmod 644 %s\n"+
+						"  3. Use custom path: opts.WithCustomStderrLogFile(\"/path/to/file.log\")\n",
+					logPath, err, logDir, logPath)
+			} else {
+				t.logger.Debug("Stderr file logging enabled: %s", logPath)
+			}
+		}
 	}
-	defer func() {
-		_ = logFile.Close()
-	}()
+
+	// Ensure cleanup if file was opened
+	if logFile != nil {
+		defer func() {
+			_ = logFile.Close()
+		}()
+	}
 
 	reader := NewJSONLineReader(t.stderr)
 	for {
@@ -495,11 +527,20 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context) {
 			return
 		}
 
-		// Log stderr output to file
+		// Process stderr output
 		if len(line) > 0 {
 			stderrText := string(line)
-			_, _ = fmt.Fprintf(logFile, "[Claude CLI stderr]: %s\n", stderrText)
-			_ = logFile.Sync() // Flush to disk immediately
+
+			// Write to log file if enabled and file is open
+			if logFile != nil {
+				_, _ = fmt.Fprintf(logFile, "[Claude CLI stderr]: %s\n", stderrText)
+				_ = logFile.Sync() // Flush to disk immediately
+			}
+
+			// Call stderr callback if configured (for runtime control)
+			if t.options != nil && t.options.Stderr != nil {
+				t.options.Stderr(stderrText)
+			}
 
 			// Parse known error patterns and create typed errors
 			t.parseStderrError(stderrText)

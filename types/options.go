@@ -184,6 +184,13 @@ type ClaudeAgentOptions struct {
 	CanUseTool CanUseToolFunc              `json:"-"`
 	Hooks      map[HookEvent][]HookMatcher `json:"-"`
 	Stderr     StderrCallbackFunc          `json:"-"`
+
+	// Stderr file logging (SDK-managed, configuration-time only)
+	// - nil (default): No file logging
+	// - &"": Use default location (~/.claude/agents_server/cli_stderr.log)
+	// - &"path": Use custom path
+	// For runtime control, use the Stderr callback instead
+	StderrLogFile *string `json:"-"`
 }
 
 // NewClaudeAgentOptions creates a new ClaudeAgentOptions with sensible defaults.
@@ -449,6 +456,27 @@ func (o *ClaudeAgentOptions) WithHook(event HookEvent, matcher HookMatcher) *Cla
 // WithStderr sets the stderr callback.
 func (o *ClaudeAgentOptions) WithStderr(callback StderrCallbackFunc) *ClaudeAgentOptions {
 	o.Stderr = callback
+	return o
+}
+
+// WithStderrLogFile enables SDK-managed stderr file logging.
+// Pass nil to disable (default), empty string for default location, or custom path.
+func (o *ClaudeAgentOptions) WithStderrLogFile(path *string) *ClaudeAgentOptions {
+	o.StderrLogFile = path
+	return o
+}
+
+// WithDefaultStderrLogFile enables stderr logging to default location.
+// Default: ~/.claude/agents_server/cli_stderr.log
+func (o *ClaudeAgentOptions) WithDefaultStderrLogFile() *ClaudeAgentOptions {
+	empty := ""
+	o.StderrLogFile = &empty
+	return o
+}
+
+// WithCustomStderrLogFile enables stderr logging to a custom file path.
+func (o *ClaudeAgentOptions) WithCustomStderrLogFile(path string) *ClaudeAgentOptions {
+	o.StderrLogFile = &path
 	return o
 }
 
