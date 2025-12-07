@@ -143,6 +143,9 @@ type ClaudeAgentOptions struct {
 	MaxThinkingTokens *int     `json:"max_thinking_tokens,omitempty"` // Maximum tokens for extended thinking
 	MaxBudgetUSD      *float64 `json:"max_budget_usd,omitempty"`      // Maximum budget in USD for this query
 
+	// Beta features
+	Betas []string `json:"betas,omitempty"` // List of beta feature flags (e.g., "context-1m-2025-08-07")
+
 	// API configuration
 	BaseURL *string `json:"base_url,omitempty"` // Custom Anthropic API base URL (ANTHROPIC_BASE_URL)
 
@@ -194,6 +197,7 @@ func NewClaudeAgentOptions() *ClaudeAgentOptions {
 		ForkSession:            false,
 		IncludePartialMessages: false,
 		Plugins:                []PluginConfig{},
+		Betas:                  []string{},
 	}
 }
 
@@ -286,6 +290,20 @@ func (o *ClaudeAgentOptions) WithMaxThinkingTokens(maxTokens int) *ClaudeAgentOp
 // This helps prevent unexpectedly high API costs by stopping execution when the limit is reached.
 func (o *ClaudeAgentOptions) WithMaxBudgetUSD(maxBudget float64) *ClaudeAgentOptions {
 	o.MaxBudgetUSD = &maxBudget
+	return o
+}
+
+// WithBetas sets the beta feature flags to opt into Anthropic beta APIs.
+// Example: []string{"context-1m-2025-08-07"} for extended context window support.
+func (o *ClaudeAgentOptions) WithBetas(betas []string) *ClaudeAgentOptions {
+	o.Betas = betas
+	return o
+}
+
+// WithBeta adds a single beta feature flag.
+// This is useful for adding beta features without replacing the existing list.
+func (o *ClaudeAgentOptions) WithBeta(beta string) *ClaudeAgentOptions {
+	o.Betas = append(o.Betas, beta)
 	return o
 }
 

@@ -354,6 +354,14 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		t.logger.Debug("Setting max budget: $%.2f USD", *t.options.MaxBudgetUSD)
 	}
 
+	// Add beta feature flags if specified
+	if t.options != nil && len(t.options.Betas) > 0 {
+		for _, beta := range t.options.Betas {
+			args = append(args, "--betas", beta)
+			t.logger.Debug("Adding beta feature flag: %s", beta)
+		}
+	}
+
 	// Add plugin directories
 	if t.options != nil && len(t.options.Plugins) > 0 {
 		for _, plugin := range t.options.Plugins {
