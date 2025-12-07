@@ -166,7 +166,42 @@ func main() {
   ```bash
   npm install -g @anthropic-ai/claude-code
   ```
-- **Valid Claude API key** (via `CLAUDE_API_KEY` environment variable)
+- **Authentication** (choose one method):
+  - **API Key** (Pay-as-you-go): Set `CLAUDE_API_KEY` environment variable
+  - **OAuth Token** (Max subscription): Set `CLAUDE_CODE_OAUTH_TOKEN` environment variable
+
+## Authentication
+
+The SDK supports two authentication methods depending on your Anthropic subscription plan:
+
+### Method 1: API Key (Pay-as-you-go Plans)
+
+For standard API usage with pay-as-you-go billing:
+
+```bash
+export CLAUDE_API_KEY=your-api-key-here
+```
+
+Get your API key from the [Anthropic Console](https://console.anthropic.com/).
+
+### Method 2: OAuth Token (Max Subscription Plans)
+
+For Anthropic Max subscription plans that include Claude Code:
+
+1. **Setup OAuth token** with Claude Code CLI:
+   ```bash
+   claude setup-token
+   ```
+   This will open a browser window to authenticate and generate your OAuth token.
+
+2. **Export the token** to your environment:
+   ```bash
+   export CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token-here
+   ```
+
+3. **Use the SDK** - The Claude Code CLI will automatically use the OAuth token when available.
+
+**Note**: OAuth tokens are tied to your Max subscription and provide access to Claude Code features. API keys are for direct API access with usage-based billing.
 
 ## Architecture
 
@@ -392,9 +427,12 @@ opts := NewClaudeAgentOptions().
 
 | Variable | Purpose |
 |----------|---------|
-| `CLAUDE_API_KEY` | Claude API key (required) |
+| `CLAUDE_API_KEY` | Claude API key for pay-as-you-go plans (choose one auth method) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token for Max subscription plans (choose one auth method) |
 | `CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK` | Skip CLI version validation (dev only) |
 | Custom variables | Passed to CLI process via `WithEnv()` |
+
+**Authentication**: Set either `CLAUDE_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, not both. See [Authentication](#authentication) section for details.
 
 **Note:** For stderr logging, use the options-based approach (`WithDefaultStderrLogFile()` or `WithStderr()`) instead of environment variables. See [Debugging and Stderr Logging](#debugging-and-stderr-logging).
 
