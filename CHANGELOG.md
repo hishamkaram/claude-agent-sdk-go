@@ -2,6 +2,22 @@
 
 All notable changes to the Claude Agent SDK for Go are documented in this file.
 
+## [0.2.9] - 2025-12-07
+
+### Added
+- Beta API feature support via `WithBetas()` and `WithBeta()` builder methods
+- Support for Anthropic beta APIs like extended context windows (`context-1m-2025-08-07`)
+- Pass beta feature flags to Claude Code CLI via `--betas` flag
+- Comprehensive example demonstrating beta feature usage (`examples/with_betas/`)
+- Extensive unit tests for betas functionality in both options and transport layers
+
+### Details
+- Implements feature parity with Python SDK v0.1.12+ for beta support
+- Full CLI flag generation testing for `--betas` argument passing
+- Supports multiple simultaneous beta features
+- Method chaining support for fluent API usage
+- Closes #23
+
 ## [0.2.2] - 2025-10-19
 
 ### Added
