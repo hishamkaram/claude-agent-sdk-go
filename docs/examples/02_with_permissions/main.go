@@ -22,8 +22,8 @@ func checkPermission(ctx context.Context,
 	input map[string]interface{},
 	permCtx types.ToolPermissionContext) (interface{}, error) {
 	/*
-	Permission callback that controls tool access.
-	Returns PermissionResultAllow or PermissionResultDeny to grant or restrict tool use.
+		Permission callback that controls tool access.
+		Returns PermissionResultAllow or PermissionResultDeny to grant or restrict tool use.
 	*/
 
 	fmt.Printf("🔐 Checking permission for tool: %s\n", toolName)
@@ -59,7 +59,7 @@ func main() {
 	ctx := context.Background()
 
 	// Configure options with permission callback
-	options := sdk.NewClaudeAgentOptions().
+	options := types.NewClaudeAgentOptions().
 		WithCanUseTool(checkPermission).
 		WithAllowedTools("Bash", "Write", "Read").
 		WithSystemPrompt("You are a helpful assistant. You have access to tools but must ask before using them.")

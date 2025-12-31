@@ -30,7 +30,7 @@ func main() {
 				a, _ := args["a"].(float64)
 				b, _ := args["b"].(float64)
 				return map[string]any{
-					"result": a + b,
+					"result":    a + b,
 					"operation": "addition",
 				}, nil
 			},
@@ -51,7 +51,7 @@ func main() {
 				a, _ := args["a"].(float64)
 				b, _ := args["b"].(float64)
 				return map[string]any{
-					"result": a * b,
+					"result":    a * b,
 					"operation": "multiplication",
 				}, nil
 			},
@@ -62,9 +62,11 @@ func main() {
 	}
 
 	// Configure Claude with the MCP server
-	options := sdk.NewClaudeAgentOptions().
+	options := types.NewClaudeAgentOptions().
 		WithModel("claude-opus-4-20250514").
-		WithMCPServer("calculator", calculator).
+		WithMcpServers(map[string]interface{}{
+			"calculator": calculator,
+		}).
 		WithSystemPrompt(`You are a helpful calculator assistant. You have access to a calculator tool with two operations:
 - add(a, b): adds two numbers
 - multiply(a, b): multiplies two numbers
@@ -98,9 +100,8 @@ Use these tools to help the user with mathematical calculations.`)
 		case *types.ResultMessage:
 			// Final result with cost information
 			fmt.Printf("\n📊 Result: %s\n", m.Type)
-			if m.CostSummary != nil {
-				fmt.Printf("   Input tokens: %d\n", m.CostSummary.InputTokens)
-				fmt.Printf("   Output tokens: %d\n", m.CostSummary.OutputTokens)
+			if m.TotalCostUSD != nil {
+				fmt.Printf("   Total cost: $%.4f\n", *m.TotalCostUSD)
 			}
 		}
 	}

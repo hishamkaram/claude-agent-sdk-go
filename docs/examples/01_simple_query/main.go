@@ -38,9 +38,8 @@ func main() {
 			}
 		case *types.ResultMessage:
 			fmt.Println("\n✓ Response complete")
-			if m.CostSummary != nil {
-				fmt.Printf("  Tokens used - Input: %d, Output: %d\n",
-					m.CostSummary.InputTokens, m.CostSummary.OutputTokens)
+			if m.TotalCostUSD != nil {
+				fmt.Printf("  Total cost: $%.4f\n", *m.TotalCostUSD)
 			}
 		}
 	}

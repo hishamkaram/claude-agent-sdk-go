@@ -63,11 +63,11 @@ func TestNewSDKMCPServer_Success(t *testing.T) {
 
 func TestNewSDKMCPServer_Errors(t *testing.T) {
 	tests := []struct {
-		name      string
+		name       string
 		serverName string
-		tools     []Tool
-		wantErr   bool
-		errType   string
+		tools      []Tool
+		wantErr    bool
+		errType    string
 	}{
 		{
 			name:       "empty server name",

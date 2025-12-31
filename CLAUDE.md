@@ -108,28 +108,39 @@ Branch naming:
 - Reference the Python SDK for behavior
 - Implement in phase order (types → transport → parser → protocol → API)
 
-### 3. Testing Locally
+### 3. Verifying Changes via CI
 
-Before pushing, run the full test suite:
+Do NOT run tests locally. Instead, commit and push your changes to trigger the GitHub Actions CI pipeline, which is the source of truth for test verification.
 
+**Why CI-only testing:**
+- Ensures consistent test environment across all commits
+- Tests against multiple Go versions (1.24, 1.25)
+- Prevents environment-specific issues
+- Provides authoritative pass/fail signal
+- Coverage reports are generated automatically
+
+**Workflow:**
 ```bash
-# Format code
+# Format code locally only if needed
 make fmt
 
-# Check for issues
-make lint
+# Commit changes
+git add .
+git commit -m "Your message"
 
-# Build
-make build
+# Push to trigger CI
+git push origin your-branch-name
 
-# Run tests
-make test
-
-# Run with coverage
-make coverage
+# Wait for GitHub Actions to run
+# Monitor at: https://github.com/schlunsen/claude-agent-sdk-go/pull/YOUR_PR
 ```
 
-All checks should pass before pushing.
+**Do not run locally:**
+- ~~`make test`~~ - Let CI handle this
+- ~~`make lint`~~ - CI runs linting
+- ~~`make coverage`~~ - CI generates coverage reports
+
+The CI pipeline will verify all changes and report results on the pull request.
 
 ### 4. Committing Changes
 
@@ -164,12 +175,12 @@ Phase 2: Implement subprocess transport layer
 - Handle process lifecycle and stream cleanup
 ```
 
-### 5. Push Frequently
+### 5. Push Frequently to Trigger CI
 
 Push early and often - don't wait until everything is "complete":
 
 ```bash
-# After every 2-3 commits
+# After every commit
 git push -u origin phase-1/error-types
 
 # Subsequent pushes
@@ -179,26 +190,19 @@ git push
 This ensures:
 - Your work is backed up on GitHub
 - Progress is visible to others
-- You get feedback early
+- **GitHub Actions CI runs immediately to verify your changes**
+- You get fast feedback on formatting, linting, and test results
 
 ### 6. Create a Pull Request
 
 When a feature, fix, or chore is done:
 
-1. **Ensure all checks pass**:
-   ```bash
-   make fmt
-   make lint
-   make build
-   make test
-   ```
-
-2. **Push to GitHub**:
+1. **Push to GitHub**:
    ```bash
    git push origin phase-1/error-types
    ```
 
-3. **Create PR with clear description**:
+2. **Create PR with clear description**:
    - Title: Match commit message style
    - Description: Explain what, why, and how
    - Reference the implementation phase
@@ -377,19 +381,22 @@ type Query struct {
 
 ### Running Tests
 
+**Tests are verified by GitHub Actions CI only.** Do not run tests locally.
+
+Push your changes to trigger the CI pipeline:
 ```bash
-# Run all tests
-go test ./...
-
-# Run specific package
-go test -v ./types/...
-
-# Run with coverage
-go test -cover ./...
-
-# Generate HTML coverage report
-go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out
+git push origin your-branch-name
 ```
+
+Then monitor results at: `https://github.com/schlunsen/claude-agent-sdk-go/pull/YOUR_PR`
+
+The CI pipeline automatically:
+- ✅ Formats code with `gofmt`
+- ✅ Runs `go vet` for static analysis
+- ✅ Executes all tests with race detection: `go test -v -short -race`
+- ✅ Generates coverage reports
+- ✅ Runs `golangci-lint` for code quality
+- ✅ Tests on multiple Go versions (1.24, 1.25)
 
 ### Test Files
 

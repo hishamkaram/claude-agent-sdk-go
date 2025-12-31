@@ -111,7 +111,7 @@ func (s *SDKMCPServer) handleListTools(message map[string]interface{}) (map[stri
 		tools = append(tools, toolMap)
 	}
 
-	id, _ := message["id"]
+	id := message["id"]
 	return map[string]interface{}{
 		"jsonrpc": "2.0",
 		"id":      id,
@@ -153,7 +153,7 @@ func (s *SDKMCPServer) handleCallTool(message map[string]interface{}) (map[strin
 	}
 
 	// Format the result as content blocks
-	id, _ := message["id"]
+	id := message["id"]
 	content := s.formatResult(result)
 
 	return map[string]interface{}{
@@ -212,7 +212,7 @@ func (s *SDKMCPServer) formatResult(result any) []map[string]interface{} {
 
 // errorResponse creates a JSON-RPC error response.
 func (s *SDKMCPServer) errorResponse(message map[string]interface{}, code int, errMsg string) map[string]interface{} {
-	id, _ := message["id"]
+	id := message["id"]
 	return map[string]interface{}{
 		"jsonrpc": "2.0",
 		"id":      id,
