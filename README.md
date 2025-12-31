@@ -18,10 +18,18 @@ A Go SDK for building multi-turn AI agent applications with Claude via the Claud
 - 🔄 **Interactive sessions** - Bidirectional control protocol with `Client` for complex workflows
 - 🛠️ **Tool integration** - Permission callbacks and tool use controls
 - 🎣 **Hook system** - Respond to lifecycle events (PreToolUse, PostToolUse, etc.)
-- 📡 **MCP support** - Model Context Protocol servers (external and SDK-based)
+- 📡 **MCP support** - Model Context Protocol servers (external and SDK-based) + **[NEW] Factory function** for simplified server creation (Issue #24)
 - ⚡ **Streaming** - Full message streaming with partial outputs
 - 🎯 **Idiomatic Go** - Uses goroutines, channels, and context for natural concurrency
 - 📦 **Zero dependencies** - Core SDK uses only Go stdlib (except test examples)
+
+### Comparison with Python SDK
+
+Coming from Python? We have comprehensive guides:
+- **[📊 Feature Parity Guide](docs/FEATURE_PARITY.md)** - See what's implemented and how it compares
+- **[🏗️ Architecture Differences](docs/ARCHITECTURE.md)** - Understand async/await vs goroutines
+- **[🔄 Migration Guide](docs/MIGRATION_FROM_PYTHON.md)** - Python → Go code examples
+- **[📝 Side-by-side examples](docs/examples/python_vs_go/)** - Compare implementations
 
 ## Status
 
