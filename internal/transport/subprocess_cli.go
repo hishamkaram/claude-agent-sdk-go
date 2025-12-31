@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -376,7 +377,92 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		}
 	}
 
+	// Add setting sources if specified (enables local slash commands, CLAUDE.md, etc.)
+	if t.options != nil && len(t.options.SettingSources) > 0 {
+		sources := make([]string, len(t.options.SettingSources))
+		for i, src := range t.options.SettingSources {
+			sources[i] = string(src)
+		}
+		args = append(args, "--setting-sources", joinStrings(sources, ","))
+		t.logger.Debug("Setting sources: %s", joinStrings(sources, ","))
+	}
+
+	// Add agents if specified
+	if t.options != nil && len(t.options.Agents) > 0 {
+		agentsJSON := make(map[string]map[string]interface{})
+
+		for name, agent := range t.options.Agents {
+			agentMap := make(map[string]interface{})
+			agentMap["description"] = agent.Description
+			agentMap["prompt"] = agent.Prompt
+
+			// Add optional fields only if set
+			if len(agent.Tools) > 0 {
+				agentMap["tools"] = agent.Tools
+			}
+			if agent.Model != nil {
+				agentMap["model"] = *agent.Model
+			}
+			if agent.ExecutionMode != nil {
+				agentMap["execution_mode"] = string(*agent.ExecutionMode)
+			}
+			if agent.Timeout != nil {
+				agentMap["timeout"] = *agent.Timeout
+			}
+			if agent.MaxTurns != nil {
+				agentMap["max_turns"] = *agent.MaxTurns
+			}
+
+			agentsJSON[name] = agentMap
+		}
+
+		agentsJSONBytes, err := json.Marshal(agentsJSON)
+		if err != nil {
+			t.logger.Warning("Failed to marshal agents to JSON: %v", err)
+		} else {
+			args = append(args, "--agents", string(agentsJSONBytes))
+			t.logger.Debug("Agents configuration: %s", string(agentsJSONBytes))
+		}
+	}
+
+	// Add subagent execution configuration if specified
+	if t.options != nil && t.options.SubagentExecution != nil {
+		subagentJSON := make(map[string]interface{})
+
+		if t.options.SubagentExecution.MultiInvocation != "" {
+			subagentJSON["multi_invocation"] = string(t.options.SubagentExecution.MultiInvocation)
+		}
+		if t.options.SubagentExecution.MaxConcurrent > 0 {
+			subagentJSON["max_concurrent"] = t.options.SubagentExecution.MaxConcurrent
+		}
+		if t.options.SubagentExecution.ErrorHandling != "" {
+			subagentJSON["error_handling"] = string(t.options.SubagentExecution.ErrorHandling)
+		}
+
+		if len(subagentJSON) > 0 {
+			subagentJSONBytes, err := json.Marshal(subagentJSON)
+			if err != nil {
+				t.logger.Warning("Failed to marshal subagent execution config to JSON: %v", err)
+			} else {
+				args = append(args, "--subagent-execution", string(subagentJSONBytes))
+				t.logger.Debug("Subagent execution configuration: %s", string(subagentJSONBytes))
+			}
+		}
+	}
+
 	return args
+}
+
+// joinStrings joins strings with a separator (avoiding strings import)
+func joinStrings(strs []string, sep string) string {
+	if len(strs) == 0 {
+		return ""
+	}
+	result := strs[0]
+	for i := 1; i < len(strs); i++ {
+		result += sep + strs[i]
+	}
+	return result
 }
 
 // Close terminates the subprocess and cleans up all resources.

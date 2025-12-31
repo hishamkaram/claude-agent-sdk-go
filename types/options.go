@@ -14,6 +14,55 @@ const (
 	SettingSourceLocal   SettingSource = "local"
 )
 
+// SubagentExecutionMode represents how a subagent executes relative to others.
+type SubagentExecutionMode string
+
+const (
+	SubagentExecutionModeSequential SubagentExecutionMode = "sequential"
+	SubagentExecutionModeParallel   SubagentExecutionMode = "parallel"
+	SubagentExecutionModeAuto       SubagentExecutionMode = "auto"
+)
+
+// MultiInvocationMode represents how multiple subagent invocations are handled.
+type MultiInvocationMode string
+
+const (
+	MultiInvocationModeSequential MultiInvocationMode = "sequential"
+	MultiInvocationModeParallel   MultiInvocationMode = "parallel"
+	MultiInvocationModeError      MultiInvocationMode = "error"
+)
+
+// SubagentErrorHandling represents how errors in subagent execution are handled.
+type SubagentErrorHandling string
+
+const (
+	SubagentErrorHandlingFailFast SubagentErrorHandling = "fail_fast"
+	SubagentErrorHandlingContinue SubagentErrorHandling = "continue"
+)
+
+// SubagentExecutionConfig represents global configuration for subagent execution.
+type SubagentExecutionConfig struct {
+	// MultiInvocation specifies how multiple subagent invocations are handled
+	MultiInvocation MultiInvocationMode `json:"multi_invocation,omitempty"`
+	// MaxConcurrent specifies the maximum number of concurrent subagent executions (default: 3)
+	MaxConcurrent int `json:"max_concurrent,omitempty"`
+	// ErrorHandling specifies how errors in subagent execution are handled
+	ErrorHandling SubagentErrorHandling `json:"error_handling,omitempty"`
+}
+
+// NewSubagentExecutionConfig creates a new SubagentExecutionConfig with sensible defaults.
+// Default values:
+// - MultiInvocation: sequential
+// - MaxConcurrent: 3
+// - ErrorHandling: continue
+func NewSubagentExecutionConfig() *SubagentExecutionConfig {
+	return &SubagentExecutionConfig{
+		MultiInvocation: MultiInvocationModeSequential,
+		MaxConcurrent:   3,
+		ErrorHandling:   SubagentErrorHandlingContinue,
+	}
+}
+
 // SystemPromptPreset represents a preset system prompt configuration.
 type SystemPromptPreset struct {
 	Type   string  `json:"type"`   // "preset"
@@ -23,10 +72,13 @@ type SystemPromptPreset struct {
 
 // AgentDefinition represents a custom agent definition.
 type AgentDefinition struct {
-	Description string   `json:"description"`
-	Prompt      string   `json:"prompt"`
-	Tools       []string `json:"tools,omitempty"`
-	Model       *string  `json:"model,omitempty"` // "sonnet", "opus", "haiku", "inherit"
+	Description   string                 `json:"description"`
+	Prompt        string                 `json:"prompt"`
+	Tools         []string               `json:"tools,omitempty"`
+	Model         *string                `json:"model,omitempty"`          // "sonnet", "opus", "haiku", "inherit"
+	ExecutionMode *SubagentExecutionMode `json:"execution_mode,omitempty"` // How this agent executes relative to others
+	Timeout       *float64               `json:"timeout,omitempty"`        // Maximum seconds to wait for agent response
+	MaxTurns      *int                   `json:"max_turns,omitempty"`      // Maximum conversation turns for this agent
 }
 
 // PluginConfig represents a Claude Code plugin configuration.
@@ -173,6 +225,9 @@ type ClaudeAgentOptions struct {
 
 	// Agent definitions
 	Agents map[string]AgentDefinition `json:"agents,omitempty"`
+
+	// Subagent execution configuration
+	SubagentExecution *SubagentExecutionConfig `json:"subagent_execution,omitempty"`
 
 	// Plugin configurations for custom plugins
 	Plugins []PluginConfig `json:"plugins,omitempty"`
@@ -410,6 +465,13 @@ func (o *ClaudeAgentOptions) WithAgent(name string, agent AgentDefinition) *Clau
 		o.Agents = make(map[string]AgentDefinition)
 	}
 	o.Agents[name] = agent
+	return o
+}
+
+// WithSubagentExecution sets the subagent execution configuration.
+// This controls how multiple subagents execute concurrently.
+func (o *ClaudeAgentOptions) WithSubagentExecution(config *SubagentExecutionConfig) *ClaudeAgentOptions {
+	o.SubagentExecution = config
 	return o
 }
 

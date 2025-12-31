@@ -1411,3 +1411,398 @@ func TestStderrFileLogging_DirectoryCreation(t *testing.T) {
 		t.Logf("Log file was not created (may be expected for /bin/echo): %s", deepPath)
 	}
 }
+
+// TestBuildCommandArgs_Agents tests agent configuration JSON serialization
+func TestBuildCommandArgs_Agents(t *testing.T) {
+	t.Run("single agent with all fields", func(t *testing.T) {
+		mode := types.SubagentExecutionModeParallel
+		timeout := 30.5
+		maxTurns := 5
+		modelStr := "claude-opus-4-5-latest"
+
+		opts := types.NewClaudeAgentOptions().
+			WithAgent("search", types.AgentDefinition{
+				Description:   "Search agent",
+				Prompt:        "Search for information",
+				Tools:         []string{"Read", "Glob"},
+				Model:         &modelStr,
+				ExecutionMode: &mode,
+				Timeout:       &timeout,
+				MaxTurns:      &maxTurns,
+			})
+
+		transport := NewSubprocessCLITransport(
+			"claude",
+			"",
+			nil,
+			log.NewLogger(false),
+			"",
+			opts,
+		)
+
+		args := transport.buildCommandArgs()
+
+		// Verify --agents flag is present
+		agentsIdx := -1
+		for i, arg := range args {
+			if arg == "--agents" {
+				agentsIdx = i
+				break
+			}
+		}
+
+		if agentsIdx == -1 {
+			t.Fatal("--agents flag not found in command arguments")
+		}
+
+		if agentsIdx+1 >= len(args) {
+			t.Fatal("--agents flag has no value")
+		}
+
+		agentsJSON := args[agentsIdx+1]
+
+		// Verify JSON can be unmarshaled
+		var agentsData map[string]map[string]interface{}
+		if err := json.Unmarshal([]byte(agentsJSON), &agentsData); err != nil {
+			t.Fatalf("Failed to unmarshal agents JSON: %v", err)
+		}
+
+		// Verify agent exists
+		searchAgent, ok := agentsData["search"]
+		if !ok {
+			t.Fatal("Agent 'search' not found in JSON")
+		}
+
+		// Verify fields
+		if searchAgent["description"] != "Search agent" {
+			t.Errorf("Expected description 'Search agent', got %v", searchAgent["description"])
+		}
+
+		if searchAgent["prompt"] != "Search for information" {
+			t.Errorf("Expected prompt 'Search for information', got %v", searchAgent["prompt"])
+		}
+
+		if searchAgent["execution_mode"] != "parallel" {
+			t.Errorf("Expected execution_mode 'parallel', got %v", searchAgent["execution_mode"])
+		}
+
+		if searchAgent["timeout"] != 30.5 {
+			t.Errorf("Expected timeout 30.5, got %v", searchAgent["timeout"])
+		}
+
+		if maxTurnsVal, ok := searchAgent["max_turns"].(float64); !ok || maxTurnsVal != 5 {
+			t.Errorf("Expected max_turns 5, got %v", searchAgent["max_turns"])
+		}
+	})
+
+	t.Run("multiple agents with different configs", func(t *testing.T) {
+		mode1 := types.SubagentExecutionModeSequential
+		mode2 := types.SubagentExecutionModeParallel
+
+		opts := types.NewClaudeAgentOptions().
+			WithAgent("agent1", types.AgentDefinition{
+				Description:   "First agent",
+				Prompt:        "First prompt",
+				ExecutionMode: &mode1,
+			}).
+			WithAgent("agent2", types.AgentDefinition{
+				Description:   "Second agent",
+				Prompt:        "Second prompt",
+				ExecutionMode: &mode2,
+			})
+
+		transport := NewSubprocessCLITransport(
+			"claude",
+			"",
+			nil,
+			log.NewLogger(false),
+			"",
+			opts,
+		)
+
+		args := transport.buildCommandArgs()
+
+		agentsIdx := -1
+		for i, arg := range args {
+			if arg == "--agents" {
+				agentsIdx = i
+				break
+			}
+		}
+
+		if agentsIdx == -1 {
+			t.Fatal("--agents flag not found")
+		}
+
+		agentsJSON := args[agentsIdx+1]
+		var agentsData map[string]map[string]interface{}
+		if err := json.Unmarshal([]byte(agentsJSON), &agentsData); err != nil {
+			t.Fatalf("Failed to unmarshal agents JSON: %v", err)
+		}
+
+		if len(agentsData) != 2 {
+			t.Errorf("Expected 2 agents, got %d", len(agentsData))
+		}
+
+		if agentsData["agent1"]["execution_mode"] != "sequential" {
+			t.Error("agent1 should have sequential execution mode")
+		}
+
+		if agentsData["agent2"]["execution_mode"] != "parallel" {
+			t.Error("agent2 should have parallel execution mode")
+		}
+	})
+
+	t.Run("agent with only required fields", func(t *testing.T) {
+		opts := types.NewClaudeAgentOptions().
+			WithAgent("simple", types.AgentDefinition{
+				Description: "Simple agent",
+				Prompt:      "Simple prompt",
+			})
+
+		transport := NewSubprocessCLITransport(
+			"claude",
+			"",
+			nil,
+			log.NewLogger(false),
+			"",
+			opts,
+		)
+
+		args := transport.buildCommandArgs()
+
+		agentsIdx := -1
+		for i, arg := range args {
+			if arg == "--agents" {
+				agentsIdx = i
+				break
+			}
+		}
+
+		if agentsIdx == -1 {
+			t.Fatal("--agents flag not found")
+		}
+
+		agentsJSON := args[agentsIdx+1]
+		var agentsData map[string]map[string]interface{}
+		if err := json.Unmarshal([]byte(agentsJSON), &agentsData); err != nil {
+			t.Fatalf("Failed to unmarshal agents JSON: %v", err)
+		}
+
+		simpleAgent := agentsData["simple"]
+
+		// Verify required fields are present
+		if simpleAgent["description"] != "Simple agent" {
+			t.Error("description should be present")
+		}
+		if simpleAgent["prompt"] != "Simple prompt" {
+			t.Error("prompt should be present")
+		}
+
+		// Verify optional fields are absent (not in JSON)
+		if _, ok := simpleAgent["execution_mode"]; ok {
+			t.Error("execution_mode should not be in JSON when not set")
+		}
+		if _, ok := simpleAgent["timeout"]; ok {
+			t.Error("timeout should not be in JSON when not set")
+		}
+		if _, ok := simpleAgent["max_turns"]; ok {
+			t.Error("max_turns should not be in JSON when not set")
+		}
+	})
+
+	t.Run("no agents when not specified", func(t *testing.T) {
+		opts := types.NewClaudeAgentOptions()
+
+		transport := NewSubprocessCLITransport(
+			"claude",
+			"",
+			nil,
+			log.NewLogger(false),
+			"",
+			opts,
+		)
+
+		args := transport.buildCommandArgs()
+
+		// Verify --agents flag is not present
+		for _, arg := range args {
+			if arg == "--agents" {
+				t.Fatal("--agents flag should not be present when no agents are configured")
+			}
+		}
+	})
+}
+
+// TestBuildCommandArgs_SubagentExecution tests subagent execution config JSON serialization
+func TestBuildCommandArgs_SubagentExecution(t *testing.T) {
+	t.Run("subagent execution with all fields", func(t *testing.T) {
+		config := types.NewSubagentExecutionConfig()
+		config.MultiInvocation = types.MultiInvocationModeParallel
+		config.MaxConcurrent = 5
+		config.ErrorHandling = types.SubagentErrorHandlingFailFast
+
+		opts := types.NewClaudeAgentOptions().
+			WithSubagentExecution(config)
+
+		transport := NewSubprocessCLITransport(
+			"claude",
+			"",
+			nil,
+			log.NewLogger(false),
+			"",
+			opts,
+		)
+
+		args := transport.buildCommandArgs()
+
+		// Verify --subagent-execution flag is present
+		subagentIdx := -1
+		for i, arg := range args {
+			if arg == "--subagent-execution" {
+				subagentIdx = i
+				break
+			}
+		}
+
+		if subagentIdx == -1 {
+			t.Fatal("--subagent-execution flag not found")
+		}
+
+		subagentJSON := args[subagentIdx+1]
+		var subagentData map[string]interface{}
+		if err := json.Unmarshal([]byte(subagentJSON), &subagentData); err != nil {
+			t.Fatalf("Failed to unmarshal subagent JSON: %v", err)
+		}
+
+		if subagentData["multi_invocation"] != "parallel" {
+			t.Errorf("Expected multi_invocation 'parallel', got %v", subagentData["multi_invocation"])
+		}
+
+		if subagentData["max_concurrent"] != float64(5) {
+			t.Errorf("Expected max_concurrent 5, got %v", subagentData["max_concurrent"])
+		}
+
+		if subagentData["error_handling"] != "fail_fast" {
+			t.Errorf("Expected error_handling 'fail_fast', got %v", subagentData["error_handling"])
+		}
+	})
+
+	t.Run("subagent execution with defaults", func(t *testing.T) {
+		config := types.NewSubagentExecutionConfig()
+
+		opts := types.NewClaudeAgentOptions().
+			WithSubagentExecution(config)
+
+		transport := NewSubprocessCLITransport(
+			"claude",
+			"",
+			nil,
+			log.NewLogger(false),
+			"",
+			opts,
+		)
+
+		args := transport.buildCommandArgs()
+
+		subagentIdx := -1
+		for i, arg := range args {
+			if arg == "--subagent-execution" {
+				subagentIdx = i
+				break
+			}
+		}
+
+		if subagentIdx == -1 {
+			t.Fatal("--subagent-execution flag not found")
+		}
+
+		subagentJSON := args[subagentIdx+1]
+		var subagentData map[string]interface{}
+		if err := json.Unmarshal([]byte(subagentJSON), &subagentData); err != nil {
+			t.Fatalf("Failed to unmarshal subagent JSON: %v", err)
+		}
+
+		// Verify defaults are serialized
+		if subagentData["multi_invocation"] != "sequential" {
+			t.Error("Default multi_invocation should be sequential")
+		}
+
+		if subagentData["max_concurrent"] != float64(3) {
+			t.Error("Default max_concurrent should be 3")
+		}
+
+		if subagentData["error_handling"] != "continue" {
+			t.Error("Default error_handling should be continue")
+		}
+	})
+
+	t.Run("no subagent execution when not specified", func(t *testing.T) {
+		opts := types.NewClaudeAgentOptions()
+
+		transport := NewSubprocessCLITransport(
+			"claude",
+			"",
+			nil,
+			log.NewLogger(false),
+			"",
+			opts,
+		)
+
+		args := transport.buildCommandArgs()
+
+		// Verify --subagent-execution flag is not present
+		for _, arg := range args {
+			if arg == "--subagent-execution" {
+				t.Fatal("--subagent-execution flag should not be present when config not set")
+			}
+		}
+	})
+}
+
+// TestBuildCommandArgs_AgentsWithSubagentExecution tests agents and subagent config together
+func TestBuildCommandArgs_AgentsWithSubagentExecution(t *testing.T) {
+	mode := types.SubagentExecutionModeParallel
+	subagentConfig := types.NewSubagentExecutionConfig()
+	subagentConfig.MaxConcurrent = 4
+
+	opts := types.NewClaudeAgentOptions().
+		WithAgent("agent1", types.AgentDefinition{
+			Description:   "Agent 1",
+			Prompt:        "Prompt 1",
+			ExecutionMode: &mode,
+		}).
+		WithSubagentExecution(subagentConfig)
+
+	transport := NewSubprocessCLITransport(
+		"claude",
+		"",
+		nil,
+		log.NewLogger(false),
+		"",
+		opts,
+	)
+
+	args := transport.buildCommandArgs()
+
+	// Verify both flags are present
+	hasAgents := false
+	hasSubagentExecution := false
+
+	for _, arg := range args {
+		if arg == "--agents" {
+			hasAgents = true
+		}
+		if arg == "--subagent-execution" {
+			hasSubagentExecution = true
+		}
+	}
+
+	if !hasAgents {
+		t.Error("--agents flag should be present")
+	}
+
+	if !hasSubagentExecution {
+		t.Error("--subagent-execution flag should be present")
+	}
+}
