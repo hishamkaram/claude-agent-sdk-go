@@ -1284,7 +1284,7 @@ func TestStderrFileLogging(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 
 		// Close transport
-		transport.Close(ctx)
+		_ = transport.Close(ctx)
 
 		// Verify the directory was created
 		logDir := filepath.Dir(customLogPath)
@@ -1348,7 +1348,7 @@ func TestStderrFileLogging(t *testing.T) {
 		_ = transport.Write(ctx, `echo "callback test" >&2`)
 
 		time.Sleep(500 * time.Millisecond)
-		transport.Close(ctx)
+		_ = transport.Close(ctx)
 
 		// Verify callback was called
 		mu.Lock()
@@ -1398,7 +1398,7 @@ func TestStderrFileLogging_DirectoryCreation(t *testing.T) {
 	// Give readStderr goroutine time to run
 	time.Sleep(200 * time.Millisecond)
 
-	transport.Close(ctx)
+	_ = transport.Close(ctx)
 
 	// Verify nested directories were created
 	expectedDir := filepath.Join(tempDir, "a", "b", "c")

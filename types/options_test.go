@@ -78,11 +78,6 @@ func TestOptionsChaining(t *testing.T) {
 func TestNewClaudeAgentOptions(t *testing.T) {
 	opts := NewClaudeAgentOptions()
 
-	// Verify default values
-	if opts == nil {
-		t.Fatal("NewClaudeAgentOptions should not return nil")
-	}
-
 	// Check that optional fields are nil by default
 	if opts.MaxThinkingTokens != nil {
 		t.Error("MaxThinkingTokens should be nil by default")
@@ -407,10 +402,6 @@ func TestSubagentErrorHandlingConstants(t *testing.T) {
 func TestNewSubagentExecutionConfig(t *testing.T) {
 	t.Run("creates config with sensible defaults", func(t *testing.T) {
 		config := NewSubagentExecutionConfig()
-
-		if config == nil {
-			t.Fatal("NewSubagentExecutionConfig returned nil")
-		}
 
 		if config.MultiInvocation != MultiInvocationModeSequential {
 			t.Errorf("expected MultiInvocation to be sequential, got %s", config.MultiInvocation)

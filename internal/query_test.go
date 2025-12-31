@@ -100,9 +100,6 @@ func TestNewQuery(t *testing.T) {
 	logger := log.NewLogger(false) // Non-verbose for tests
 	query := NewQuery(ctx, transport, opts, logger, true)
 
-	if query == nil {
-		t.Fatal("NewQuery returned nil")
-	}
 	if query.transport != transport {
 		t.Error("transport not set correctly")
 	}
