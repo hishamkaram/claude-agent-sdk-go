@@ -415,3 +415,45 @@ func IsSessionNotFoundError(err error) bool {
 	var e *SessionNotFoundError
 	return errors.As(err, &e)
 }
+
+// ValidationError indicates that configuration or input validation failed.
+// This occurs when creating MCP servers, tools, or other components with invalid parameters.
+type ValidationError struct {
+	Message string // Description of the validation failure
+	Cause   error  // Optional underlying error
+}
+
+// Error returns the error message, implementing the error interface.
+func (e *ValidationError) Error() string {
+	if e.Cause != nil {
+		return e.Message + ": " + e.Cause.Error()
+	}
+	return e.Message
+}
+
+// Is checks if the target error is a ValidationError.
+func (e *ValidationError) Is(target error) bool {
+	_, ok := target.(*ValidationError)
+	return ok
+}
+
+// Unwrap returns the wrapped error.
+func (e *ValidationError) Unwrap() error {
+	return e.Cause
+}
+
+// NewValidationError creates a new ValidationError with the given message.
+func NewValidationError(message string) *ValidationError {
+	return &ValidationError{Message: message}
+}
+
+// NewValidationErrorWithCause creates a new ValidationError with the given message and cause.
+func NewValidationErrorWithCause(message string, cause error) *ValidationError {
+	return &ValidationError{Message: message, Cause: cause}
+}
+
+// IsValidationError checks if an error is or wraps a ValidationError.
+func IsValidationError(err error) bool {
+	var e *ValidationError
+	return errors.As(err, &e)
+}
