@@ -40,3 +40,6 @@ examples/*/*.exe
 GO_PORT_PLAN.md
 claude_docs/
 .claude/
+
+# Git worktrees
+.worktrees/
