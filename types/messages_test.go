@@ -224,3 +224,63 @@ func TestResultMessageMarshaling(t *testing.T) {
 		t.Errorf("total cost doesn't match")
 	}
 }
+
+// TestModelInfo_JSONRoundtrip verifies ModelInfo marshals and unmarshals correctly.
+func TestModelInfo_JSONRoundtrip(t *testing.T) {
+	original := ModelInfo{
+		Value:       "claude-3-5-haiku-latest",
+		DisplayName: "Claude 3.5 Haiku",
+		Description: "Fast and affordable model",
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("failed to marshal ModelInfo: %v", err)
+	}
+
+	var decoded ModelInfo
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("failed to unmarshal ModelInfo: %v", err)
+	}
+
+	if decoded.Value != original.Value {
+		t.Errorf("Value mismatch: got %q, want %q", decoded.Value, original.Value)
+	}
+	if decoded.DisplayName != original.DisplayName {
+		t.Errorf("DisplayName mismatch: got %q, want %q", decoded.DisplayName, original.DisplayName)
+	}
+	if decoded.Description != original.Description {
+		t.Errorf("Description mismatch: got %q, want %q", decoded.Description, original.Description)
+	}
+}
+
+// TestModelInfo_OptionalDescription verifies that omitting Description works correctly.
+func TestModelInfo_OptionalDescription(t *testing.T) {
+	original := ModelInfo{
+		Value:       "claude-3-opus-latest",
+		DisplayName: "Claude 3 Opus",
+		// Description intentionally omitted
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("failed to marshal ModelInfo: %v", err)
+	}
+
+	// Description should be omitted from JSON when empty (omitempty).
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("failed to unmarshal to map: %v", err)
+	}
+	if _, exists := raw["description"]; exists {
+		t.Error("expected 'description' to be omitted from JSON when empty")
+	}
+
+	var decoded ModelInfo
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("failed to unmarshal ModelInfo: %v", err)
+	}
+	if decoded.Description != "" {
+		t.Errorf("expected empty description, got %q", decoded.Description)
+	}
+}

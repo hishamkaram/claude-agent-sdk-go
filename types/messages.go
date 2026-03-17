@@ -353,12 +353,25 @@ type SlashCommand struct {
 	ArgumentHint string `json:"argumentHint,omitempty"`
 }
 
+// ModelInfo describes a model available in the current session.
+// It is populated from the CLI's initialize response.
+type ModelInfo struct {
+	// Value is the model identifier (e.g. "claude-3-5-haiku-latest").
+	Value string `json:"value"`
+	// DisplayName is the human-readable model name (e.g. "Claude 3.5 Haiku").
+	DisplayName string `json:"displayName"`
+	// Description is an optional short description of the model.
+	Description string `json:"description,omitempty"`
+}
+
 // InitializeResult holds the parsed response from session initialization.
 // It contains available commands, models, and session metadata returned
 // by the Claude CLI control protocol initialize response.
 type InitializeResult struct {
 	// Commands is the list of available slash commands/skills.
 	Commands []SlashCommand `json:"commands,omitempty"`
+	// Models is the list of models available in this session.
+	Models []ModelInfo `json:"models,omitempty"`
 	// Raw holds the full untyped response for forward compatibility.
 	Raw map[string]interface{} `json:"-"`
 }
