@@ -546,6 +546,14 @@ func (q *Query) handleMCPMessage(requestData map[string]interface{}) (map[string
 	}, nil
 }
 
+// SendControlMessage is the exported wrapper around sendControlRequest.
+// It allows callers outside the internal package (e.g. Client in the top-level
+// package) to send arbitrary control protocol messages without exposing the
+// full internal query machinery.
+func (q *Query) SendControlMessage(ctx context.Context, request map[string]interface{}) (map[string]interface{}, error) {
+	return q.sendControlRequest(ctx, request)
+}
+
 // sendControlRequest sends a control request to CLI and waits for response.
 func (q *Query) sendControlRequest(ctx context.Context, request map[string]interface{}) (map[string]interface{}, error) {
 	if !q.isStreamingMode {

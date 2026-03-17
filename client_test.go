@@ -502,6 +502,255 @@ func TestClient_InitResult_BeforeConnect(t *testing.T) {
 	}
 }
 
+// TestSetModel_BeforeConnect ensures SetModel returns CLIConnectionError when not connected.
+func TestSetModel_BeforeConnect(t *testing.T) {
+	ctx := context.Background()
+	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
+
+	client, err := NewClient(ctx, opts)
+	if err != nil {
+		t.Skip("Could not create client")
+	}
+	defer func() { _ = client.Close(ctx) }()
+
+	err = client.SetModel(ctx, "haiku")
+	if err == nil {
+		t.Fatal("expected error when calling SetModel before Connect()")
+	}
+	if !types.IsCLIConnectionError(err) {
+		t.Errorf("expected CLIConnectionError, got: %T - %v", err, err)
+	}
+}
+
+// TestSetPermissionMode_BeforeConnect ensures SetPermissionMode returns CLIConnectionError when not connected.
+func TestSetPermissionMode_BeforeConnect(t *testing.T) {
+	ctx := context.Background()
+	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
+
+	client, err := NewClient(ctx, opts)
+	if err != nil {
+		t.Skip("Could not create client")
+	}
+	defer func() { _ = client.Close(ctx) }()
+
+	err = client.SetPermissionMode(ctx, types.PermissionModePlan)
+	if err == nil {
+		t.Fatal("expected error when calling SetPermissionMode before Connect()")
+	}
+	if !types.IsCLIConnectionError(err) {
+		t.Errorf("expected CLIConnectionError, got: %T - %v", err, err)
+	}
+}
+
+// TestSupportedModels_BeforeConnect ensures SupportedModels returns nil when not connected.
+func TestSupportedModels_BeforeConnect(t *testing.T) {
+	ctx := context.Background()
+	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
+
+	client, err := NewClient(ctx, opts)
+	if err != nil {
+		t.Skip("Could not create client")
+	}
+	defer func() { _ = client.Close(ctx) }()
+
+	models := client.SupportedModels()
+	if models != nil {
+		t.Errorf("expected nil before Connect(), got %v", models)
+	}
+}
+
+// TestParseInitResult_WithModels verifies that the models array is parsed correctly.
+func TestParseInitResult_WithModels(t *testing.T) {
+	raw := map[string]interface{}{
+		"models": []interface{}{
+			map[string]interface{}{
+				"value":       "haiku",
+				"displayName": "Haiku",
+				"description": "Fast model",
+			},
+			map[string]interface{}{
+				"value":       "sonnet",
+				"displayName": "Sonnet",
+			},
+		},
+	}
+
+	result := parseInitResult(raw)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if len(result.Models) != 2 {
+		t.Fatalf("expected 2 models, got %d", len(result.Models))
+	}
+	if result.Models[0].Value != "haiku" {
+		t.Errorf("expected first model value 'haiku', got %q", result.Models[0].Value)
+	}
+	if result.Models[0].DisplayName != "Haiku" {
+		t.Errorf("expected first model displayName 'Haiku', got %q", result.Models[0].DisplayName)
+	}
+	if result.Models[0].Description != "Fast model" {
+		t.Errorf("expected first model description 'Fast model', got %q", result.Models[0].Description)
+	}
+	if result.Models[1].Value != "sonnet" {
+		t.Errorf("expected second model value 'sonnet', got %q", result.Models[1].Value)
+	}
+	if result.Models[1].Description != "" {
+		t.Errorf("expected second model description empty, got %q", result.Models[1].Description)
+	}
+}
+
+// TestParseInitResult_ModelsEmptyArray verifies empty models array is handled.
+func TestParseInitResult_ModelsEmptyArray(t *testing.T) {
+	raw := map[string]interface{}{
+		"models": []interface{}{},
+	}
+
+	result := parseInitResult(raw)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if len(result.Models) != 0 {
+		t.Errorf("expected 0 models, got %d", len(result.Models))
+	}
+}
+
+// TestParseInitResult_ModelsInvalidType verifies graceful handling of unexpected type.
+func TestParseInitResult_ModelsInvalidType(t *testing.T) {
+	raw := map[string]interface{}{
+		"models": "not-an-array",
+	}
+
+	result := parseInitResult(raw)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	// Should not panic, models should be nil/empty.
+	if len(result.Models) != 0 {
+		t.Errorf("expected 0 models for invalid type, got %d", len(result.Models))
+	}
+}
+
+// TestParseInitResult_ModelsMissingFields verifies partial model entries are still parsed.
+func TestParseInitResult_ModelsMissingFields(t *testing.T) {
+	raw := map[string]interface{}{
+		"models": []interface{}{
+			map[string]interface{}{
+				"value": "haiku",
+				// no displayName or description
+			},
+		},
+	}
+
+	result := parseInitResult(raw)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if len(result.Models) != 1 {
+		t.Fatalf("expected 1 model, got %d", len(result.Models))
+	}
+	if result.Models[0].Value != "haiku" {
+		t.Errorf("expected 'haiku', got %q", result.Models[0].Value)
+	}
+	if result.Models[0].DisplayName != "" {
+		t.Errorf("expected empty displayName, got %q", result.Models[0].DisplayName)
+	}
+}
+
+// TestParseInitResult_ModelsAndCommandsTogether verifies both fields are parsed when present.
+func TestParseInitResult_ModelsAndCommandsTogether(t *testing.T) {
+	raw := map[string]interface{}{
+		"commands": []interface{}{
+			map[string]interface{}{
+				"name":        "compact",
+				"description": "Compact context",
+			},
+		},
+		"models": []interface{}{
+			map[string]interface{}{
+				"value":       "haiku",
+				"displayName": "Haiku",
+			},
+		},
+	}
+
+	result := parseInitResult(raw)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if len(result.Commands) != 1 {
+		t.Errorf("expected 1 command, got %d", len(result.Commands))
+	}
+	if len(result.Models) != 1 {
+		t.Errorf("expected 1 model, got %d", len(result.Models))
+	}
+	if result.Commands[0].Name != "compact" {
+		t.Errorf("unexpected command name: %q", result.Commands[0].Name)
+	}
+	if result.Models[0].Value != "haiku" {
+		t.Errorf("unexpected model value: %q", result.Models[0].Value)
+	}
+}
+
+// TestParseInitResult_ModelsSkipsEmptyValue verifies models with no value are skipped.
+func TestParseInitResult_ModelsSkipsEmptyValue(t *testing.T) {
+	raw := map[string]interface{}{
+		"models": []interface{}{
+			map[string]interface{}{
+				"displayName": "No Value Model",
+				// value intentionally missing
+			},
+			map[string]interface{}{
+				"value":       "haiku",
+				"displayName": "Haiku",
+			},
+		},
+	}
+
+	result := parseInitResult(raw)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if len(result.Models) != 1 {
+		t.Fatalf("expected 1 model (skipping empty value), got %d", len(result.Models))
+	}
+	if result.Models[0].Value != "haiku" {
+		t.Errorf("expected 'haiku', got %q", result.Models[0].Value)
+	}
+}
+
+// TestSupportedModels_ReturnsFromInitResult verifies SupportedModels uses the stored init result.
+func TestSupportedModels_ReturnsFromInitResult(t *testing.T) {
+	ctx := context.Background()
+	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
+
+	client, err := NewClient(ctx, opts)
+	if err != nil {
+		t.Skip("Could not create client")
+	}
+	defer func() { _ = client.Close(ctx) }()
+
+	// Manually inject an initResult to test SupportedModels() without a live connection.
+	client.mu.Lock()
+	client.initResult = &types.InitializeResult{
+		Models: []types.ModelInfo{
+			{Value: "haiku", DisplayName: "Haiku", Description: "Fast"},
+			{Value: "sonnet", DisplayName: "Sonnet"},
+		},
+	}
+	client.mu.Unlock()
+
+	models := client.SupportedModels()
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d", len(models))
+	}
+	if models[0].Value != "haiku" {
+		t.Errorf("expected 'haiku', got %q", models[0].Value)
+	}
+	if models[1].Value != "sonnet" {
+		t.Errorf("expected 'sonnet', got %q", models[1].Value)
+	}
+}
+
 // BenchmarkClient benchmarks the Client type
 func BenchmarkClient_Create(b *testing.B) {
 	ctx := context.Background()

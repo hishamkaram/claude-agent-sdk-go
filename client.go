@@ -537,6 +537,55 @@ func (c *Client) SlashCommands() []types.SlashCommand {
 	return c.initResult.Commands
 }
 
+// SupportedModels returns the list of models available in this session.
+// Returns nil if Connect() has not been called or the CLI did not return model info.
+func (c *Client) SupportedModels() []types.ModelInfo {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.initResult == nil {
+		return nil
+	}
+	return c.initResult.Models
+}
+
+// SetModel changes the model used for subsequent responses.
+// Pass an empty string to revert to the session's default model.
+// Only valid after Connect() has been called.
+func (c *Client) SetModel(ctx context.Context, model string) error {
+	c.mu.Lock()
+	if !c.connected {
+		c.mu.Unlock()
+		return types.NewCLIConnectionError("not connected - call Connect() first")
+	}
+	c.mu.Unlock()
+
+	req := map[string]interface{}{"subtype": "set_model"}
+	if model != "" {
+		req["model"] = model
+	}
+	_, err := c.query.SendControlMessage(ctx, req)
+	return err
+}
+
+// SetPermissionMode changes the permission mode mid-session.
+// Use types.PermissionModePlan to enter plan mode (/plan equivalent).
+// Only valid after Connect() has been called.
+func (c *Client) SetPermissionMode(ctx context.Context, mode types.PermissionMode) error {
+	c.mu.Lock()
+	if !c.connected {
+		c.mu.Unlock()
+		return types.NewCLIConnectionError("not connected - call Connect() first")
+	}
+	c.mu.Unlock()
+
+	req := map[string]interface{}{
+		"subtype": "set_permission_mode",
+		"mode":    string(mode),
+	}
+	_, err := c.query.SendControlMessage(ctx, req)
+	return err
+}
+
 // parseInitResult converts the raw initialize response map into a typed InitializeResult.
 func parseInitResult(raw map[string]interface{}) *types.InitializeResult {
 	if raw == nil {
@@ -546,37 +595,58 @@ func parseInitResult(raw map[string]interface{}) *types.InitializeResult {
 	result := &types.InitializeResult{Raw: raw}
 
 	// Parse "commands" array: each element has "name", "description", "argumentHint".
-	cmdsRaw, ok := raw["commands"]
-	if !ok {
-		return result
+	if cmdsRaw, ok := raw["commands"]; ok {
+		if cmdsSlice, ok := cmdsRaw.([]interface{}); ok {
+			commands := make([]types.SlashCommand, 0, len(cmdsSlice))
+			for _, item := range cmdsSlice {
+				m, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				cmd := types.SlashCommand{}
+				if name, ok := m["name"].(string); ok {
+					cmd.Name = name
+				}
+				if desc, ok := m["description"].(string); ok {
+					cmd.Description = desc
+				}
+				if hint, ok := m["argumentHint"].(string); ok {
+					cmd.ArgumentHint = hint
+				}
+				if cmd.Name != "" {
+					commands = append(commands, cmd)
+				}
+			}
+			result.Commands = commands
+		}
 	}
 
-	cmdsSlice, ok := cmdsRaw.([]interface{})
-	if !ok {
-		return result
+	// Parse "models" array: each element has "value", "displayName", "description".
+	if modelsRaw, ok := raw["models"]; ok {
+		if modelsSlice, ok := modelsRaw.([]interface{}); ok {
+			models := make([]types.ModelInfo, 0, len(modelsSlice))
+			for _, item := range modelsSlice {
+				m, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				info := types.ModelInfo{}
+				if v, ok := m["value"].(string); ok {
+					info.Value = v
+				}
+				if v, ok := m["displayName"].(string); ok {
+					info.DisplayName = v
+				}
+				if v, ok := m["description"].(string); ok {
+					info.Description = v
+				}
+				if info.Value != "" {
+					models = append(models, info)
+				}
+			}
+			result.Models = models
+		}
 	}
-
-	commands := make([]types.SlashCommand, 0, len(cmdsSlice))
-	for _, item := range cmdsSlice {
-		m, ok := item.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		cmd := types.SlashCommand{}
-		if name, ok := m["name"].(string); ok {
-			cmd.Name = name
-		}
-		if desc, ok := m["description"].(string); ok {
-			cmd.Description = desc
-		}
-		if hint, ok := m["argumentHint"].(string); ok {
-			cmd.ArgumentHint = hint
-		}
-		if cmd.Name != "" {
-			commands = append(commands, cmd)
-		}
-	}
-	result.Commands = commands
 
 	return result
 }
