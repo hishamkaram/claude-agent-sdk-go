@@ -354,6 +354,154 @@ func TestClient_MultipleQueries(t *testing.T) {
 	}
 }
 
+func TestParseInitResult_Nil(t *testing.T) {
+	result := parseInitResult(nil)
+	if result != nil {
+		t.Fatal("expected nil for nil input")
+	}
+}
+
+func TestParseInitResult_EmptyMap(t *testing.T) {
+	result := parseInitResult(map[string]interface{}{})
+	if result == nil {
+		t.Fatal("expected non-nil result for empty map")
+	}
+	if len(result.Commands) != 0 {
+		t.Fatalf("expected 0 commands, got %d", len(result.Commands))
+	}
+}
+
+func TestParseInitResult_WithCommands(t *testing.T) {
+	raw := map[string]interface{}{
+		"commands": []interface{}{
+			map[string]interface{}{
+				"name":         "compact",
+				"description":  "Compact conversation context",
+				"argumentHint": "",
+			},
+			map[string]interface{}{
+				"name":         "dev",
+				"description":  "Run development workflow",
+				"argumentHint": "[phase]",
+			},
+			map[string]interface{}{
+				"name":         "plan",
+				"description":  "Enter plan mode",
+				"argumentHint": "",
+			},
+		},
+		"models": []interface{}{}, // other fields should not break parsing
+	}
+
+	result := parseInitResult(raw)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if len(result.Commands) != 3 {
+		t.Fatalf("expected 3 commands, got %d", len(result.Commands))
+	}
+
+	// Verify first command
+	if result.Commands[0].Name != "compact" {
+		t.Errorf("expected first command name 'compact', got %q", result.Commands[0].Name)
+	}
+	if result.Commands[0].Description != "Compact conversation context" {
+		t.Errorf("unexpected description: %q", result.Commands[0].Description)
+	}
+
+	// Verify second command with argumentHint
+	if result.Commands[1].Name != "dev" {
+		t.Errorf("expected second command name 'dev', got %q", result.Commands[1].Name)
+	}
+	if result.Commands[1].ArgumentHint != "[phase]" {
+		t.Errorf("expected argumentHint '[phase]', got %q", result.Commands[1].ArgumentHint)
+	}
+
+	// Verify raw is preserved
+	if result.Raw == nil {
+		t.Error("expected raw map to be preserved")
+	}
+}
+
+func TestParseInitResult_SkipsEmptyNames(t *testing.T) {
+	raw := map[string]interface{}{
+		"commands": []interface{}{
+			map[string]interface{}{
+				"name":        "valid",
+				"description": "A valid command",
+			},
+			map[string]interface{}{
+				"description": "Missing name",
+			},
+			map[string]interface{}{
+				"name":        "",
+				"description": "Empty name",
+			},
+		},
+	}
+
+	result := parseInitResult(raw)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if len(result.Commands) != 1 {
+		t.Fatalf("expected 1 command (skipping empty names), got %d", len(result.Commands))
+	}
+	if result.Commands[0].Name != "valid" {
+		t.Errorf("expected 'valid', got %q", result.Commands[0].Name)
+	}
+}
+
+func TestParseInitResult_InvalidCommandsType(t *testing.T) {
+	raw := map[string]interface{}{
+		"commands": "not an array",
+	}
+
+	result := parseInitResult(raw)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if len(result.Commands) != 0 {
+		t.Fatalf("expected 0 commands for invalid type, got %d", len(result.Commands))
+	}
+}
+
+func TestClient_SlashCommands_BeforeConnect(t *testing.T) {
+	ctx := context.Background()
+	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
+
+	client, err := NewClient(ctx, opts)
+	if err != nil {
+		t.Skip("Could not create client")
+	}
+	defer func() {
+		_ = client.Close(ctx)
+	}()
+
+	cmds := client.SlashCommands()
+	if cmds != nil {
+		t.Errorf("expected nil before connect, got %v", cmds)
+	}
+}
+
+func TestClient_InitResult_BeforeConnect(t *testing.T) {
+	ctx := context.Background()
+	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
+
+	client, err := NewClient(ctx, opts)
+	if err != nil {
+		t.Skip("Could not create client")
+	}
+	defer func() {
+		_ = client.Close(ctx)
+	}()
+
+	result := client.InitResult()
+	if result != nil {
+		t.Errorf("expected nil before connect, got %v", result)
+	}
+}
+
 // BenchmarkClient benchmarks the Client type
 func BenchmarkClient_Create(b *testing.B) {
 	ctx := context.Background()

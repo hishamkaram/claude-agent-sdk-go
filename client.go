@@ -72,10 +72,11 @@ type Client struct {
 	query     *internal.Query
 	logger    *log.Logger
 
-	mu        sync.Mutex
-	connected bool
-	ctx       context.Context
-	cancel    context.CancelFunc
+	mu         sync.Mutex
+	connected  bool
+	ctx        context.Context
+	cancel     context.CancelFunc
+	initResult *types.InitializeResult // Parsed initialization response.
 }
 
 // NewClient creates a new interactive client with the given options.
@@ -221,13 +222,17 @@ func (c *Client) Connect(ctx context.Context) error {
 	c.logger.Debug("Message processing started")
 
 	// Initialize control protocol
-	if _, err := c.query.Initialize(ctx); err != nil {
+	initRaw, err := c.query.Initialize(ctx)
+	if err != nil {
 		c.logger.Error("Failed to initialize control protocol: %v", err)
 		_ = c.query.Stop(ctx)
 		_ = c.transport.Close(ctx)
 		return types.NewControlProtocolErrorWithCause("failed to initialize control protocol", err)
 	}
 	c.logger.Debug("Control protocol initialized")
+
+	// Parse the init result into typed structure.
+	c.initResult = parseInitResult(initRaw)
 
 	c.connected = true
 	c.logger.Info("Successfully connected to Claude")
@@ -507,4 +512,71 @@ func (c *Client) IsConnected() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.connected
+}
+
+// InitResult returns the parsed initialization response from the control protocol.
+// Returns nil if Connect() has not been called or initialization did not return data.
+//
+// The result contains available slash commands/skills, and the raw response map
+// for forward compatibility with future CLI features.
+func (c *Client) InitResult() *types.InitializeResult {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.initResult
+}
+
+// SlashCommands returns the slash commands/skills available in the current session.
+// This is a convenience accessor for InitResult().Commands.
+// Returns nil if Connect() has not been called or no commands were returned.
+func (c *Client) SlashCommands() []types.SlashCommand {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.initResult == nil {
+		return nil
+	}
+	return c.initResult.Commands
+}
+
+// parseInitResult converts the raw initialize response map into a typed InitializeResult.
+func parseInitResult(raw map[string]interface{}) *types.InitializeResult {
+	if raw == nil {
+		return nil
+	}
+
+	result := &types.InitializeResult{Raw: raw}
+
+	// Parse "commands" array: each element has "name", "description", "argumentHint".
+	cmdsRaw, ok := raw["commands"]
+	if !ok {
+		return result
+	}
+
+	cmdsSlice, ok := cmdsRaw.([]interface{})
+	if !ok {
+		return result
+	}
+
+	commands := make([]types.SlashCommand, 0, len(cmdsSlice))
+	for _, item := range cmdsSlice {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		cmd := types.SlashCommand{}
+		if name, ok := m["name"].(string); ok {
+			cmd.Name = name
+		}
+		if desc, ok := m["description"].(string); ok {
+			cmd.Description = desc
+		}
+		if hint, ok := m["argumentHint"].(string); ok {
+			cmd.ArgumentHint = hint
+		}
+		if cmd.Name != "" {
+			commands = append(commands, cmd)
+		}
+	}
+	result.Commands = commands
+
+	return result
 }
