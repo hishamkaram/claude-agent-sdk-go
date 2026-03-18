@@ -8,9 +8,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/schlunsen/claude-agent-sdk-go/internal/log"
-	"github.com/schlunsen/claude-agent-sdk-go/internal/transport"
-	"github.com/schlunsen/claude-agent-sdk-go/types"
+	"github.com/hishamkaram/claude-agent-sdk-go/internal/log"
+	"github.com/hishamkaram/claude-agent-sdk-go/internal/transport"
+	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 // Query manages bidirectional control message handling.
@@ -374,9 +374,15 @@ func (q *Query) handlePermissionRequest(requestData map[string]interface{}) (map
 
 	q.logger.Debug("handlePermissionRequest: toolName=%s, input=%+v", toolName, input)
 
-	if toolName == "" || input == nil {
-		q.logger.Error("handlePermissionRequest: missing tool_name or input")
-		return nil, types.NewControlProtocolError("missing tool_name or input in permission request")
+	if toolName == "" {
+		q.logger.Error("handlePermissionRequest: missing tool_name")
+		return nil, types.NewControlProtocolError("missing tool_name in permission request")
+	}
+	if input == nil {
+		// Some tools (e.g. ExitPlanMode) legitimately send null input.
+		// Normalize to an empty map so CanUseTool is always called.
+		q.logger.Debug("handlePermissionRequest: nil input normalized to empty map for tool=%s", toolName)
+		input = map[string]interface{}{}
 	}
 
 	// Build permission context

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/schlunsen/claude-agent-sdk-go/internal/log"
-	"github.com/schlunsen/claude-agent-sdk-go/types"
+	"github.com/hishamkaram/claude-agent-sdk-go/internal/log"
+	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 // mockTransport implements a mock transport for testing.
@@ -388,6 +388,25 @@ func TestHandlePermissionRequest(t *testing.T) {
 				"updatedInput": map[string]interface{}{
 					"file_path": "/tmp/sanitized.txt",
 				},
+			},
+		},
+		{
+			// ExitPlanMode sends input: null from the Claude CLI.
+			// The SDK must normalize nil to {} and call CanUseTool rather than
+			// returning an error. This was the root cause of the plan approval
+			// prompt silently disappearing.
+			name: "nil input normalized to empty map — ExitPlanMode",
+			requestData: map[string]interface{}{
+				"subtype":   "can_use_tool",
+				"tool_name": "ExitPlanMode",
+				"input":     nil,
+			},
+			callbackResult: types.PermissionResultAllow{
+				Behavior: "allow",
+			},
+			expectedResult: map[string]interface{}{
+				"behavior":     "allow",
+				"updatedInput": map[string]interface{}{},
 			},
 		},
 	}

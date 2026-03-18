@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/schlunsen/claude-agent-sdk-go/internal/log"
-	"github.com/schlunsen/claude-agent-sdk-go/types"
+	"github.com/hishamkaram/claude-agent-sdk-go/internal/log"
+	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 // sendControlResponse is a test helper that reads the first written request,

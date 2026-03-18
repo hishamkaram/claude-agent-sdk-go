@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/schlunsen/claude-agent-sdk-go/types"
+	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 func TestNewClient_NilOptions(t *testing.T) {

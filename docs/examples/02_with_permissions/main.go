@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"strings"
 
-	sdk "github.com/schlunsen/claude-agent-sdk-go"
-	"github.com/schlunsen/claude-agent-sdk-go/types"
+	sdk "github.com/hishamkaram/claude-agent-sdk-go"
+	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 func checkPermission(ctx context.Context,

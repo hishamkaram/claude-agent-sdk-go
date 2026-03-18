@@ -3,7 +3,7 @@ package transport
 import (
 	"context"
 
-	"github.com/schlunsen/claude-agent-sdk-go/types"
+	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 // Transport defines the interface for communicating with Claude Code CLI subprocess.

@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/schlunsen/claude-agent-sdk-go/internal/log"
-	"github.com/schlunsen/claude-agent-sdk-go/types"
+	"github.com/hishamkaram/claude-agent-sdk-go/internal/log"
+	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 // TestFindCLI tests CLI discovery in various scenarios
