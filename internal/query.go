@@ -8,9 +8,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/schlunsen/claude-agent-sdk-go/internal/log"
-	"github.com/schlunsen/claude-agent-sdk-go/internal/transport"
-	"github.com/schlunsen/claude-agent-sdk-go/types"
+	"github.com/hishamkaram/claude-agent-sdk-go/internal/log"
+	"github.com/hishamkaram/claude-agent-sdk-go/internal/transport"
+	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 // Query manages bidirectional control message handling.
@@ -374,9 +374,15 @@ func (q *Query) handlePermissionRequest(requestData map[string]interface{}) (map
 
 	q.logger.Debug("handlePermissionRequest: toolName=%s, input=%+v", toolName, input)
 
-	if toolName == "" || input == nil {
-		q.logger.Error("handlePermissionRequest: missing tool_name or input")
-		return nil, types.NewControlProtocolError("missing tool_name or input in permission request")
+	if toolName == "" {
+		q.logger.Error("handlePermissionRequest: missing tool_name")
+		return nil, types.NewControlProtocolError("missing tool_name in permission request")
+	}
+	if input == nil {
+		// Some tools (e.g. ExitPlanMode) legitimately send null input.
+		// Normalize to an empty map so CanUseTool is always called.
+		q.logger.Debug("handlePermissionRequest: nil input normalized to empty map for tool=%s", toolName)
+		input = map[string]interface{}{}
 	}
 
 	// Build permission context
@@ -544,6 +550,14 @@ func (q *Query) handleMCPMessage(requestData map[string]interface{}) (map[string
 	return map[string]interface{}{
 		"mcp_response": mcpResponse,
 	}, nil
+}
+
+// SendControlMessage is the exported wrapper around sendControlRequest.
+// It allows callers outside the internal package (e.g. Client in the top-level
+// package) to send arbitrary control protocol messages without exposing the
+// full internal query machinery.
+func (q *Query) SendControlMessage(ctx context.Context, request map[string]interface{}) (map[string]interface{}, error) {
+	return q.sendControlRequest(ctx, request)
 }
 
 // sendControlRequest sends a control request to CLI and waits for response.

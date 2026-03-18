@@ -1,4 +1,4 @@
-module github.com/schlunsen/claude-agent-sdk-go
+module github.com/hishamkaram/claude-agent-sdk-go
 
 go 1.24
 

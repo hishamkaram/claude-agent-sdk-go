@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	claude "github.com/schlunsen/claude-agent-sdk-go"
-	"github.com/schlunsen/claude-agent-sdk-go/types"
+	claude "github.com/hishamkaram/claude-agent-sdk-go"
+	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 // BenchmarkQuery_SimpleMessage benchmarks a simple Query call.

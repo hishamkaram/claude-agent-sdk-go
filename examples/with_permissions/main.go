@@ -7,8 +7,8 @@ import (
 	"log"
 	"strings"
 
-	claude "github.com/schlunsen/claude-agent-sdk-go"
-	"github.com/schlunsen/claude-agent-sdk-go/types"
+	claude "github.com/hishamkaram/claude-agent-sdk-go"
+	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 // WithPermissions demonstrates how to control tool usage with permission callbacks.

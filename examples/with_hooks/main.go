@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 
-	claude "github.com/schlunsen/claude-agent-sdk-go"
-	"github.com/schlunsen/claude-agent-sdk-go/types"
+	claude "github.com/hishamkaram/claude-agent-sdk-go"
+	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 // WithHooks demonstrates the hook system for responding to lifecycle events.

@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/schlunsen/claude-agent-sdk-go/internal"
-	"github.com/schlunsen/claude-agent-sdk-go/internal/log"
-	"github.com/schlunsen/claude-agent-sdk-go/internal/transport"
-	"github.com/schlunsen/claude-agent-sdk-go/types"
+	"github.com/hishamkaram/claude-agent-sdk-go/internal"
+	"github.com/hishamkaram/claude-agent-sdk-go/internal/log"
+	"github.com/hishamkaram/claude-agent-sdk-go/internal/transport"
+	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 // Client provides bidirectional communication with Claude Code CLI for interactive sessions.
@@ -72,10 +72,11 @@ type Client struct {
 	query     *internal.Query
 	logger    *log.Logger
 
-	mu        sync.Mutex
-	connected bool
-	ctx       context.Context
-	cancel    context.CancelFunc
+	mu         sync.Mutex
+	connected  bool
+	ctx        context.Context
+	cancel     context.CancelFunc
+	initResult *types.InitializeResult // Parsed initialization response.
 }
 
 // NewClient creates a new interactive client with the given options.
@@ -221,13 +222,17 @@ func (c *Client) Connect(ctx context.Context) error {
 	c.logger.Debug("Message processing started")
 
 	// Initialize control protocol
-	if _, err := c.query.Initialize(ctx); err != nil {
+	initRaw, err := c.query.Initialize(ctx)
+	if err != nil {
 		c.logger.Error("Failed to initialize control protocol: %v", err)
 		_ = c.query.Stop(ctx)
 		_ = c.transport.Close(ctx)
 		return types.NewControlProtocolErrorWithCause("failed to initialize control protocol", err)
 	}
 	c.logger.Debug("Control protocol initialized")
+
+	// Parse the init result into typed structure.
+	c.initResult = parseInitResult(initRaw)
 
 	c.connected = true
 	c.logger.Info("Successfully connected to Claude")
@@ -507,4 +512,141 @@ func (c *Client) IsConnected() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.connected
+}
+
+// InitResult returns the parsed initialization response from the control protocol.
+// Returns nil if Connect() has not been called or initialization did not return data.
+//
+// The result contains available slash commands/skills, and the raw response map
+// for forward compatibility with future CLI features.
+func (c *Client) InitResult() *types.InitializeResult {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.initResult
+}
+
+// SlashCommands returns the slash commands/skills available in the current session.
+// This is a convenience accessor for InitResult().Commands.
+// Returns nil if Connect() has not been called or no commands were returned.
+func (c *Client) SlashCommands() []types.SlashCommand {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.initResult == nil {
+		return nil
+	}
+	return c.initResult.Commands
+}
+
+// SupportedModels returns the list of models available in this session.
+// Returns nil if Connect() has not been called or the CLI did not return model info.
+func (c *Client) SupportedModels() []types.ModelInfo {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.initResult == nil {
+		return nil
+	}
+	return c.initResult.Models
+}
+
+// SetModel changes the model used for subsequent responses.
+// Pass an empty string to revert to the session's default model.
+// Only valid after Connect() has been called.
+func (c *Client) SetModel(ctx context.Context, model string) error {
+	c.mu.Lock()
+	if !c.connected {
+		c.mu.Unlock()
+		return types.NewCLIConnectionError("not connected - call Connect() first")
+	}
+	c.mu.Unlock()
+
+	req := map[string]interface{}{"subtype": "set_model"}
+	if model != "" {
+		req["model"] = model
+	}
+	_, err := c.query.SendControlMessage(ctx, req)
+	return err
+}
+
+// SetPermissionMode changes the permission mode mid-session.
+// Use types.PermissionModePlan to enter plan mode (/plan equivalent).
+// Only valid after Connect() has been called.
+func (c *Client) SetPermissionMode(ctx context.Context, mode types.PermissionMode) error {
+	c.mu.Lock()
+	if !c.connected {
+		c.mu.Unlock()
+		return types.NewCLIConnectionError("not connected - call Connect() first")
+	}
+	c.mu.Unlock()
+
+	req := map[string]interface{}{
+		"subtype": "set_permission_mode",
+		"mode":    string(mode),
+	}
+	_, err := c.query.SendControlMessage(ctx, req)
+	return err
+}
+
+// parseInitResult converts the raw initialize response map into a typed InitializeResult.
+func parseInitResult(raw map[string]interface{}) *types.InitializeResult {
+	if raw == nil {
+		return nil
+	}
+
+	result := &types.InitializeResult{Raw: raw}
+
+	// Parse "commands" array: each element has "name", "description", "argumentHint".
+	if cmdsRaw, ok := raw["commands"]; ok {
+		if cmdsSlice, ok := cmdsRaw.([]interface{}); ok {
+			commands := make([]types.SlashCommand, 0, len(cmdsSlice))
+			for _, item := range cmdsSlice {
+				m, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				cmd := types.SlashCommand{}
+				if name, ok := m["name"].(string); ok {
+					cmd.Name = name
+				}
+				if desc, ok := m["description"].(string); ok {
+					cmd.Description = desc
+				}
+				if hint, ok := m["argumentHint"].(string); ok {
+					cmd.ArgumentHint = hint
+				}
+				if cmd.Name != "" {
+					commands = append(commands, cmd)
+				}
+			}
+			result.Commands = commands
+		}
+	}
+
+	// Parse "models" array: each element has "value", "displayName", "description".
+	if modelsRaw, ok := raw["models"]; ok {
+		if modelsSlice, ok := modelsRaw.([]interface{}); ok {
+			models := make([]types.ModelInfo, 0, len(modelsSlice))
+			for _, item := range modelsSlice {
+				m, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				info := types.ModelInfo{}
+				if v, ok := m["value"].(string); ok {
+					info.Value = v
+				}
+				if v, ok := m["displayName"].(string); ok {
+					info.DisplayName = v
+				}
+				if v, ok := m["description"].(string); ok {
+					info.Description = v
+				}
+				if info.Value != "" {
+					models = append(models, info)
+				}
+			}
+			result.Models = models
+		}
+	}
+
+	return result
 }
