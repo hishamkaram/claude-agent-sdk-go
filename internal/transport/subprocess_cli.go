@@ -432,6 +432,50 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		}
 	}
 
+	// Add effort level if specified
+	if t.options != nil && t.options.Effort != nil {
+		args = append(args, "--effort", string(*t.options.Effort))
+		t.logger.Debug("Setting effort level: %s", string(*t.options.Effort))
+	}
+
+	// Add fallback model if specified
+	if t.options != nil && t.options.FallbackModel != nil {
+		args = append(args, "--fallback-model", *t.options.FallbackModel)
+		t.logger.Debug("Setting fallback model: %s", *t.options.FallbackModel)
+	}
+
+	// Add session ID if specified
+	if t.options != nil && t.options.SessionID != nil {
+		args = append(args, "--session-id", *t.options.SessionID)
+		t.logger.Debug("Setting session ID: %s", *t.options.SessionID)
+	}
+
+	// Add no-session-persistence flag if PersistSession is explicitly false
+	if t.options != nil && t.options.PersistSession != nil && !*t.options.PersistSession {
+		args = append(args, "--no-session-persistence")
+		t.logger.Debug("Disabling session persistence")
+	}
+
+	// Add JSON schema output format if specified
+	if t.options != nil && t.options.OutputFormat != nil {
+		schemaJSON, err := json.Marshal(t.options.OutputFormat)
+		if err != nil {
+			t.logger.Warning("Failed to marshal output format to JSON: %v", err)
+		} else {
+			args = append(args, "--json-schema", string(schemaJSON))
+			t.logger.Debug("Setting JSON schema output format: %s", string(schemaJSON))
+		}
+	}
+
+	// Build and add settings JSON if needed (thinking, sandbox, file checkpointing)
+	if t.options != nil {
+		settingsJSON := t.buildSettingsJSON()
+		if settingsJSON != "" {
+			args = append(args, "--settings", settingsJSON)
+			t.logger.Debug("Setting settings JSON: %s", settingsJSON)
+		}
+	}
+
 	// Add subagent execution configuration if specified
 	if t.options != nil && t.options.SubagentExecution != nil {
 		subagentJSON := make(map[string]interface{})
@@ -470,6 +514,53 @@ func joinStrings(strs []string, sep string) string {
 		result += sep + strs[i]
 	}
 	return result
+}
+
+// buildSettingsJSON constructs the --settings JSON string from typed option fields.
+// It merges typed fields (Thinking, Sandbox, EnableFileCheckpointing) on top of
+// any user-provided Settings string. Typed fields take precedence on conflict.
+func (t *SubprocessCLITransport) buildSettingsJSON() string {
+	hasThinking := t.options.Thinking != nil
+	hasSandbox := t.options.Sandbox != nil
+	hasCheckpointing := t.options.EnableFileCheckpointing
+
+	if !hasThinking && !hasSandbox && !hasCheckpointing && t.options.Settings == nil {
+		return ""
+	}
+
+	// Start with user-provided settings as base (if any)
+	settings := make(map[string]interface{})
+	if t.options.Settings != nil && *t.options.Settings != "" {
+		if err := json.Unmarshal([]byte(*t.options.Settings), &settings); err != nil {
+			t.logger.Warning("Failed to parse user settings JSON, using typed fields only: %v", err)
+		}
+	}
+
+	// If no typed fields are set, just return the original settings string
+	if !hasThinking && !hasSandbox && !hasCheckpointing {
+		if t.options.Settings != nil {
+			return *t.options.Settings
+		}
+		return ""
+	}
+
+	// Typed fields override user-provided settings
+	if hasThinking {
+		settings["thinking"] = t.options.Thinking
+	}
+	if hasSandbox {
+		settings["sandbox"] = t.options.Sandbox
+	}
+	if hasCheckpointing {
+		settings["enableFileCheckpointing"] = true
+	}
+
+	result, err := json.Marshal(settings)
+	if err != nil {
+		t.logger.Warning("Failed to marshal settings JSON: %v", err)
+		return ""
+	}
+	return string(result)
 }
 
 // Close terminates the subprocess and cleans up all resources.

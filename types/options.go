@@ -5,6 +5,62 @@ import (
 	"fmt"
 )
 
+// EffortLevel represents reasoning effort levels.
+type EffortLevel string
+
+const (
+	EffortLow    EffortLevel = "low"
+	EffortMedium EffortLevel = "medium"
+	EffortHigh   EffortLevel = "high"
+	EffortMax    EffortLevel = "max"
+)
+
+// ThinkingConfig controls Claude's thinking/reasoning behavior.
+type ThinkingConfig struct {
+	Type         string `json:"type"`                   // "adaptive", "enabled", "disabled"
+	BudgetTokens *int   `json:"budgetTokens,omitempty"` // Only for type="enabled"
+}
+
+// OutputFormat represents structured output configuration (JsonSchemaOutputFormat).
+type OutputFormat struct {
+	Type   string                 `json:"type"`             // Always "json_schema"
+	Schema map[string]interface{} `json:"schema,omitempty"` // JSON schema definition
+	Name   *string                `json:"name,omitempty"`   // Optional schema name
+}
+
+// SandboxConfig matches TS SDK's SandboxSettings.
+type SandboxConfig struct {
+	Enabled                      *bool                    `json:"enabled,omitempty"`
+	AutoAllowBashIfSandboxed     *bool                    `json:"autoAllowBashIfSandboxed,omitempty"`
+	AllowUnsandboxedCommands     *bool                    `json:"allowUnsandboxedCommands,omitempty"`
+	Network                      *SandboxNetworkConfig    `json:"network,omitempty"`
+	Filesystem                   *SandboxFilesystemConfig `json:"filesystem,omitempty"`
+	IgnoreViolations             map[string][]string      `json:"ignoreViolations,omitempty"`
+	EnableWeakerNestedSandbox    *bool                    `json:"enableWeakerNestedSandbox,omitempty"`
+	EnableWeakerNetworkIsolation *bool                    `json:"enableWeakerNetworkIsolation,omitempty"`
+	ExcludedCommands             []string                 `json:"excludedCommands,omitempty"`
+}
+
+// SandboxNetworkConfig represents network sandbox configuration.
+type SandboxNetworkConfig struct {
+	AllowedDomains          []string `json:"allowedDomains,omitempty"`
+	AllowManagedDomainsOnly *bool    `json:"allowManagedDomainsOnly,omitempty"`
+	AllowUnixSockets        []string `json:"allowUnixSockets,omitempty"`
+	AllowAllUnixSockets     *bool    `json:"allowAllUnixSockets,omitempty"`
+	AllowLocalBinding       *bool    `json:"allowLocalBinding,omitempty"`
+	HttpProxyPort           *int     `json:"httpProxyPort,omitempty"`
+	SocksProxyPort          *int     `json:"socksProxyPort,omitempty"`
+}
+
+// SandboxFilesystemConfig represents filesystem sandbox configuration.
+type SandboxFilesystemConfig struct {
+	AllowWrite                []string `json:"allowWrite,omitempty"`
+	DenyWrite                 []string `json:"denyWrite,omitempty"`
+	DenyRead                  []string `json:"denyRead,omitempty"`
+	AllowRead                 []string `json:"allowRead,omitempty"`
+	AllowManagedReadPathsOnly *bool    `json:"allowManagedReadPathsOnly,omitempty"`
+}
+
 // SettingSource represents where settings are loaded from.
 type SettingSource string
 
@@ -231,6 +287,33 @@ type ClaudeAgentOptions struct {
 
 	// Plugin configurations for custom plugins
 	Plugins []PluginConfig `json:"plugins,omitempty"`
+
+	// Reasoning effort control
+	Effort *EffortLevel `json:"effort,omitempty"` // "low", "medium", "high", "max" → --effort flag
+
+	// Thinking configuration
+	Thinking *ThinkingConfig `json:"thinking,omitempty"` // adaptive/enabled/disabled → --settings JSON
+
+	// Structured output
+	OutputFormat *OutputFormat `json:"output_format,omitempty"` // JSON schema output → --json-schema flag
+
+	// Model fallback
+	FallbackModel *string `json:"fallback_model,omitempty"` // → --fallback-model flag
+
+	// File checkpointing
+	EnableFileCheckpointing bool `json:"enable_file_checkpointing,omitempty"` // → --settings JSON
+
+	// Sandbox configuration
+	Sandbox *SandboxConfig `json:"sandbox,omitempty"` // → --settings JSON
+
+	// Session persistence control
+	PersistSession *bool `json:"persist_session,omitempty"` // false → --no-session-persistence flag
+
+	// Session ID
+	SessionID *string `json:"session_id,omitempty"` // → --session-id flag
+
+	// Prompt suggestions
+	PromptSuggestions bool `json:"prompt_suggestions,omitempty"` // → init control protocol
 
 	// Debug and diagnostics
 	Verbose bool `json:"-"` // Enable verbose debug logging
@@ -565,5 +648,59 @@ func (o *ClaudeAgentOptions) WithDangerouslySkipPermissions(skip bool) *ClaudeAg
 // This is the "safety switch" that allows the dangerous flag to work.
 func (o *ClaudeAgentOptions) WithAllowDangerouslySkipPermissions(allow bool) *ClaudeAgentOptions {
 	o.AllowDangerouslySkipPermissions = allow
+	return o
+}
+
+// WithEffort sets the reasoning effort level (low/medium/high/max).
+func (o *ClaudeAgentOptions) WithEffort(level EffortLevel) *ClaudeAgentOptions {
+	o.Effort = &level
+	return o
+}
+
+// WithThinking sets the thinking configuration (adaptive/enabled/disabled).
+func (o *ClaudeAgentOptions) WithThinking(config ThinkingConfig) *ClaudeAgentOptions {
+	o.Thinking = &config
+	return o
+}
+
+// WithOutputFormat sets the structured output format configuration.
+func (o *ClaudeAgentOptions) WithOutputFormat(format OutputFormat) *ClaudeAgentOptions {
+	o.OutputFormat = &format
+	return o
+}
+
+// WithFallbackModel sets the fallback model name.
+func (o *ClaudeAgentOptions) WithFallbackModel(model string) *ClaudeAgentOptions {
+	o.FallbackModel = &model
+	return o
+}
+
+// WithEnableFileCheckpointing enables or disables file checkpointing.
+func (o *ClaudeAgentOptions) WithEnableFileCheckpointing(enabled bool) *ClaudeAgentOptions {
+	o.EnableFileCheckpointing = enabled
+	return o
+}
+
+// WithSandbox sets the sandbox configuration.
+func (o *ClaudeAgentOptions) WithSandbox(config SandboxConfig) *ClaudeAgentOptions {
+	o.Sandbox = &config
+	return o
+}
+
+// WithPersistSession controls session persistence. Pass false to disable.
+func (o *ClaudeAgentOptions) WithPersistSession(persist bool) *ClaudeAgentOptions {
+	o.PersistSession = &persist
+	return o
+}
+
+// WithSessionID sets a specific session ID instead of auto-generating.
+func (o *ClaudeAgentOptions) WithSessionID(id string) *ClaudeAgentOptions {
+	o.SessionID = &id
+	return o
+}
+
+// WithPromptSuggestions enables or disables prompt suggestions.
+func (o *ClaudeAgentOptions) WithPromptSuggestions(enabled bool) *ClaudeAgentOptions {
+	o.PromptSuggestions = enabled
 	return o
 }

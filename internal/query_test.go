@@ -937,3 +937,190 @@ func (m *mockMCPServer) Name() string {
 func (m *mockMCPServer) Version() string {
 	return m.version
 }
+
+// TestInitialize_PromptSuggestionsAndJsonSchema tests that Initialize includes
+// promptSuggestions and jsonSchema in the init control request when configured.
+func TestInitialize_PromptSuggestionsAndJsonSchema(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                  string
+		promptSuggestions     bool
+		outputFormat          *types.OutputFormat
+		wantPromptSuggestions bool
+		wantJsonSchema        bool
+	}{
+		{
+			name:                  "promptSuggestions enabled",
+			promptSuggestions:     true,
+			outputFormat:          nil,
+			wantPromptSuggestions: true,
+			wantJsonSchema:        false,
+		},
+		{
+			name:              "jsonSchema from OutputFormat with schema",
+			promptSuggestions: false,
+			outputFormat: &types.OutputFormat{
+				Type: "json_schema",
+				Schema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"answer": map[string]interface{}{
+							"type": "string",
+						},
+					},
+				},
+			},
+			wantPromptSuggestions: false,
+			wantJsonSchema:        true,
+		},
+		{
+			name:              "both promptSuggestions and jsonSchema",
+			promptSuggestions: true,
+			outputFormat: &types.OutputFormat{
+				Type: "json_schema",
+				Schema: map[string]interface{}{
+					"type": "object",
+				},
+			},
+			wantPromptSuggestions: true,
+			wantJsonSchema:        true,
+		},
+		{
+			name:                  "neither set — baseline behavior",
+			promptSuggestions:     false,
+			outputFormat:          nil,
+			wantPromptSuggestions: false,
+			wantJsonSchema:        false,
+		},
+		{
+			name:              "outputFormat without schema — no jsonSchema in init",
+			promptSuggestions: false,
+			outputFormat: &types.OutputFormat{
+				Type:   "json_schema",
+				Schema: nil,
+			},
+			wantPromptSuggestions: false,
+			wantJsonSchema:        false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			transport := newMockTransport()
+
+			opts := types.NewClaudeAgentOptions()
+			if tt.promptSuggestions {
+				opts.WithPromptSuggestions(true)
+			}
+			if tt.outputFormat != nil {
+				opts.WithOutputFormat(*tt.outputFormat)
+			}
+
+			logger := log.NewLogger(false)
+			query := NewQuery(ctx, transport, opts, logger, true)
+
+			if err := query.Start(ctx); err != nil {
+				t.Fatalf("Start failed: %v", err)
+			}
+			defer func() {
+				if err := query.Stop(ctx); err != nil {
+					t.Logf("error stopping query: %v", err)
+				}
+			}()
+
+			// Goroutine to respond to the initialize request and capture its payload.
+			requestCaptured := make(chan map[string]interface{}, 1)
+			go func() {
+				time.Sleep(50 * time.Millisecond)
+				written := transport.getWrittenData()
+
+				for _, data := range written {
+					var sentRequest map[string]interface{}
+					if err := json.Unmarshal([]byte(data), &sentRequest); err != nil {
+						continue
+					}
+
+					reqType, _ := sentRequest["type"].(string)
+					if reqType != "control_request" {
+						continue
+					}
+
+					requestID, _ := sentRequest["request_id"].(string)
+					request, _ := sentRequest["request"].(map[string]interface{})
+					subtype, _ := request["subtype"].(string)
+
+					if subtype == "initialize" {
+						// Capture the inner request for assertions
+						requestCaptured <- request
+
+						// Send success response
+						controlResponse := &types.SystemMessage{
+							Type:    "control_response",
+							Subtype: "control_response",
+							Response: map[string]interface{}{
+								"subtype":    "success",
+								"request_id": requestID,
+								"response": map[string]interface{}{
+									"capabilities": []string{"hooks", "permissions"},
+								},
+							},
+						}
+						transport.sendMessage(controlResponse)
+						return
+					}
+				}
+			}()
+
+			// Initialize
+			result, err := query.Initialize(ctx)
+			if err != nil {
+				t.Fatalf("Initialize failed: %v", err)
+			}
+			if result == nil {
+				t.Fatal("expected non-nil result from Initialize")
+			}
+
+			// Get the captured request
+			select {
+			case req := <-requestCaptured:
+				// Check promptSuggestions
+				ps, psExists := req["promptSuggestions"]
+				if tt.wantPromptSuggestions {
+					if !psExists {
+						t.Error("expected promptSuggestions in init request, but not found")
+					} else if ps != true {
+						t.Errorf("promptSuggestions = %v, want true", ps)
+					}
+				} else {
+					if psExists {
+						t.Errorf("promptSuggestions should not be present in init request, but got %v", ps)
+					}
+				}
+
+				// Check jsonSchema
+				js, jsExists := req["jsonSchema"]
+				if tt.wantJsonSchema {
+					if !jsExists {
+						t.Error("expected jsonSchema in init request, but not found")
+					}
+					// Verify it is a map (the schema object)
+					if _, ok := js.(map[string]interface{}); !ok {
+						t.Errorf("jsonSchema should be a map, got %T", js)
+					}
+				} else {
+					if jsExists {
+						t.Errorf("jsonSchema should not be present in init request, but got %v", js)
+					}
+				}
+
+			case <-time.After(2 * time.Second):
+				t.Fatal("timeout waiting for captured init request")
+			}
+		})
+	}
+}

@@ -30,6 +30,9 @@ type Query struct {
 	hookCallbacks      map[string]types.HookCallbackFunc
 	nextHookCallbackID int64
 
+	// Options (for init protocol fields)
+	options *types.ClaudeAgentOptions
+
 	// Callbacks
 	canUseTool types.CanUseToolFunc
 	hooks      map[types.HookEvent][]types.HookMatcher
@@ -71,6 +74,7 @@ func NewQuery(ctx context.Context, transport transport.Transport, opts *types.Cl
 	}
 
 	if opts != nil {
+		q.options = opts
 		q.canUseTool = opts.CanUseTool
 		q.hooks = opts.Hooks
 	}
@@ -124,6 +128,16 @@ func (q *Query) Initialize(ctx context.Context) (map[string]interface{}, error) 
 	}
 	if len(hooksConfig) > 0 {
 		request["hooks"] = hooksConfig
+	}
+
+	// Add promptSuggestions if enabled
+	if q.options != nil && q.options.PromptSuggestions {
+		request["promptSuggestions"] = true
+	}
+
+	// Add jsonSchema from OutputFormat if specified
+	if q.options != nil && q.options.OutputFormat != nil && q.options.OutputFormat.Schema != nil {
+		request["jsonSchema"] = q.options.OutputFormat.Schema
 	}
 
 	result, err := q.sendControlRequest(ctx, request)
