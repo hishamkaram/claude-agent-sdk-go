@@ -7,18 +7,17 @@ import (
 
 // TestTextBlockMarshaling tests JSON marshaling/unmarshaling of TextBlock.
 func TestTextBlockMarshaling(t *testing.T) {
+	t.Parallel()
 	original := &TextBlock{
 		Type: "text",
 		Text: "Hello, world!",
 	}
 
-	// Marshal to JSON
 	data, err := json.Marshal(original)
 	if err != nil {
 		t.Fatalf("failed to marshal TextBlock: %v", err)
 	}
 
-	// Unmarshal back
 	var decoded TextBlock
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("failed to unmarshal TextBlock: %v", err)
@@ -31,6 +30,7 @@ func TestTextBlockMarshaling(t *testing.T) {
 
 // TestToolUseBlockMarshaling tests JSON marshaling/unmarshaling of ToolUseBlock.
 func TestToolUseBlockMarshaling(t *testing.T) {
+	t.Parallel()
 	original := &ToolUseBlock{
 		Type: "tool_use",
 		ID:   "test-123",
@@ -40,13 +40,11 @@ func TestToolUseBlockMarshaling(t *testing.T) {
 		},
 	}
 
-	// Marshal to JSON
 	data, err := json.Marshal(original)
 	if err != nil {
 		t.Fatalf("failed to marshal ToolUseBlock: %v", err)
 	}
 
-	// Unmarshal back
 	var decoded ToolUseBlock
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("failed to unmarshal ToolUseBlock: %v", err)
@@ -59,6 +57,7 @@ func TestToolUseBlockMarshaling(t *testing.T) {
 
 // TestUnmarshalContentBlock tests unmarshaling of different content block types.
 func TestUnmarshalContentBlock(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		json     string
@@ -82,7 +81,9 @@ func TestUnmarshalContentBlock(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			block, err := UnmarshalContentBlock([]byte(tt.json))
 			if err != nil {
 				t.Fatalf("UnmarshalContentBlock failed: %v", err)
@@ -96,7 +97,10 @@ func TestUnmarshalContentBlock(t *testing.T) {
 
 // TestUserMessageMarshaling tests JSON marshaling/unmarshaling of UserMessage.
 func TestUserMessageMarshaling(t *testing.T) {
+	t.Parallel()
+
 	t.Run("string content", func(t *testing.T) {
+		t.Parallel()
 		original := &UserMessage{
 			Type:    "user",
 			Content: "Hello, Claude!",
@@ -118,7 +122,7 @@ func TestUserMessageMarshaling(t *testing.T) {
 	})
 
 	t.Run("nested message format with tool_result", func(t *testing.T) {
-		// This mimics the real-world format from Claude CLI that was causing errors
+		t.Parallel()
 		jsonData := `{
 			"type": "user",
 			"message": {
@@ -142,7 +146,6 @@ func TestUserMessageMarshaling(t *testing.T) {
 			t.Errorf("expected type 'user', got %s", decoded.Type)
 		}
 
-		// Content should be an array of ContentBlock
 		blocks, ok := decoded.Content.([]ContentBlock)
 		if !ok {
 			t.Fatalf("expected content to be []ContentBlock, got %T", decoded.Content)
@@ -152,7 +155,6 @@ func TestUserMessageMarshaling(t *testing.T) {
 			t.Fatalf("expected 1 content block, got %d", len(blocks))
 		}
 
-		// First block should be a tool_result
 		toolResult, ok := blocks[0].(*ToolResultBlock)
 		if !ok {
 			t.Fatalf("expected ToolResultBlock, got %T", blocks[0])
@@ -164,7 +166,7 @@ func TestUserMessageMarshaling(t *testing.T) {
 	})
 
 	t.Run("top-level content array", func(t *testing.T) {
-		// Standard format with content at top level
+		t.Parallel()
 		jsonData := `{
 			"type": "user",
 			"content": [
@@ -193,6 +195,7 @@ func TestUserMessageMarshaling(t *testing.T) {
 
 // TestResultMessageMarshaling tests JSON marshaling/unmarshaling of ResultMessage.
 func TestResultMessageMarshaling(t *testing.T) {
+	t.Parallel()
 	costUSD := 0.05
 	result := "Success"
 	original := &ResultMessage{
@@ -227,6 +230,7 @@ func TestResultMessageMarshaling(t *testing.T) {
 
 // TestModelInfo_JSONRoundtrip verifies ModelInfo marshals and unmarshals correctly.
 func TestModelInfo_JSONRoundtrip(t *testing.T) {
+	t.Parallel()
 	original := ModelInfo{
 		Value:       "claude-3-5-haiku-latest",
 		DisplayName: "Claude 3.5 Haiku",
@@ -256,10 +260,10 @@ func TestModelInfo_JSONRoundtrip(t *testing.T) {
 
 // TestModelInfo_OptionalDescription verifies that omitting Description works correctly.
 func TestModelInfo_OptionalDescription(t *testing.T) {
+	t.Parallel()
 	original := ModelInfo{
 		Value:       "claude-3-opus-latest",
 		DisplayName: "Claude 3 Opus",
-		// Description intentionally omitted
 	}
 
 	data, err := json.Marshal(original)
@@ -267,7 +271,6 @@ func TestModelInfo_OptionalDescription(t *testing.T) {
 		t.Fatalf("failed to marshal ModelInfo: %v", err)
 	}
 
-	// Description should be omitted from JSON when empty (omitempty).
 	var raw map[string]interface{}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatalf("failed to unmarshal to map: %v", err)
@@ -282,5 +285,978 @@ func TestModelInfo_OptionalDescription(t *testing.T) {
 	}
 	if decoded.Description != "" {
 		t.Errorf("expected empty description, got %q", decoded.Description)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests for new top-level message types (US1)
+// ---------------------------------------------------------------------------
+
+func TestUnmarshalToolProgressMessage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		json        string
+		wantErr     bool
+		checkResult func(t *testing.T, msg Message)
+	}{
+		{
+			name: "valid with all fields",
+			json: `{
+				"type": "tool_progress",
+				"tool_use_id": "toolu_001",
+				"tool_name": "Bash",
+				"parent_tool_use_id": "parent_001",
+				"elapsed_time_seconds": 5.3,
+				"task_id": "task_001",
+				"uuid": "uuid_001",
+				"session_id": "sess_001"
+			}`,
+			wantErr: false,
+			checkResult: func(t *testing.T, msg Message) {
+				m, ok := msg.(*ToolProgressMessage)
+				if !ok {
+					t.Fatalf("expected *ToolProgressMessage, got %T", msg)
+				}
+				if m.ToolUseID != "toolu_001" {
+					t.Errorf("ToolUseID = %q, want %q", m.ToolUseID, "toolu_001")
+				}
+				if m.ToolName != "Bash" {
+					t.Errorf("ToolName = %q, want %q", m.ToolName, "Bash")
+				}
+				if m.ParentToolUseID == nil || *m.ParentToolUseID != "parent_001" {
+					t.Errorf("ParentToolUseID = %v, want %q", m.ParentToolUseID, "parent_001")
+				}
+				if m.ElapsedTimeSeconds != 5.3 {
+					t.Errorf("ElapsedTimeSeconds = %v, want %v", m.ElapsedTimeSeconds, 5.3)
+				}
+				if m.TaskID == nil || *m.TaskID != "task_001" {
+					t.Errorf("TaskID = %v, want %q", m.TaskID, "task_001")
+				}
+			},
+		},
+		{
+			name: "missing optional task_id",
+			json: `{
+				"type": "tool_progress",
+				"tool_use_id": "toolu_002",
+				"tool_name": "Read",
+				"elapsed_time_seconds": 1.0,
+				"uuid": "uuid_002",
+				"session_id": "sess_002"
+			}`,
+			wantErr: false,
+			checkResult: func(t *testing.T, msg Message) {
+				m := msg.(*ToolProgressMessage)
+				if m.TaskID != nil {
+					t.Errorf("TaskID should be nil, got %v", m.TaskID)
+				}
+				if m.ParentToolUseID != nil {
+					t.Errorf("ParentToolUseID should be nil, got %v", m.ParentToolUseID)
+				}
+			},
+		},
+		{
+			name: "ShouldDisplayToUser returns false",
+			json: `{"type":"tool_progress","tool_use_id":"t","tool_name":"x","elapsed_time_seconds":0,"uuid":"u","session_id":"s"}`,
+			checkResult: func(t *testing.T, msg Message) {
+				if msg.ShouldDisplayToUser() {
+					t.Error("ShouldDisplayToUser() should return false")
+				}
+			},
+		},
+		{
+			name: "GetMessageType returns tool_progress",
+			json: `{"type":"tool_progress","tool_use_id":"t","tool_name":"x","elapsed_time_seconds":0,"uuid":"u","session_id":"s"}`,
+			checkResult: func(t *testing.T, msg Message) {
+				if msg.GetMessageType() != "tool_progress" {
+					t.Errorf("GetMessageType() = %q, want %q", msg.GetMessageType(), "tool_progress")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			msg, err := UnmarshalMessage([]byte(tt.json))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("UnmarshalMessage() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.checkResult != nil && err == nil {
+				tt.checkResult(t, msg)
+			}
+		})
+	}
+}
+
+func TestUnmarshalAuthStatusMessage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		json        string
+		wantErr     bool
+		checkResult func(t *testing.T, msg Message)
+	}{
+		{
+			name: "valid with error",
+			json: `{
+				"type": "auth_status",
+				"isAuthenticating": true,
+				"output": ["Checking...", "Contacting server..."],
+				"error": "token expired",
+				"uuid": "uuid_001",
+				"session_id": "sess_001"
+			}`,
+			checkResult: func(t *testing.T, msg Message) {
+				m := msg.(*AuthStatusMessage)
+				if !m.IsAuthenticating {
+					t.Error("IsAuthenticating should be true")
+				}
+				if len(m.Output) != 2 {
+					t.Errorf("Output len = %d, want 2", len(m.Output))
+				}
+				if m.Error == nil || *m.Error != "token expired" {
+					t.Errorf("Error = %v, want %q", m.Error, "token expired")
+				}
+			},
+		},
+		{
+			name: "optional error absent",
+			json: `{
+				"type": "auth_status",
+				"isAuthenticating": false,
+				"output": ["Success"],
+				"uuid": "uuid_002",
+				"session_id": "sess_002"
+			}`,
+			checkResult: func(t *testing.T, msg Message) {
+				m := msg.(*AuthStatusMessage)
+				if m.Error != nil {
+					t.Errorf("Error should be nil, got %v", m.Error)
+				}
+				if m.IsAuthenticating {
+					t.Error("IsAuthenticating should be false")
+				}
+			},
+		},
+		{
+			name: "ShouldDisplayToUser returns true",
+			json: `{"type":"auth_status","isAuthenticating":false,"output":[],"uuid":"u","session_id":"s"}`,
+			checkResult: func(t *testing.T, msg Message) {
+				if !msg.ShouldDisplayToUser() {
+					t.Error("ShouldDisplayToUser() should return true")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			msg, err := UnmarshalMessage([]byte(tt.json))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("UnmarshalMessage() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.checkResult != nil && err == nil {
+				tt.checkResult(t, msg)
+			}
+		})
+	}
+}
+
+func TestUnmarshalToolUseSummaryMessage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		json        string
+		checkResult func(t *testing.T, msg Message)
+	}{
+		{
+			name: "valid",
+			json: `{
+				"type": "tool_use_summary",
+				"summary": "Used Bash to run tests",
+				"preceding_tool_use_ids": ["t1", "t2"],
+				"uuid": "u1",
+				"session_id": "s1"
+			}`,
+			checkResult: func(t *testing.T, msg Message) {
+				m := msg.(*ToolUseSummaryMessage)
+				if m.Summary != "Used Bash to run tests" {
+					t.Errorf("Summary = %q", m.Summary)
+				}
+				if len(m.PrecedingToolUseIDs) != 2 {
+					t.Errorf("PrecedingToolUseIDs len = %d, want 2", len(m.PrecedingToolUseIDs))
+				}
+				if m.PrecedingToolUseIDs[0] != "t1" || m.PrecedingToolUseIDs[1] != "t2" {
+					t.Errorf("PrecedingToolUseIDs = %v", m.PrecedingToolUseIDs)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			msg, err := UnmarshalMessage([]byte(tt.json))
+			if err != nil {
+				t.Fatalf("UnmarshalMessage() error = %v", err)
+			}
+			if tt.checkResult != nil {
+				tt.checkResult(t, msg)
+			}
+		})
+	}
+}
+
+func TestUnmarshalRateLimitEvent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		json        string
+		checkResult func(t *testing.T, msg Message)
+	}{
+		{
+			name: "allowed",
+			json: `{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"},"uuid":"u","session_id":"s"}`,
+			checkResult: func(t *testing.T, msg Message) {
+				m := msg.(*RateLimitEvent)
+				if m.RateLimitInfo.Status != "allowed" {
+					t.Errorf("Status = %q, want %q", m.RateLimitInfo.Status, "allowed")
+				}
+				if m.RateLimitInfo.ResetsAt != nil {
+					t.Error("ResetsAt should be nil")
+				}
+				if m.RateLimitInfo.Utilization != nil {
+					t.Error("Utilization should be nil")
+				}
+			},
+		},
+		{
+			name: "allowed_warning with utilization",
+			json: `{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","utilization":0.85},"uuid":"u","session_id":"s"}`,
+			checkResult: func(t *testing.T, msg Message) {
+				m := msg.(*RateLimitEvent)
+				if m.RateLimitInfo.Status != "allowed_warning" {
+					t.Errorf("Status = %q", m.RateLimitInfo.Status)
+				}
+				if m.RateLimitInfo.Utilization == nil || *m.RateLimitInfo.Utilization != 0.85 {
+					t.Errorf("Utilization = %v, want 0.85", m.RateLimitInfo.Utilization)
+				}
+			},
+		},
+		{
+			name: "rejected with resetsAt",
+			json: `{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1711036800.0,"utilization":1.0},"uuid":"u","session_id":"s"}`,
+			checkResult: func(t *testing.T, msg Message) {
+				m := msg.(*RateLimitEvent)
+				if m.RateLimitInfo.Status != "rejected" {
+					t.Errorf("Status = %q", m.RateLimitInfo.Status)
+				}
+				if m.RateLimitInfo.ResetsAt == nil || *m.RateLimitInfo.ResetsAt != 1711036800.0 {
+					t.Errorf("ResetsAt = %v", m.RateLimitInfo.ResetsAt)
+				}
+			},
+		},
+		{
+			name: "ShouldDisplayToUser returns true",
+			json: `{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"},"uuid":"u","session_id":"s"}`,
+			checkResult: func(t *testing.T, msg Message) {
+				if !msg.ShouldDisplayToUser() {
+					t.Error("ShouldDisplayToUser() should return true")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			msg, err := UnmarshalMessage([]byte(tt.json))
+			if err != nil {
+				t.Fatalf("UnmarshalMessage() error = %v", err)
+			}
+			if tt.checkResult != nil {
+				tt.checkResult(t, msg)
+			}
+		})
+	}
+}
+
+func TestUnmarshalPromptSuggestionMessage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		json        string
+		checkResult func(t *testing.T, msg Message)
+	}{
+		{
+			name: "valid",
+			json: `{"type":"prompt_suggestion","suggestion":"Add tests?","uuid":"u","session_id":"s"}`,
+			checkResult: func(t *testing.T, msg Message) {
+				m := msg.(*PromptSuggestionMessage)
+				if m.Suggestion != "Add tests?" {
+					t.Errorf("Suggestion = %q", m.Suggestion)
+				}
+				if msg.ShouldDisplayToUser() {
+					t.Error("ShouldDisplayToUser() should return false")
+				}
+				if msg.GetMessageType() != "prompt_suggestion" {
+					t.Errorf("GetMessageType() = %q", msg.GetMessageType())
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			msg, err := UnmarshalMessage([]byte(tt.json))
+			if err != nil {
+				t.Fatalf("UnmarshalMessage() error = %v", err)
+			}
+			if tt.checkResult != nil {
+				tt.checkResult(t, msg)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests for typed system message subtypes (US2)
+// ---------------------------------------------------------------------------
+
+func TestUnmarshalCompactBoundaryMessage(t *testing.T) {
+	t.Parallel()
+	jsonData := `{
+		"type": "system",
+		"subtype": "compact_boundary",
+		"compact_metadata": {"trigger": "auto", "pre_tokens": 50000},
+		"uuid": "u1",
+		"session_id": "s1"
+	}`
+
+	msg, err := UnmarshalMessage([]byte(jsonData))
+	if err != nil {
+		t.Fatalf("UnmarshalMessage() error = %v", err)
+	}
+
+	m, ok := msg.(*CompactBoundaryMessage)
+	if !ok {
+		t.Fatalf("expected *CompactBoundaryMessage, got %T", msg)
+	}
+	if m.CompactMetadata.Trigger != "auto" {
+		t.Errorf("Trigger = %q, want %q", m.CompactMetadata.Trigger, "auto")
+	}
+	if m.CompactMetadata.PreTokens != 50000 {
+		t.Errorf("PreTokens = %d, want %d", m.CompactMetadata.PreTokens, 50000)
+	}
+	if m.ShouldDisplayToUser() {
+		t.Error("ShouldDisplayToUser() should return false")
+	}
+}
+
+func TestUnmarshalStatusMessage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		json        string
+		checkResult func(t *testing.T, msg Message)
+	}{
+		{
+			name: "compacting with permission mode",
+			json: `{
+				"type": "system", "subtype": "status",
+				"status": "compacting", "permissionMode": "default",
+				"uuid": "u", "session_id": "s"
+			}`,
+			checkResult: func(t *testing.T, msg Message) {
+				m := msg.(*StatusMessage)
+				if m.Status == nil || *m.Status != "compacting" {
+					t.Errorf("Status = %v, want %q", m.Status, "compacting")
+				}
+				if m.PermissionMode == nil || *m.PermissionMode != "default" {
+					t.Errorf("PermissionMode = %v, want %q", m.PermissionMode, "default")
+				}
+			},
+		},
+		{
+			name: "nil status",
+			json: `{"type": "system", "subtype": "status", "uuid": "u", "session_id": "s"}`,
+			checkResult: func(t *testing.T, msg Message) {
+				m := msg.(*StatusMessage)
+				if m.Status != nil {
+					t.Errorf("Status should be nil, got %v", m.Status)
+				}
+			},
+		},
+		{
+			name: "ShouldDisplayToUser returns true",
+			json: `{"type":"system","subtype":"status","uuid":"u","session_id":"s"}`,
+			checkResult: func(t *testing.T, msg Message) {
+				if !msg.ShouldDisplayToUser() {
+					t.Error("ShouldDisplayToUser() should return true")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			msg, err := UnmarshalMessage([]byte(tt.json))
+			if err != nil {
+				t.Fatalf("error = %v", err)
+			}
+			if tt.checkResult != nil {
+				tt.checkResult(t, msg)
+			}
+		})
+	}
+}
+
+func TestUnmarshalHookMessages(t *testing.T) {
+	t.Parallel()
+
+	t.Run("HookStartedMessage", func(t *testing.T) {
+		t.Parallel()
+		jsonData := `{
+			"type":"system","subtype":"hook_started",
+			"hook_id":"h1","hook_name":"pre-commit","hook_event":"PostToolUse",
+			"uuid":"u","session_id":"s"
+		}`
+		msg, err := UnmarshalMessage([]byte(jsonData))
+		if err != nil {
+			t.Fatalf("error = %v", err)
+		}
+		m, ok := msg.(*HookStartedMessage)
+		if !ok {
+			t.Fatalf("expected *HookStartedMessage, got %T", msg)
+		}
+		if m.HookID != "h1" || m.HookName != "pre-commit" || m.HookEvent != "PostToolUse" {
+			t.Errorf("fields = %+v", m)
+		}
+		if m.ShouldDisplayToUser() {
+			t.Error("ShouldDisplayToUser() should return false")
+		}
+	})
+
+	t.Run("HookProgressMessage", func(t *testing.T) {
+		t.Parallel()
+		jsonData := `{
+			"type":"system","subtype":"hook_progress",
+			"hook_id":"h2","hook_name":"lint","hook_event":"PostToolUse",
+			"stdout":"Running...\n","stderr":"","output":"Running...\n",
+			"uuid":"u","session_id":"s"
+		}`
+		msg, err := UnmarshalMessage([]byte(jsonData))
+		if err != nil {
+			t.Fatalf("error = %v", err)
+		}
+		m, ok := msg.(*HookProgressMessage)
+		if !ok {
+			t.Fatalf("expected *HookProgressMessage, got %T", msg)
+		}
+		if m.Stdout != "Running...\n" {
+			t.Errorf("Stdout = %q", m.Stdout)
+		}
+		if m.ShouldDisplayToUser() {
+			t.Error("ShouldDisplayToUser() should return false")
+		}
+	})
+
+	t.Run("HookResponseMessage", func(t *testing.T) {
+		t.Parallel()
+		jsonData := `{
+			"type":"system","subtype":"hook_response",
+			"hook_id":"h3","hook_name":"pre-commit","hook_event":"PostToolUse",
+			"output":"Done","stdout":"All passed","stderr":"",
+			"exit_code":0,"outcome":"success",
+			"uuid":"u","session_id":"s"
+		}`
+		msg, err := UnmarshalMessage([]byte(jsonData))
+		if err != nil {
+			t.Fatalf("error = %v", err)
+		}
+		m, ok := msg.(*HookResponseMessage)
+		if !ok {
+			t.Fatalf("expected *HookResponseMessage, got %T", msg)
+		}
+		if m.Outcome != "success" {
+			t.Errorf("Outcome = %q", m.Outcome)
+		}
+		if m.ExitCode == nil || *m.ExitCode != 0 {
+			t.Errorf("ExitCode = %v", m.ExitCode)
+		}
+		if m.ShouldDisplayToUser() {
+			t.Error("ShouldDisplayToUser() should return false")
+		}
+	})
+}
+
+func TestUnmarshalTaskMessages(t *testing.T) {
+	t.Parallel()
+
+	t.Run("TaskNotificationMessage", func(t *testing.T) {
+		t.Parallel()
+		jsonData := `{
+			"type":"system","subtype":"task_notification",
+			"task_id":"t1","status":"completed",
+			"output_file":"/tmp/out.txt","summary":"Done",
+			"usage":{"total_tokens":5000,"tool_uses":12,"duration_ms":30000},
+			"uuid":"u","session_id":"s"
+		}`
+		msg, err := UnmarshalMessage([]byte(jsonData))
+		if err != nil {
+			t.Fatalf("error = %v", err)
+		}
+		m, ok := msg.(*TaskNotificationMessage)
+		if !ok {
+			t.Fatalf("expected *TaskNotificationMessage, got %T", msg)
+		}
+		if m.TaskID != "t1" || m.Status != "completed" || m.Summary != "Done" {
+			t.Errorf("fields = %+v", m)
+		}
+		if m.Usage == nil || m.Usage.TotalTokens != 5000 {
+			t.Errorf("Usage = %v", m.Usage)
+		}
+		if !m.ShouldDisplayToUser() {
+			t.Error("ShouldDisplayToUser() should return true")
+		}
+	})
+
+	t.Run("TaskStartedMessage", func(t *testing.T) {
+		t.Parallel()
+		jsonData := `{
+			"type":"system","subtype":"task_started",
+			"task_id":"t2","description":"Building feature",
+			"task_type":"agent",
+			"uuid":"u","session_id":"s"
+		}`
+		msg, err := UnmarshalMessage([]byte(jsonData))
+		if err != nil {
+			t.Fatalf("error = %v", err)
+		}
+		m, ok := msg.(*TaskStartedMessage)
+		if !ok {
+			t.Fatalf("expected *TaskStartedMessage, got %T", msg)
+		}
+		if m.Description != "Building feature" {
+			t.Errorf("Description = %q", m.Description)
+		}
+		if m.TaskType == nil || *m.TaskType != "agent" {
+			t.Errorf("TaskType = %v", m.TaskType)
+		}
+		if !m.ShouldDisplayToUser() {
+			t.Error("ShouldDisplayToUser() should return true")
+		}
+	})
+
+	t.Run("TaskProgressMessage", func(t *testing.T) {
+		t.Parallel()
+		jsonData := `{
+			"type":"system","subtype":"task_progress",
+			"task_id":"t3","description":"Running tests",
+			"usage":{"total_tokens":2500,"tool_uses":5,"duration_ms":15000},
+			"last_tool_name":"Bash",
+			"uuid":"u","session_id":"s"
+		}`
+		msg, err := UnmarshalMessage([]byte(jsonData))
+		if err != nil {
+			t.Fatalf("error = %v", err)
+		}
+		m, ok := msg.(*TaskProgressMessage)
+		if !ok {
+			t.Fatalf("expected *TaskProgressMessage, got %T", msg)
+		}
+		if m.Usage.ToolUses != 5 {
+			t.Errorf("Usage.ToolUses = %d", m.Usage.ToolUses)
+		}
+		if m.LastToolName == nil || *m.LastToolName != "Bash" {
+			t.Errorf("LastToolName = %v", m.LastToolName)
+		}
+		if m.ShouldDisplayToUser() {
+			t.Error("ShouldDisplayToUser() should return false")
+		}
+	})
+}
+
+func TestUnmarshalFilesPersistedEvent(t *testing.T) {
+	t.Parallel()
+	jsonData := `{
+		"type":"system","subtype":"files_persisted",
+		"files":[
+			{"filename":"main.go","file_id":"f1"},
+			{"filename":"test.go","file_id":"f2"}
+		],
+		"failed":[{"filename":"big.bin","error":"too large"}],
+		"processed_at":"2026-03-19T10:30:00Z",
+		"uuid":"u","session_id":"s"
+	}`
+
+	msg, err := UnmarshalMessage([]byte(jsonData))
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+
+	m, ok := msg.(*FilesPersistedEvent)
+	if !ok {
+		t.Fatalf("expected *FilesPersistedEvent, got %T", msg)
+	}
+	if len(m.Files) != 2 {
+		t.Errorf("Files len = %d, want 2", len(m.Files))
+	}
+	if m.Files[0].Filename != "main.go" || m.Files[0].FileID != "f1" {
+		t.Errorf("Files[0] = %+v", m.Files[0])
+	}
+	if len(m.Failed) != 1 || m.Failed[0].Error != "too large" {
+		t.Errorf("Failed = %+v", m.Failed)
+	}
+	if m.ShouldDisplayToUser() {
+		t.Error("ShouldDisplayToUser() should return false")
+	}
+}
+
+func TestUnmarshalSystemUnknownSubtype(t *testing.T) {
+	t.Parallel()
+	jsonData := `{
+		"type": "system",
+		"subtype": "future_system_event",
+		"data": {"key": "value"}
+	}`
+
+	msg, err := UnmarshalMessage([]byte(jsonData))
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+
+	m, ok := msg.(*SystemMessage)
+	if !ok {
+		t.Fatalf("expected *SystemMessage for unknown subtype, got %T", msg)
+	}
+	if m.Subtype != "future_system_event" {
+		t.Errorf("Subtype = %q", m.Subtype)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests for enhanced ResultMessage & UserMessage (US3)
+// ---------------------------------------------------------------------------
+
+func TestResultMessageErrorSubtypes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		json       string
+		wantSub    string
+		wantErrors []string
+		wantIsErr  bool
+	}{
+		{
+			name: "error_max_turns with errors",
+			json: `{
+				"type":"result","subtype":"error_max_turns",
+				"duration_ms":120000,"duration_api_ms":115000,
+				"is_error":true,"num_turns":25,"session_id":"s",
+				"errors":["Max turns reached","Task incomplete"]
+			}`,
+			wantSub:    "error_max_turns",
+			wantErrors: []string{"Max turns reached", "Task incomplete"},
+			wantIsErr:  true,
+		},
+		{
+			name: "error_max_budget_usd",
+			json: `{
+				"type":"result","subtype":"error_max_budget_usd",
+				"duration_ms":60000,"duration_api_ms":55000,
+				"is_error":true,"num_turns":10,"session_id":"s",
+				"errors":["Budget exceeded"]
+			}`,
+			wantSub:    "error_max_budget_usd",
+			wantErrors: []string{"Budget exceeded"},
+			wantIsErr:  true,
+		},
+		{
+			name: "error_during_execution",
+			json: `{
+				"type":"result","subtype":"error_during_execution",
+				"duration_ms":5000,"duration_api_ms":4500,
+				"is_error":true,"num_turns":1,"session_id":"s",
+				"errors":["Process crashed"]
+			}`,
+			wantSub:    "error_during_execution",
+			wantErrors: []string{"Process crashed"},
+			wantIsErr:  true,
+		},
+		{
+			name: "error_max_structured_output_retries",
+			json: `{
+				"type":"result","subtype":"error_max_structured_output_retries",
+				"duration_ms":10000,"duration_api_ms":9000,
+				"is_error":true,"num_turns":3,"session_id":"s",
+				"errors":["Schema validation failed"]
+			}`,
+			wantSub:    "error_max_structured_output_retries",
+			wantErrors: []string{"Schema validation failed"},
+			wantIsErr:  true,
+		},
+		{
+			name: "success with nil errors",
+			json: `{
+				"type":"result","subtype":"success",
+				"duration_ms":5000,"duration_api_ms":4500,
+				"is_error":false,"num_turns":3,"session_id":"s",
+				"result":"All done"
+			}`,
+			wantSub:   "success",
+			wantIsErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			msg, err := UnmarshalMessage([]byte(tt.json))
+			if err != nil {
+				t.Fatalf("error = %v", err)
+			}
+			m := msg.(*ResultMessage)
+			if m.Subtype != tt.wantSub {
+				t.Errorf("Subtype = %q, want %q", m.Subtype, tt.wantSub)
+			}
+			if m.IsError != tt.wantIsErr {
+				t.Errorf("IsError = %v, want %v", m.IsError, tt.wantIsErr)
+			}
+			if tt.wantErrors != nil {
+				if len(m.Errors) != len(tt.wantErrors) {
+					t.Fatalf("Errors len = %d, want %d", len(m.Errors), len(tt.wantErrors))
+				}
+				for i, e := range tt.wantErrors {
+					if m.Errors[i] != e {
+						t.Errorf("Errors[%d] = %q, want %q", i, m.Errors[i], e)
+					}
+				}
+			} else if m.Errors != nil {
+				t.Errorf("Errors should be nil, got %v", m.Errors)
+			}
+		})
+	}
+}
+
+func TestResultMessageNewFields(t *testing.T) {
+	t.Parallel()
+	jsonData := `{
+		"type":"result","subtype":"success",
+		"duration_ms":8000,"duration_api_ms":7500,
+		"is_error":false,"num_turns":5,"session_id":"s",
+		"stop_reason":"end_turn",
+		"permission_denials":[{
+			"tool_name":"Bash",
+			"tool_use_id":"toolu_pd_001",
+			"tool_input":{"command":"rm -rf /"}
+		}],
+		"modelUsage":{
+			"claude-sonnet-4-5-20250929":{
+				"input_tokens":1000,
+				"output_tokens":500,
+				"cache_creation_input_tokens":200,
+				"cache_read_input_tokens":100
+			}
+		},
+		"uuid":"uuid_test"
+	}`
+
+	msg, err := UnmarshalMessage([]byte(jsonData))
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	m := msg.(*ResultMessage)
+
+	if m.StopReason == nil || *m.StopReason != "end_turn" {
+		t.Errorf("StopReason = %v, want %q", m.StopReason, "end_turn")
+	}
+	if len(m.PermissionDenials) != 1 {
+		t.Fatalf("PermissionDenials len = %d, want 1", len(m.PermissionDenials))
+	}
+	if m.PermissionDenials[0].ToolName != "Bash" {
+		t.Errorf("PermissionDenials[0].ToolName = %q", m.PermissionDenials[0].ToolName)
+	}
+	if m.PermissionDenials[0].ToolUseID != "toolu_pd_001" {
+		t.Errorf("PermissionDenials[0].ToolUseID = %q", m.PermissionDenials[0].ToolUseID)
+	}
+
+	usage, ok := m.ModelUsageMap["claude-sonnet-4-5-20250929"]
+	if !ok {
+		t.Fatal("ModelUsageMap missing key claude-sonnet-4-5-20250929")
+	}
+	if usage.InputTokens != 1000 || usage.OutputTokens != 500 {
+		t.Errorf("ModelUsage = %+v", usage)
+	}
+	if usage.CacheCreationInputTokens != 200 || usage.CacheReadInputTokens != 100 {
+		t.Errorf("cache tokens = %d/%d", usage.CacheCreationInputTokens, usage.CacheReadInputTokens)
+	}
+
+	if m.UUID != "uuid_test" {
+		t.Errorf("UUID = %q", m.UUID)
+	}
+}
+
+func TestUserMessageIsReplay(t *testing.T) {
+	t.Parallel()
+
+	t.Run("isReplay true", func(t *testing.T) {
+		t.Parallel()
+		jsonData := `{"type":"user","content":"Hello","isReplay":true}`
+		msg, err := UnmarshalMessage([]byte(jsonData))
+		if err != nil {
+			t.Fatalf("error = %v", err)
+		}
+		m := msg.(*UserMessage)
+		if !m.IsReplay {
+			t.Error("IsReplay should be true")
+		}
+	})
+
+	t.Run("isReplay absent defaults to false", func(t *testing.T) {
+		t.Parallel()
+		jsonData := `{"type":"user","content":"Hello"}`
+		msg, err := UnmarshalMessage([]byte(jsonData))
+		if err != nil {
+			t.Fatalf("error = %v", err)
+		}
+		m := msg.(*UserMessage)
+		if m.IsReplay {
+			t.Error("IsReplay should default to false")
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Tests for forward compatibility (US4)
+// ---------------------------------------------------------------------------
+
+func TestUnmarshalUnknownMessage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		json        string
+		checkResult func(t *testing.T, msg Message)
+	}{
+		{
+			name: "unknown type returns UnknownMessage",
+			json: `{"type":"future_feature_xyz","data":{"key":"value"}}`,
+			checkResult: func(t *testing.T, msg Message) {
+				m, ok := msg.(*UnknownMessage)
+				if !ok {
+					t.Fatalf("expected *UnknownMessage, got %T", msg)
+				}
+				if m.Type != "future_feature_xyz" {
+					t.Errorf("Type = %q, want %q", m.Type, "future_feature_xyz")
+				}
+				if len(m.RawJSON) == 0 {
+					t.Error("RawJSON should be populated")
+				}
+			},
+		},
+		{
+			name: "ShouldDisplayToUser returns false",
+			json: `{"type":"something_new"}`,
+			checkResult: func(t *testing.T, msg Message) {
+				if msg.ShouldDisplayToUser() {
+					t.Error("ShouldDisplayToUser() should return false")
+				}
+			},
+		},
+		{
+			name: "GetMessageType returns unknown type string",
+			json: `{"type":"abc_123"}`,
+			checkResult: func(t *testing.T, msg Message) {
+				if msg.GetMessageType() != "abc_123" {
+					t.Errorf("GetMessageType() = %q, want %q", msg.GetMessageType(), "abc_123")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			msg, err := UnmarshalMessage([]byte(tt.json))
+			if err != nil {
+				t.Fatalf("UnmarshalMessage() should not error on unknown types, got %v", err)
+			}
+			if tt.checkResult != nil {
+				tt.checkResult(t, msg)
+			}
+		})
+	}
+}
+
+func TestUnmarshalMessageNoErrorOnUnknownType(t *testing.T) {
+	t.Parallel()
+	msg, err := UnmarshalMessage([]byte(`{"type":"never_seen_before","x":1}`))
+	if err != nil {
+		t.Fatalf("expected no error for unknown type, got %v", err)
+	}
+	if msg == nil {
+		t.Fatal("expected non-nil message")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests for empty/missing type still errors
+// ---------------------------------------------------------------------------
+
+func TestUnmarshalMessageMissingType(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		json string
+	}{
+		{name: "missing type", json: `{"content":"hello"}`},
+		{name: "null type", json: `{"type":null}`},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := UnmarshalMessage([]byte(tt.json))
+			if err == nil {
+				t.Error("expected error for missing/null type")
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Backward compatibility: existing subtypes still return *SystemMessage
+// ---------------------------------------------------------------------------
+
+func TestExistingSystemSubtypesReturnSystemMessage(t *testing.T) {
+	t.Parallel()
+	subtypes := []string{"init", "warning", "error", "info", "debug", "session_end", "session_info"}
+	for _, sub := range subtypes {
+		sub := sub
+		t.Run(sub, func(t *testing.T) {
+			t.Parallel()
+			jsonData := `{"type":"system","subtype":"` + sub + `","data":{}}`
+			msg, err := UnmarshalMessage([]byte(jsonData))
+			if err != nil {
+				t.Fatalf("error = %v", err)
+			}
+			if _, ok := msg.(*SystemMessage); !ok {
+				t.Errorf("subtype %q should return *SystemMessage, got %T", sub, msg)
+			}
+		})
 	}
 }
