@@ -409,11 +409,27 @@ func Query(ctx context.Context, prompt string) (<-chan Message, error) {
 
 // Type checking at compile time
 func Process(msg Message) string {
-    switch msg.(type) {
+    switch m := msg.(type) {
     case *AssistantMessage:
-        return msg.(*AssistantMessage).Text
+        return m.Content[0].(*TextBlock).Text
     case *ResultMessage:
-        return fmt.Sprintf("Cost: %d", msg.(*ResultMessage).Cost)
+        return fmt.Sprintf("Cost: %.4f", *m.TotalCostUSD)
+    case *ToolProgressMessage:
+        return fmt.Sprintf("tool %s running (%.1fs)", m.ToolName, m.ElapsedTimeSeconds)
+    case *AuthStatusMessage:
+        return strings.Join(m.Output, "\n")
+    case *RateLimitEvent:
+        return fmt.Sprintf("rate limit: %s", m.RateLimitInfo.Status)
+    case *StatusMessage:
+        return fmt.Sprintf("status: %s", *m.Status)
+    case *TaskStartedMessage:
+        return fmt.Sprintf("task started: %s", m.Description)
+    case *TaskNotificationMessage:
+        return fmt.Sprintf("task done: %s", m.Summary)
+    case *HookResponseMessage:
+        return fmt.Sprintf("hook %s: %s", m.HookName, m.Outcome)
+    case *UnknownMessage:
+        return fmt.Sprintf("unknown type: %s", m.Type) // forward-compat
     default:
         return ""  // Compiler requires all cases or default
     }
@@ -427,6 +443,8 @@ func Process(msg Message) string {
 - No nil by default (explicit `*Type`)
 - Composition over inheritance
 - Exhaustive switch checking
+- Two-level dispatch: `UnmarshalMessage()` routes on `type`, then `unmarshalSystemMessage()` routes on `subtype` for system messages
+- `UnknownMessage` catch-all preserves raw JSON for forward compatibility with future CLI versions
 
 ### Comparison
 

@@ -53,6 +53,24 @@ func main() {
         switch m := message.(type) {
         case *types.AssistantMessage:
             fmt.Printf("Assistant: %v\n", m.Content)
+        case *types.ResultMessage:
+            fmt.Printf("Done (subtype=%s)\n", m.Subtype)
+        case *types.AuthStatusMessage:
+            fmt.Printf("Auth: %v\n", m.Output)
+        case *types.RateLimitEvent:
+            fmt.Printf("Rate limit: %s\n", m.RateLimitInfo.Status)
+        case *types.ToolProgressMessage:
+            fmt.Printf("Tool %s running (%.1fs)\n", m.ToolName, m.ElapsedTimeSeconds)
+        case *types.TaskStartedMessage:
+            fmt.Printf("Task started: %s\n", m.Description)
+        case *types.TaskNotificationMessage:
+            fmt.Printf("Task done: %s\n", m.Summary)
+        case *types.StatusMessage:
+            // system subtype "status" — permission mode change, etc.
+        case *types.HookResponseMessage:
+            // system subtype "hook_response" — hook outcome
+        case *types.UnknownMessage:
+            // forward-compatible: unrecognized type, raw JSON preserved in m.RawJSON
         }
     }
 }
@@ -128,12 +146,17 @@ func main() {
 
     messages, _ := sdk.Query(ctx, "What is Go?", nil)
     for msg := range messages {
-        if assistantMsg, ok := msg.(*types.AssistantMessage); ok {
-            for _, block := range assistantMsg.Content {
+        switch m := msg.(type) {
+        case *types.AssistantMessage:
+            for _, block := range m.Content {
                 if textBlock, ok := block.(*types.TextBlock); ok {
                     fmt.Println(textBlock.Text)
                 }
             }
+        case *types.ResultMessage:
+            fmt.Printf("Finished: subtype=%s turns=%d\n", m.Subtype, m.NumTurns)
+        case *types.UnknownMessage:
+            // Unrecognized type — raw JSON preserved in m.RawJSON for forward compat
         }
     }
 }
