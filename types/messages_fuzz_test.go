@@ -43,5 +43,8 @@ func FuzzUnmarshalMessage(f *testing.F) {
 		if err == nil && msg == nil {
 			t.Error("UnmarshalMessage returned nil message with nil error")
 		}
+		if err != nil && msg != nil {
+			t.Error("UnmarshalMessage returned non-nil message with non-nil error")
+		}
 	})
 }

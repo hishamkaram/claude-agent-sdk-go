@@ -2,7 +2,6 @@ package types
 
 import (
 	"encoding/json"
-	"fmt"
 )
 
 // SystemMessageSubtype constants for common system message subtypes
@@ -209,7 +208,7 @@ func (m *UserMessage) UnmarshalJSON(data []byte) error {
 
 	// If we still don't have content, that's an error
 	if contentRaw == nil {
-		return fmt.Errorf("missing content field")
+		return NewMessageParseError("types.UserMessage.UnmarshalJSON: missing content field")
 	}
 
 	// Try to unmarshal as string first
@@ -234,7 +233,7 @@ func (m *UserMessage) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	return fmt.Errorf("content must be string or array of content blocks")
+	return NewMessageParseError("types.UserMessage.UnmarshalJSON: content must be string or array of content blocks")
 }
 
 // AssistantMessage represents a message from Claude assistant.
@@ -832,7 +831,7 @@ func UnmarshalMessage(data []byte) (Message, error) {
 	default:
 		return &UnknownMessage{
 			Type:    typeCheck.Type,
-			RawJSON: json.RawMessage(data),
+			RawJSON: append(json.RawMessage(nil), data...),
 		}, nil
 	}
 }
@@ -842,7 +841,9 @@ func unmarshalSystemMessage(data []byte) (Message, error) {
 	var subtypeCheck struct {
 		Subtype string `json:"subtype"`
 	}
-	_ = json.Unmarshal(data, &subtypeCheck)
+	if err := json.Unmarshal(data, &subtypeCheck); err != nil {
+		return nil, NewJSONDecodeErrorWithCause("failed to extract system subtype", truncateRaw(string(data), 200), err)
+	}
 
 	switch subtypeCheck.Subtype {
 	case SystemSubtypeCompactBoundary:

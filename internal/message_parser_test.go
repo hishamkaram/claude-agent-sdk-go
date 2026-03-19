@@ -11,6 +11,7 @@ import (
 
 // TestParseMessage_UserMessage tests parsing of user messages.
 func TestParseMessage_UserMessage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		input       []byte
@@ -127,7 +128,9 @@ func TestParseMessage_UserMessage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg, err := ParseMessage(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseMessage() error = %v, wantErr %v", err, tt.wantErr)
@@ -147,6 +150,7 @@ func TestParseMessage_UserMessage(t *testing.T) {
 
 // TestParseMessage_AssistantMessage tests parsing of assistant messages.
 func TestParseMessage_AssistantMessage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		input       []byte
@@ -283,7 +287,9 @@ func TestParseMessage_AssistantMessage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg, err := ParseMessage(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseMessage() error = %v, wantErr %v", err, tt.wantErr)
@@ -303,6 +309,7 @@ func TestParseMessage_AssistantMessage(t *testing.T) {
 
 // TestParseMessage_SystemMessage tests parsing of system messages.
 func TestParseMessage_SystemMessage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		input       []byte
@@ -324,7 +331,9 @@ func TestParseMessage_SystemMessage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg, err := ParseMessage(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseMessage() error = %v, wantErr %v", err, tt.wantErr)
@@ -346,6 +355,7 @@ func TestParseMessage_SystemMessage(t *testing.T) {
 
 // TestParseMessage_ResultMessage tests parsing of result messages.
 func TestParseMessage_ResultMessage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    []byte
@@ -370,7 +380,9 @@ func TestParseMessage_ResultMessage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg, err := ParseMessage(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseMessage() error = %v, wantErr %v", err, tt.wantErr)
@@ -398,6 +410,7 @@ func TestParseMessage_ResultMessage(t *testing.T) {
 
 // TestParseMessage_StreamEvent tests parsing of stream events.
 func TestParseMessage_StreamEvent(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		input     []byte
@@ -425,7 +438,9 @@ func TestParseMessage_StreamEvent(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg, err := ParseMessage(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseMessage() error = %v, wantErr %v", err, tt.wantErr)
@@ -452,6 +467,7 @@ func TestParseMessage_StreamEvent(t *testing.T) {
 
 // TestParseMessage_InvalidJSON tests error handling for invalid JSON.
 func TestParseMessage_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   []byte
@@ -829,6 +845,7 @@ func TestParseMessage_UnknownTypeReturnsUnknownMessage(t *testing.T) {
 
 // TestParseContentBlock_TextBlock tests parsing text blocks.
 func TestParseContentBlock_TextBlock(t *testing.T) {
+	t.Parallel()
 	block, err := ParseContentBlock(textBlockJSON)
 	if err != nil {
 		t.Fatalf("ParseContentBlock() error = %v", err)
@@ -849,6 +866,7 @@ func TestParseContentBlock_TextBlock(t *testing.T) {
 
 // TestParseContentBlock_ToolUseBlock tests parsing tool use blocks.
 func TestParseContentBlock_ToolUseBlock(t *testing.T) {
+	t.Parallel()
 	block, err := ParseContentBlock(toolUseBlockJSON)
 	if err != nil {
 		t.Fatalf("ParseContentBlock() error = %v", err)
@@ -872,6 +890,7 @@ func TestParseContentBlock_ToolUseBlock(t *testing.T) {
 
 // TestParseContentBlock_ToolResultBlock tests parsing tool result blocks.
 func TestParseContentBlock_ToolResultBlock(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		input       []byte
@@ -899,7 +918,9 @@ func TestParseContentBlock_ToolResultBlock(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			block, err := ParseContentBlock(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseContentBlock() error = %v, wantErr %v", err, tt.wantErr)
@@ -928,6 +949,7 @@ func TestParseContentBlock_ToolResultBlock(t *testing.T) {
 
 // TestParseContentBlock_ThinkingBlock tests parsing thinking blocks.
 func TestParseContentBlock_ThinkingBlock(t *testing.T) {
+	t.Parallel()
 	block, err := ParseContentBlock(thinkingBlockJSON)
 	if err != nil {
 		t.Fatalf("ParseContentBlock() error = %v", err)
@@ -948,6 +970,7 @@ func TestParseContentBlock_ThinkingBlock(t *testing.T) {
 
 // TestParseContentBlock_InvalidBlocks tests error handling for invalid content blocks.
 func TestParseContentBlock_InvalidBlocks(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   []byte
@@ -976,7 +999,9 @@ func TestParseContentBlock_InvalidBlocks(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := ParseContentBlock(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseContentBlock() error = %v, wantErr %v", err, tt.wantErr)
@@ -987,6 +1012,7 @@ func TestParseContentBlock_InvalidBlocks(t *testing.T) {
 
 // TestParseContentBlocks_Multiple tests parsing multiple content blocks.
 func TestParseContentBlocks_Multiple(t *testing.T) {
+	t.Parallel()
 	rawBlocks := make([]json.RawMessage, len(multipleContentBlocks))
 	for i, block := range multipleContentBlocks {
 		rawBlocks[i] = json.RawMessage(block)
@@ -1015,6 +1041,7 @@ func TestParseContentBlocks_Multiple(t *testing.T) {
 
 // TestParseContentBlocks_Empty tests parsing empty content blocks array.
 func TestParseContentBlocks_Empty(t *testing.T) {
+	t.Parallel()
 	blocks, err := ParseContentBlocks([]json.RawMessage{})
 	if err != nil {
 		t.Fatalf("ParseContentBlocks() error = %v", err)
@@ -1027,6 +1054,7 @@ func TestParseContentBlocks_Empty(t *testing.T) {
 
 // TestParseContentBlocks_WithError tests error handling in batch parsing.
 func TestParseContentBlocks_WithError(t *testing.T) {
+	t.Parallel()
 	rawBlocks := []json.RawMessage{
 		json.RawMessage(`{"type": "text", "text": "Valid"}`),
 		json.RawMessage(`{"type": "invalid_type"}`),
@@ -1046,6 +1074,7 @@ func TestParseContentBlocks_WithError(t *testing.T) {
 
 // TestExtractType tests the type extraction helper.
 func TestExtractType(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    []byte
@@ -1091,7 +1120,9 @@ func TestExtractType(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			gotType, err := extractType(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("extractType() error = %v, wantErr %v", err, tt.wantErr)
@@ -1106,6 +1137,7 @@ func TestExtractType(t *testing.T) {
 
 // TestTruncateString tests the string truncation helper.
 func TestTruncateString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		input  string
@@ -1139,7 +1171,9 @@ func TestTruncateString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := truncateString(tt.input, tt.maxLen)
 			if got != tt.want {
 				t.Errorf("truncateString() = %v, want %v", got, tt.want)
