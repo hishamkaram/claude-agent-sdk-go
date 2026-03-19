@@ -36,13 +36,14 @@ type Query struct {
 	mcpServers map[string]types.MCPServer
 
 	// Message handling
-	messagesChan     chan types.Message
-	stopChan         chan struct{}
-	readLoopDone     chan struct{}
-	started          bool
-	initialized      bool
-	initializeResult map[string]interface{}
-	isStreamingMode  bool
+	messagesChan      chan types.Message
+	closeMessagesOnce sync.Once // guards close(messagesChan) — called from Stop() or messageLoop()
+	stopChan          chan struct{}
+	readLoopDone      chan struct{}
+	started           bool
+	initialized       bool
+	initializeResult  map[string]interface{}
+	isStreamingMode   bool
 }
 
 // responseResult wraps the response or error from a control request.
@@ -174,8 +175,8 @@ func (q *Query) Stop(ctx context.Context) error {
 		return ctx.Err()
 	}
 
-	// Close message channel
-	close(q.messagesChan)
+	// Close message channel (safe even if messageLoop already closed it on transport EOF).
+	q.closeMessagesOnce.Do(func() { close(q.messagesChan) })
 
 	return nil
 }
@@ -203,7 +204,11 @@ func (q *Query) messageLoop() {
 		case msg, ok := <-messages:
 			if !ok {
 				q.logger.Debug("Message loop stopped: transport channel closed")
-				// Channel closed - transport has stopped
+				// Transport channel closed (subprocess EOF or crash). Close
+				// messagesChan so that any ReceiveResponse() goroutines blocking
+				// on it can exit immediately rather than waiting forever.
+				// sync.Once prevents a double-close panic if Stop() is also called.
+				q.closeMessagesOnce.Do(func() { close(q.messagesChan) })
 				return
 			}
 
