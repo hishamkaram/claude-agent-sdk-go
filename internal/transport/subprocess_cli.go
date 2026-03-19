@@ -197,6 +197,13 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context) {
 				return
 			}
 
+			// If the transport context is already cancelled, read errors
+			// are expected (pipe closed during shutdown) — log at Debug.
+			if t.ctx.Err() != nil {
+				t.logger.Debug("Message reader loop stopped during shutdown: %v", err)
+				return
+			}
+
 			t.logger.Error("Failed to read from CLI stdout: %v", err)
 			// Store error and return
 			t.OnError(types.NewJSONDecodeErrorWithCause(
@@ -466,7 +473,10 @@ func joinStrings(strs []string, sep string) string {
 }
 
 // Close terminates the subprocess and cleans up all resources.
-// It attempts to gracefully shut down the subprocess with a timeout.
+// It closes stdin first to allow the subprocess to exit gracefully,
+// then waits for exit. The transport context is cancelled only after
+// the process has exited (cleanup) or as a fallback kill if the
+// caller's context expires before the process exits.
 func (t *SubprocessCLITransport) Close(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -478,46 +488,51 @@ func (t *SubprocessCLITransport) Close(ctx context.Context) error {
 	t.logger.Debug("Closing CLI subprocess...")
 	t.ready = false
 
-	// Cancel the context to stop goroutines
-	if t.cancel != nil {
-		t.cancel()
-		t.cancel = nil
-	}
-
-	// Close stdin to signal end of input
+	// 1. Close stdin FIRST — signals subprocess to exit gracefully.
+	//    This must happen before cancelling the transport context, because
+	//    exec.CommandContext sends SIGKILL on context cancel, preventing
+	//    a clean exit.
 	if t.stdin != nil {
 		_ = t.stdin.Close()
 		t.stdin = nil
 	}
 
-	// Wait for process to exit (with context timeout)
+	// 2. Wait for process to exit.
 	done := make(chan error, 1)
 	go func() {
 		done <- t.cmd.Wait()
 	}()
 
+	var waitErr error
 	select {
 	case <-ctx.Done():
-		// Timeout - kill the process
-		if t.cmd.Process != nil {
-			_ = t.cmd.Process.Kill()
+		// Caller's timeout expired — force kill via context cancel.
+		if t.cancel != nil {
+			t.cancel()
+			t.cancel = nil
 		}
-		<-done // Wait for Wait() to return
+		<-done // Wait for Wait() to return after kill
 		return types.NewProcessError("subprocess did not exit gracefully, killed")
 
-	case err := <-done:
-		// Process exited
-		if err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				return types.NewProcessErrorWithCode(
-					"subprocess exited with error",
-					exitErr.ExitCode(),
-				)
-			}
-			return types.NewProcessErrorWithCause("subprocess exited with error", err)
+	case waitErr = <-done:
+		// Process exited — cancel transport context to clean up
+		// goroutines (messageReaderLoop, readStderr).
+		if t.cancel != nil {
+			t.cancel()
+			t.cancel = nil
 		}
-		return nil
 	}
+
+	if waitErr != nil {
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
+			return types.NewProcessErrorWithCode(
+				"subprocess exited with error",
+				exitErr.ExitCode(),
+			)
+		}
+		return types.NewProcessErrorWithCause("subprocess exited with error", waitErr)
+	}
+	return nil
 }
 
 // OnError stores an error that occurred during transport operation.
@@ -546,6 +561,18 @@ func (t *SubprocessCLITransport) GetError() error {
 	defer t.mu.Unlock()
 
 	return t.err
+}
+
+// ProcessID returns the OS process ID of the Claude Code subprocess.
+// Returns 0 if the subprocess has not been started or cmd.Process is nil.
+func (t *SubprocessCLITransport) ProcessID() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.cmd != nil && t.cmd.Process != nil {
+		return t.cmd.Process.Pid
+	}
+	return 0
 }
 
 // readStderr reads stderr output in a goroutine for debugging.
