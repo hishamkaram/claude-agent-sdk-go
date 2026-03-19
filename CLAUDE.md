@@ -10,7 +10,7 @@ Go SDK for the Claude Code CLI subprocess protocol — handles subprocess transp
 
 ```bash
 go build ./...                    # Build all packages
-go test -race -count=1 ./...      # Run all tests with race detector (run locally)
+go test -race -count=1 -p 4 ./...  # Run all tests with race detector (parallelism limited)
 go vet ./...                      # Static analysis
 golangci-lint run ./...           # Linter
 ```
