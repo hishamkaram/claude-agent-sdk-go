@@ -40,6 +40,31 @@ Use `%w` (not `%v`). Define sentinel errors with `errors.New()`. Check with `err
 
 **Commits**: `type(scope): subject` format (e.g., `fix(transport): handle nil input in subprocess`, `feat(types): add SlashCommandBlock`).
 
+## Configuration Options
+
+### Option Delivery Mechanisms
+
+| Mechanism | Options | Implementation |
+|-----------|---------|----------------|
+| CLI flags | `--effort`, `--fallback-model`, `--session-id`, `--no-session-persistence`, `--json-schema` | `buildCommandArgs()` in `internal/transport/subprocess_cli.go` |
+| Settings JSON (`--settings`) | Thinking, Sandbox, EnableFileCheckpointing | `buildSettingsJSON()` in `internal/transport/subprocess_cli.go` |
+| Init control protocol | PromptSuggestions, JsonSchema | `Initialize()` in `internal/query.go` |
+
+### New Types (types/options.go)
+
+| Type | Purpose |
+|------|---------|
+| `EffortLevel` | String enum: `Low`, `Medium`, `High`, `Max` |
+| `ThinkingConfig` | Thinking mode: `Type` (adaptive/enabled/disabled), `BudgetTokens` |
+| `OutputFormat` | Structured output: `Type` (json), `Schema`, `Name` |
+| `SandboxConfig` | Sandbox controls: `Network` (SandboxNetworkConfig), `Filesystem` (SandboxFilesystemConfig) |
+
+### Hook Events (types/control.go)
+
+23 total hook events (6 existing + 17 new). Each has an input type embedding `BaseHookInput`. Events with output types implement `HookSpecificOutput` interface.
+
+New events: `PostToolUseFailure`, `Notification`, `SessionStart`, `SessionEnd`, `StopFailure`, `SubagentStart`, `PostCompact`, `PermissionRequest`, `Setup`, `TeammateIdle`, `TaskCompleted`, `Elicitation`, `ElicitationResult`, `ConfigChange`, `WorktreeCreate`, `WorktreeRemove`, `InstructionsLoaded`
+
 ## Used By
 
 `agentd/internal/agents/claudecode.go` imports:
