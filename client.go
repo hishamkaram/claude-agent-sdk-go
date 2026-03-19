@@ -586,6 +586,21 @@ func (c *Client) SetPermissionMode(ctx context.Context, mode types.PermissionMod
 	return err
 }
 
+// ProcessID returns the OS process ID of the Claude Code subprocess.
+// Returns 0 before Connect() completes or if the transport does not support PIDs.
+func (c *Client) ProcessID() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	type pidProvider interface {
+		ProcessID() int
+	}
+	if pp, ok := c.transport.(pidProvider); ok {
+		return pp.ProcessID()
+	}
+	return 0
+}
+
 // parseInitResult converts the raw initialize response map into a typed InitializeResult.
 func parseInitResult(raw map[string]interface{}) *types.InitializeResult {
 	if raw == nil {
