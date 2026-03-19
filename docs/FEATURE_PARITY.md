@@ -42,14 +42,29 @@ This document provides a comprehensive comparison of features between the Go Age
 
 | Feature | Python | Go | Notes |
 |---------|--------|-----|-------|
-| **User messages** | ✅ | ✅ | User input handling |
+| **User messages** | ✅ | ✅ | User input handling; `IsReplay` field for replayed messages |
 | **Assistant messages** | ✅ | ✅ | Claude responses |
-| **System messages** | ✅ | ✅ | System notifications |
-| **Result messages** | ✅ | ✅ | Final cost/token info |
+| **System messages** | ✅ | ✅ | System notifications; generic subtype routing |
+| **Result messages** | ✅ | ✅ | Final cost/token info; `Subtype`, `Errors`, `PermissionDenials`, `ModelUsageMap`, `StopReason`, `TotalCostUSD`, `UUID` |
 | **Text content blocks** | ✅ | ✅ | Plain text responses |
 | **Tool use blocks** | ✅ | ✅ | Tool invocation requests |
 | **Tool result blocks** | ✅ | ✅ | Tool execution results |
 | **Thinking blocks** | ✅ | ✅ | Extended thinking output (v0.1.17+) |
+| **ToolProgressMessage** | ✅ | ✅ | Periodic tool execution progress events |
+| **AuthStatusMessage** | ✅ | ✅ | Authentication flow status |
+| **ToolUseSummaryMessage** | ✅ | ✅ | Summary of grouped tool uses |
+| **RateLimitEvent** | ✅ | ✅ | Rate limit encountered events |
+| **PromptSuggestionMessage** | ✅ | ✅ | Predicted next user prompt |
+| **CompactBoundaryMessage** | ✅ | ✅ | Context compaction boundary (system subtype) |
+| **StatusMessage** | ✅ | ✅ | System status/permission mode change (system subtype) |
+| **HookStartedMessage** | ✅ | ✅ | Hook execution started (system subtype) |
+| **HookProgressMessage** | ✅ | ✅ | Hook execution stdout/stderr output (system subtype) |
+| **HookResponseMessage** | ✅ | ✅ | Hook execution completed with outcome (system subtype) |
+| **TaskNotificationMessage** | ✅ | ✅ | Background task completed (system subtype) |
+| **TaskStartedMessage** | ✅ | ✅ | Background task started (system subtype) |
+| **TaskProgressMessage** | ✅ | ✅ | Background task progress (system subtype) |
+| **FilesPersistedEvent** | ✅ | ✅ | Files persisted to checkpoint (system subtype) |
+| **UnknownMessage** | ❌ | ✅ | Forward-compatible catch-all for unrecognized types |
 
 ### Tool Integration & Permissions
 
@@ -267,6 +282,10 @@ Both SDKs use the same control protocol and are forward-compatible with differen
 - Beta registration (v0.2.0+)
 - MCP server factory (v0.2.9+) ← Issue #24
 - Comprehensive documentation (v0.2.9+) ← Issue #25
+- 14 new message types + `UnknownMessage` forward-compat catch-all (016-sdk-message-types)
+- Enhanced `ResultMessage`: `Subtype`, `Errors`, `PermissionDenials`, `ModelUsageMap`, `StopReason`, `TotalCostUSD`, `UUID`
+- Enhanced `UserMessage`: `IsReplay` field
+- System subtype routing via `unmarshalSystemMessage()` for typed dispatch
 
 ---
 
@@ -311,8 +330,8 @@ A: Both SDKs maintain backward compatibility within major versions.
 
 ---
 
-**Last Verified**: 2025-12-31
-**Next Review**: 2026-03-31
+**Last Verified**: 2026-03-19
+**Next Review**: 2026-06-30
 
 For the latest SDK versions and features, see:
 - [Go SDK Releases](https://github.com/schlunsen/claude-agent-sdk-go/releases)

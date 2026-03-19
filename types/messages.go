@@ -2,7 +2,6 @@ package types
 
 import (
 	"encoding/json"
-	"fmt"
 )
 
 // SystemMessageSubtype constants for common system message subtypes
@@ -14,6 +13,26 @@ const (
 	SystemSubtypeDebug       = "debug"
 	SystemSubtypeSessionEnd  = "session_end"
 	SystemSubtypeSessionInfo = "session_info"
+
+	// Typed system subtypes (016-sdk-message-types)
+	SystemSubtypeCompactBoundary  = "compact_boundary"
+	SystemSubtypeStatus           = "status"
+	SystemSubtypeHookStarted      = "hook_started"
+	SystemSubtypeHookProgress     = "hook_progress"
+	SystemSubtypeHookResponse     = "hook_response"
+	SystemSubtypeTaskNotification = "task_notification"
+	SystemSubtypeTaskStarted      = "task_started"
+	SystemSubtypeTaskProgress     = "task_progress"
+	SystemSubtypeFilesPersisted   = "files_persisted"
+)
+
+// ResultMessage subtype constants
+const (
+	ResultSubtypeSuccess                         = "success"
+	ResultSubtypeErrorMaxTurns                   = "error_max_turns"
+	ResultSubtypeErrorMaxBudget                  = "error_max_budget_usd"
+	ResultSubtypeErrorDuringExecution            = "error_during_execution"
+	ResultSubtypeErrorMaxStructuredOutputRetries = "error_max_structured_output_retries"
 )
 
 // ContentBlock is an interface for all content block types.
@@ -127,11 +146,16 @@ type Message interface {
 	isMessage()
 }
 
+// ---------------------------------------------------------------------------
+// Existing message types
+// ---------------------------------------------------------------------------
+
 // UserMessage represents a message from the user.
 type UserMessage struct {
 	Type            string      `json:"type"`
 	Content         interface{} `json:"content"` // Can be string or []ContentBlock
 	ParentToolUseID *string     `json:"parent_tool_use_id,omitempty"`
+	IsReplay        bool        `json:"isReplay,omitempty"`
 }
 
 // GetMessageType returns the type of the message.
@@ -184,7 +208,7 @@ func (m *UserMessage) UnmarshalJSON(data []byte) error {
 
 	// If we still don't have content, that's an error
 	if contentRaw == nil {
-		return fmt.Errorf("missing content field")
+		return NewMessageParseError("types.UserMessage.UnmarshalJSON: missing content field")
 	}
 
 	// Try to unmarshal as string first
@@ -209,7 +233,7 @@ func (m *UserMessage) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	return fmt.Errorf("content must be string or array of content blocks")
+	return NewMessageParseError("types.UserMessage.UnmarshalJSON: content must be string or array of content blocks")
 }
 
 // AssistantMessage represents a message from Claude assistant.
@@ -378,16 +402,21 @@ type InitializeResult struct {
 
 // ResultMessage represents a result message with cost and usage information.
 type ResultMessage struct {
-	Type          string                 `json:"type"`
-	Subtype       string                 `json:"subtype"`
-	DurationMs    int                    `json:"duration_ms"`
-	DurationAPIMs int                    `json:"duration_api_ms"`
-	IsError       bool                   `json:"is_error"`
-	NumTurns      int                    `json:"num_turns"`
-	SessionID     string                 `json:"session_id"`
-	TotalCostUSD  *float64               `json:"total_cost_usd,omitempty"`
-	Usage         map[string]interface{} `json:"usage,omitempty"`
-	Result        *string                `json:"result,omitempty"`
+	Type              string                 `json:"type"`
+	Subtype           string                 `json:"subtype"`
+	DurationMs        int                    `json:"duration_ms"`
+	DurationAPIMs     int                    `json:"duration_api_ms"`
+	IsError           bool                   `json:"is_error"`
+	NumTurns          int                    `json:"num_turns"`
+	SessionID         string                 `json:"session_id"`
+	TotalCostUSD      *float64               `json:"total_cost_usd,omitempty"`
+	Usage             map[string]interface{} `json:"usage,omitempty"`
+	Result            *string                `json:"result,omitempty"`
+	Errors            []string               `json:"errors,omitempty"`
+	StopReason        *string                `json:"stop_reason,omitempty"`
+	PermissionDenials []PermissionDenial     `json:"permission_denials,omitempty"`
+	ModelUsageMap     map[string]ModelUsage  `json:"modelUsage,omitempty"`
+	UUID              string                 `json:"uuid,omitempty"`
 }
 
 // GetMessageType returns the type of the message.
@@ -423,48 +452,459 @@ func (m *StreamEvent) ShouldDisplayToUser() bool {
 
 func (m *StreamEvent) isMessage() {}
 
+// ---------------------------------------------------------------------------
+// Shared nested types
+// ---------------------------------------------------------------------------
+
+// RateLimitInfo contains rate limit status information.
+type RateLimitInfo struct {
+	Status      string   `json:"status"`
+	ResetsAt    *float64 `json:"resetsAt,omitempty"`
+	Utilization *float64 `json:"utilization,omitempty"`
+}
+
+// CompactMetadata contains context compaction metadata.
+type CompactMetadata struct {
+	Trigger   string `json:"trigger"`
+	PreTokens int    `json:"pre_tokens"`
+}
+
+// TaskUsage contains task resource usage information.
+type TaskUsage struct {
+	TotalTokens int `json:"total_tokens"`
+	ToolUses    int `json:"tool_uses"`
+	DurationMs  int `json:"duration_ms"`
+}
+
+// PersistedFile represents a successfully persisted file.
+type PersistedFile struct {
+	Filename string `json:"filename"`
+	FileID   string `json:"file_id"`
+}
+
+// FailedFile represents a file that failed to persist.
+type FailedFile struct {
+	Filename string `json:"filename"`
+	Error    string `json:"error"`
+}
+
+// PermissionDenial represents a denied permission request.
+type PermissionDenial struct {
+	ToolName  string                 `json:"tool_name"`
+	ToolUseID string                 `json:"tool_use_id"`
+	ToolInput map[string]interface{} `json:"tool_input"`
+}
+
+// ModelUsage contains per-model token usage information.
+type ModelUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+}
+
+// ---------------------------------------------------------------------------
+// New top-level message types
+// ---------------------------------------------------------------------------
+
+// ToolProgressMessage is emitted periodically while a tool is executing.
+type ToolProgressMessage struct {
+	Type               string  `json:"type"`
+	ToolUseID          string  `json:"tool_use_id"`
+	ToolName           string  `json:"tool_name"`
+	ParentToolUseID    *string `json:"parent_tool_use_id,omitempty"`
+	ElapsedTimeSeconds float64 `json:"elapsed_time_seconds"`
+	TaskID             *string `json:"task_id,omitempty"`
+	UUID               string  `json:"uuid"`
+	SessionID          string  `json:"session_id"`
+}
+
+func (m *ToolProgressMessage) GetMessageType() string    { return m.Type }
+func (m *ToolProgressMessage) ShouldDisplayToUser() bool { return false }
+func (m *ToolProgressMessage) isMessage()                {}
+
+// AuthStatusMessage is emitted during authentication flows.
+type AuthStatusMessage struct {
+	Type             string   `json:"type"`
+	IsAuthenticating bool     `json:"isAuthenticating"`
+	Output           []string `json:"output"`
+	Error            *string  `json:"error,omitempty"`
+	UUID             string   `json:"uuid"`
+	SessionID        string   `json:"session_id"`
+}
+
+func (m *AuthStatusMessage) GetMessageType() string    { return m.Type }
+func (m *AuthStatusMessage) ShouldDisplayToUser() bool { return true }
+func (m *AuthStatusMessage) isMessage()                {}
+
+// ToolUseSummaryMessage contains a summary of tool usage.
+type ToolUseSummaryMessage struct {
+	Type                string   `json:"type"`
+	Summary             string   `json:"summary"`
+	PrecedingToolUseIDs []string `json:"preceding_tool_use_ids"`
+	UUID                string   `json:"uuid"`
+	SessionID           string   `json:"session_id"`
+}
+
+func (m *ToolUseSummaryMessage) GetMessageType() string    { return m.Type }
+func (m *ToolUseSummaryMessage) ShouldDisplayToUser() bool { return false }
+func (m *ToolUseSummaryMessage) isMessage()                {}
+
+// RateLimitEvent is emitted when a rate limit is encountered.
+type RateLimitEvent struct {
+	Type          string        `json:"type"`
+	RateLimitInfo RateLimitInfo `json:"rate_limit_info"`
+	UUID          string        `json:"uuid"`
+	SessionID     string        `json:"session_id"`
+}
+
+func (m *RateLimitEvent) GetMessageType() string    { return m.Type }
+func (m *RateLimitEvent) ShouldDisplayToUser() bool { return true }
+func (m *RateLimitEvent) isMessage()                {}
+
+// PromptSuggestionMessage contains a predicted next user prompt.
+type PromptSuggestionMessage struct {
+	Type       string `json:"type"`
+	Suggestion string `json:"suggestion"`
+	UUID       string `json:"uuid"`
+	SessionID  string `json:"session_id"`
+}
+
+func (m *PromptSuggestionMessage) GetMessageType() string    { return m.Type }
+func (m *PromptSuggestionMessage) ShouldDisplayToUser() bool { return false }
+func (m *PromptSuggestionMessage) isMessage()                {}
+
+// ---------------------------------------------------------------------------
+// Typed system message subtypes
+// ---------------------------------------------------------------------------
+
+// CompactBoundaryMessage indicates a context compaction boundary.
+type CompactBoundaryMessage struct {
+	Type            string          `json:"type"`
+	Subtype         string          `json:"subtype"`
+	CompactMetadata CompactMetadata `json:"compact_metadata"`
+	UUID            string          `json:"uuid"`
+	SessionID       string          `json:"session_id"`
+}
+
+func (m *CompactBoundaryMessage) GetMessageType() string    { return m.Type }
+func (m *CompactBoundaryMessage) ShouldDisplayToUser() bool { return false }
+func (m *CompactBoundaryMessage) isMessage()                {}
+
+// StatusMessage indicates a system status change.
+type StatusMessage struct {
+	Type           string  `json:"type"`
+	Subtype        string  `json:"subtype"`
+	Status         *string `json:"status,omitempty"`
+	PermissionMode *string `json:"permissionMode,omitempty"`
+	UUID           string  `json:"uuid"`
+	SessionID      string  `json:"session_id"`
+}
+
+func (m *StatusMessage) GetMessageType() string    { return m.Type }
+func (m *StatusMessage) ShouldDisplayToUser() bool { return true }
+func (m *StatusMessage) isMessage()                {}
+
+// HookStartedMessage indicates a hook has started executing.
+type HookStartedMessage struct {
+	Type      string `json:"type"`
+	Subtype   string `json:"subtype"`
+	HookID    string `json:"hook_id"`
+	HookName  string `json:"hook_name"`
+	HookEvent string `json:"hook_event"`
+	UUID      string `json:"uuid"`
+	SessionID string `json:"session_id"`
+}
+
+func (m *HookStartedMessage) GetMessageType() string    { return m.Type }
+func (m *HookStartedMessage) ShouldDisplayToUser() bool { return false }
+func (m *HookStartedMessage) isMessage()                {}
+
+// HookProgressMessage contains hook execution output.
+type HookProgressMessage struct {
+	Type      string `json:"type"`
+	Subtype   string `json:"subtype"`
+	HookID    string `json:"hook_id"`
+	HookName  string `json:"hook_name"`
+	HookEvent string `json:"hook_event"`
+	Stdout    string `json:"stdout"`
+	Stderr    string `json:"stderr"`
+	Output    string `json:"output"`
+	UUID      string `json:"uuid"`
+	SessionID string `json:"session_id"`
+}
+
+func (m *HookProgressMessage) GetMessageType() string    { return m.Type }
+func (m *HookProgressMessage) ShouldDisplayToUser() bool { return false }
+func (m *HookProgressMessage) isMessage()                {}
+
+// HookResponseMessage indicates a hook has completed.
+type HookResponseMessage struct {
+	Type      string `json:"type"`
+	Subtype   string `json:"subtype"`
+	HookID    string `json:"hook_id"`
+	HookName  string `json:"hook_name"`
+	HookEvent string `json:"hook_event"`
+	Output    string `json:"output"`
+	Stdout    string `json:"stdout"`
+	Stderr    string `json:"stderr"`
+	ExitCode  *int   `json:"exit_code,omitempty"`
+	Outcome   string `json:"outcome"`
+	UUID      string `json:"uuid"`
+	SessionID string `json:"session_id"`
+}
+
+func (m *HookResponseMessage) GetMessageType() string    { return m.Type }
+func (m *HookResponseMessage) ShouldDisplayToUser() bool { return false }
+func (m *HookResponseMessage) isMessage()                {}
+
+// TaskNotificationMessage indicates a background task has completed.
+type TaskNotificationMessage struct {
+	Type       string     `json:"type"`
+	Subtype    string     `json:"subtype"`
+	TaskID     string     `json:"task_id"`
+	ToolUseID  *string    `json:"tool_use_id,omitempty"`
+	Status     string     `json:"status"`
+	OutputFile string     `json:"output_file"`
+	Summary    string     `json:"summary"`
+	Usage      *TaskUsage `json:"usage,omitempty"`
+	UUID       string     `json:"uuid"`
+	SessionID  string     `json:"session_id"`
+}
+
+func (m *TaskNotificationMessage) GetMessageType() string    { return m.Type }
+func (m *TaskNotificationMessage) ShouldDisplayToUser() bool { return true }
+func (m *TaskNotificationMessage) isMessage()                {}
+
+// TaskStartedMessage indicates a background task has started.
+type TaskStartedMessage struct {
+	Type        string  `json:"type"`
+	Subtype     string  `json:"subtype"`
+	TaskID      string  `json:"task_id"`
+	ToolUseID   *string `json:"tool_use_id,omitempty"`
+	Description string  `json:"description"`
+	TaskType    *string `json:"task_type,omitempty"`
+	UUID        string  `json:"uuid"`
+	SessionID   string  `json:"session_id"`
+}
+
+func (m *TaskStartedMessage) GetMessageType() string    { return m.Type }
+func (m *TaskStartedMessage) ShouldDisplayToUser() bool { return true }
+func (m *TaskStartedMessage) isMessage()                {}
+
+// TaskProgressMessage contains progress information for a background task.
+type TaskProgressMessage struct {
+	Type         string    `json:"type"`
+	Subtype      string    `json:"subtype"`
+	TaskID       string    `json:"task_id"`
+	ToolUseID    *string   `json:"tool_use_id,omitempty"`
+	Description  string    `json:"description"`
+	Usage        TaskUsage `json:"usage"`
+	LastToolName *string   `json:"last_tool_name,omitempty"`
+	UUID         string    `json:"uuid"`
+	SessionID    string    `json:"session_id"`
+}
+
+func (m *TaskProgressMessage) GetMessageType() string    { return m.Type }
+func (m *TaskProgressMessage) ShouldDisplayToUser() bool { return false }
+func (m *TaskProgressMessage) isMessage()                {}
+
+// FilesPersistedEvent indicates files have been persisted to a checkpoint.
+type FilesPersistedEvent struct {
+	Type        string          `json:"type"`
+	Subtype     string          `json:"subtype"`
+	Files       []PersistedFile `json:"files"`
+	Failed      []FailedFile    `json:"failed"`
+	ProcessedAt string          `json:"processed_at"`
+	UUID        string          `json:"uuid"`
+	SessionID   string          `json:"session_id"`
+}
+
+func (m *FilesPersistedEvent) GetMessageType() string    { return m.Type }
+func (m *FilesPersistedEvent) ShouldDisplayToUser() bool { return false }
+func (m *FilesPersistedEvent) isMessage()                {}
+
+// ---------------------------------------------------------------------------
+// Forward compatibility
+// ---------------------------------------------------------------------------
+
+// UnknownMessage represents an unrecognized message type.
+// It preserves the raw JSON for forward compatibility with future CLI versions.
+type UnknownMessage struct {
+	Type    string          `json:"type"`
+	RawJSON json.RawMessage `json:"-"`
+}
+
+func (m *UnknownMessage) GetMessageType() string    { return m.Type }
+func (m *UnknownMessage) ShouldDisplayToUser() bool { return false }
+func (m *UnknownMessage) isMessage()                {}
+
+// ---------------------------------------------------------------------------
+// UnmarshalMessage — central message dispatch
+// ---------------------------------------------------------------------------
+
+// truncateRaw truncates raw JSON for safe inclusion in error messages.
+// Prevents sensitive subprocess output from leaking into error structs.
+func truncateRaw(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
 // UnmarshalMessage unmarshals a JSON message into the appropriate message type.
 func UnmarshalMessage(data []byte) (Message, error) {
 	var typeCheck struct {
 		Type string `json:"type"`
 	}
 	if err := json.Unmarshal(data, &typeCheck); err != nil {
-		return nil, NewJSONDecodeErrorWithCause("failed to determine message type", string(data), err)
+		return nil, NewJSONDecodeErrorWithCause("failed to determine message type", truncateRaw(string(data), 200), err)
+	}
+
+	if typeCheck.Type == "" {
+		return nil, NewMessageParseError("missing or empty type field")
 	}
 
 	switch typeCheck.Type {
 	case "user":
 		var msg UserMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
-			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal user message", string(data), err)
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal user message", truncateRaw(string(data), 200), err)
 		}
 		return &msg, nil
 	case "assistant":
 		var msg AssistantMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
-			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal assistant message", string(data), err)
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal assistant message", truncateRaw(string(data), 200), err)
 		}
 		return &msg, nil
-	case "system", "control_request", "control_response":
-		// system, control_request, and control_response are all SystemMessage types
+	case "system":
+		return unmarshalSystemMessage(data)
+	case "control_request", "control_response":
 		var msg SystemMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
-			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal system message", string(data), err)
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal system message", truncateRaw(string(data), 200), err)
 		}
 		return &msg, nil
 	case "result":
 		var msg ResultMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
-			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal result message", string(data), err)
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal result message", truncateRaw(string(data), 200), err)
 		}
 		return &msg, nil
 	case "stream_event":
 		var msg StreamEvent
 		if err := json.Unmarshal(data, &msg); err != nil {
-			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal stream event", string(data), err)
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal stream event", truncateRaw(string(data), 200), err)
+		}
+		return &msg, nil
+	case "tool_progress":
+		var msg ToolProgressMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal tool progress message", truncateRaw(string(data), 200), err)
+		}
+		return &msg, nil
+	case "auth_status":
+		var msg AuthStatusMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal auth status message", truncateRaw(string(data), 200), err)
+		}
+		return &msg, nil
+	case "tool_use_summary":
+		var msg ToolUseSummaryMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal tool use summary message", truncateRaw(string(data), 200), err)
+		}
+		return &msg, nil
+	case "rate_limit_event":
+		var msg RateLimitEvent
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal rate limit event", truncateRaw(string(data), 200), err)
+		}
+		return &msg, nil
+	case "prompt_suggestion":
+		var msg PromptSuggestionMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal prompt suggestion message", truncateRaw(string(data), 200), err)
 		}
 		return &msg, nil
 	default:
-		return nil, NewMessageParseErrorWithType("unknown message type", typeCheck.Type)
+		return &UnknownMessage{
+			Type:    typeCheck.Type,
+			RawJSON: append(json.RawMessage(nil), data...),
+		}, nil
+	}
+}
+
+// unmarshalSystemMessage handles system message subtype routing.
+func unmarshalSystemMessage(data []byte) (Message, error) {
+	var subtypeCheck struct {
+		Subtype string `json:"subtype"`
+	}
+	if err := json.Unmarshal(data, &subtypeCheck); err != nil {
+		return nil, NewJSONDecodeErrorWithCause("failed to extract system subtype", truncateRaw(string(data), 200), err)
+	}
+
+	switch subtypeCheck.Subtype {
+	case SystemSubtypeCompactBoundary:
+		var msg CompactBoundaryMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal compact boundary message", truncateRaw(string(data), 200), err)
+		}
+		return &msg, nil
+	case SystemSubtypeStatus:
+		var msg StatusMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal status message", truncateRaw(string(data), 200), err)
+		}
+		return &msg, nil
+	case SystemSubtypeHookStarted:
+		var msg HookStartedMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal hook started message", truncateRaw(string(data), 200), err)
+		}
+		return &msg, nil
+	case SystemSubtypeHookProgress:
+		var msg HookProgressMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal hook progress message", truncateRaw(string(data), 200), err)
+		}
+		return &msg, nil
+	case SystemSubtypeHookResponse:
+		var msg HookResponseMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal hook response message", truncateRaw(string(data), 200), err)
+		}
+		return &msg, nil
+	case SystemSubtypeTaskNotification:
+		var msg TaskNotificationMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal task notification message", truncateRaw(string(data), 200), err)
+		}
+		return &msg, nil
+	case SystemSubtypeTaskStarted:
+		var msg TaskStartedMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal task started message", truncateRaw(string(data), 200), err)
+		}
+		return &msg, nil
+	case SystemSubtypeTaskProgress:
+		var msg TaskProgressMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal task progress message", truncateRaw(string(data), 200), err)
+		}
+		return &msg, nil
+	case SystemSubtypeFilesPersisted:
+		var msg FilesPersistedEvent
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal files persisted event", truncateRaw(string(data), 200), err)
+		}
+		return &msg, nil
+	default:
+		var msg SystemMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, NewJSONDecodeErrorWithCause("failed to unmarshal system message", truncateRaw(string(data), 200), err)
+		}
+		return &msg, nil
 	}
 }
