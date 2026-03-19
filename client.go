@@ -601,6 +601,248 @@ func (c *Client) ProcessID() int {
 	return 0
 }
 
+// Interrupt sends an interrupt control request to cancel the active query.
+// Returns an error if the client is not connected.
+func (c *Client) Interrupt(ctx context.Context) error {
+	c.mu.Lock()
+	if !c.connected {
+		c.mu.Unlock()
+		return types.NewCLIConnectionError("Client.Interrupt: not connected - call Connect() first")
+	}
+	c.mu.Unlock()
+
+	req := map[string]interface{}{"subtype": "interrupt"}
+	_, err := c.query.SendControlMessage(ctx, req)
+	return err
+}
+
+// StreamInput writes user content to the subprocess stdin during an active stream.
+// This is used to respond to interactive prompts (e.g., AskUserQuestion tool calls)
+// without starting a new Query() call.
+func (c *Client) StreamInput(ctx context.Context, content string) error {
+	if content == "" {
+		return fmt.Errorf("Client.StreamInput: content: %w", types.ErrEmptyParameter)
+	}
+
+	c.mu.Lock()
+	if !c.connected {
+		c.mu.Unlock()
+		return types.NewCLIConnectionError("Client.StreamInput: not connected - call Connect() first")
+	}
+	c.mu.Unlock()
+
+	msg := map[string]interface{}{
+		"type": "user",
+		"message": map[string]interface{}{
+			"role":    "user",
+			"content": content,
+		},
+		"parent_tool_use_id": nil,
+		"session_id":         "default",
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("Client.StreamInput: failed to marshal message: %w", err)
+	}
+
+	if err := c.transport.Write(ctx, string(data)); err != nil {
+		return fmt.Errorf("Client.StreamInput: %w", err)
+	}
+
+	return nil
+}
+
+// StopTask sends a stop_task control request to cancel a specific background task.
+func (c *Client) StopTask(ctx context.Context, taskID string) error {
+	if taskID == "" {
+		return fmt.Errorf("Client.StopTask: taskID: %w", types.ErrEmptyParameter)
+	}
+
+	c.mu.Lock()
+	if !c.connected {
+		c.mu.Unlock()
+		return types.NewCLIConnectionError("Client.StopTask: not connected - call Connect() first")
+	}
+	c.mu.Unlock()
+
+	req := map[string]interface{}{
+		"subtype": "stop_task",
+		"task_id": taskID,
+	}
+	_, err := c.query.SendControlMessage(ctx, req)
+	if err != nil {
+		return fmt.Errorf("Client.StopTask: %w", err)
+	}
+	return nil
+}
+
+// MCPServerStatus requests the status of all MCP server connections.
+func (c *Client) MCPServerStatus(ctx context.Context) ([]types.McpServerStatusInfo, error) {
+	c.mu.Lock()
+	if !c.connected {
+		c.mu.Unlock()
+		return nil, types.NewCLIConnectionError("Client.MCPServerStatus: not connected - call Connect() first")
+	}
+	c.mu.Unlock()
+
+	req := map[string]interface{}{"subtype": "mcp_status"}
+	resp, err := c.query.SendControlMessage(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("Client.MCPServerStatus: %w", err)
+	}
+
+	// Parse response into typed slice
+	serversRaw, ok := resp["servers"]
+	if !ok {
+		return nil, nil
+	}
+
+	data, err := json.Marshal(serversRaw)
+	if err != nil {
+		return nil, fmt.Errorf("Client.MCPServerStatus: failed to marshal servers response: %w", err)
+	}
+
+	var servers []types.McpServerStatusInfo
+	if err := json.Unmarshal(data, &servers); err != nil {
+		return nil, fmt.Errorf("Client.MCPServerStatus: failed to parse servers response: %w", err)
+	}
+
+	return servers, nil
+}
+
+// ReconnectMCPServer reconnects a disconnected MCP server by name.
+func (c *Client) ReconnectMCPServer(ctx context.Context, serverName string) error {
+	if serverName == "" {
+		return fmt.Errorf("Client.ReconnectMCPServer: serverName: %w", types.ErrEmptyParameter)
+	}
+
+	c.mu.Lock()
+	if !c.connected {
+		c.mu.Unlock()
+		return types.NewCLIConnectionError("Client.ReconnectMCPServer: not connected - call Connect() first")
+	}
+	c.mu.Unlock()
+
+	req := map[string]interface{}{
+		"subtype":    "mcp_reconnect",
+		"serverName": serverName,
+	}
+	_, err := c.query.SendControlMessage(ctx, req)
+	if err != nil {
+		return fmt.Errorf("Client.ReconnectMCPServer: %w", err)
+	}
+	return nil
+}
+
+// ToggleMCPServer enables or disables an MCP server by name.
+func (c *Client) ToggleMCPServer(ctx context.Context, serverName string, enabled bool) error {
+	if serverName == "" {
+		return fmt.Errorf("Client.ToggleMCPServer: serverName: %w", types.ErrEmptyParameter)
+	}
+
+	c.mu.Lock()
+	if !c.connected {
+		c.mu.Unlock()
+		return types.NewCLIConnectionError("Client.ToggleMCPServer: not connected - call Connect() first")
+	}
+	c.mu.Unlock()
+
+	req := map[string]interface{}{
+		"subtype":    "mcp_toggle",
+		"serverName": serverName,
+		"enabled":    enabled,
+	}
+	_, err := c.query.SendControlMessage(ctx, req)
+	if err != nil {
+		return fmt.Errorf("Client.ToggleMCPServer: %w", err)
+	}
+	return nil
+}
+
+// SetMCPServers replaces the set of dynamically managed MCP servers.
+func (c *Client) SetMCPServers(ctx context.Context, servers map[string]interface{}) (*types.McpSetServersResult, error) {
+	if servers == nil {
+		return nil, fmt.Errorf("Client.SetMCPServers: servers: %w", types.ErrEmptyParameter)
+	}
+
+	c.mu.Lock()
+	if !c.connected {
+		c.mu.Unlock()
+		return nil, types.NewCLIConnectionError("Client.SetMCPServers: not connected - call Connect() first")
+	}
+	c.mu.Unlock()
+
+	req := map[string]interface{}{
+		"subtype": "mcp_set_servers",
+		"servers": servers,
+	}
+	resp, err := c.query.SendControlMessage(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("Client.SetMCPServers: %w", err)
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return nil, fmt.Errorf("Client.SetMCPServers: failed to marshal response: %w", err)
+	}
+
+	var result types.McpSetServersResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("Client.SetMCPServers: failed to parse response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// RewindFiles restores files to their state at a specific user message checkpoint.
+// Requires file checkpointing to be enabled.
+func (c *Client) RewindFiles(ctx context.Context, userMessageID string, dryRun bool) (*types.RewindFilesResult, error) {
+	if userMessageID == "" {
+		return nil, fmt.Errorf("Client.RewindFiles: userMessageID: %w", types.ErrEmptyParameter)
+	}
+
+	c.mu.Lock()
+	if !c.connected {
+		c.mu.Unlock()
+		return nil, types.NewCLIConnectionError("Client.RewindFiles: not connected - call Connect() first")
+	}
+	c.mu.Unlock()
+
+	req := map[string]interface{}{
+		"subtype":         "rewind_files",
+		"user_message_id": userMessageID,
+		"dry_run":         dryRun,
+	}
+	resp, err := c.query.SendControlMessage(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("Client.RewindFiles: %w", err)
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return nil, fmt.Errorf("Client.RewindFiles: failed to marshal response: %w", err)
+	}
+
+	var result types.RewindFilesResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("Client.RewindFiles: failed to parse response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// SupportedAgents returns the list of supported agent types from the init result.
+// Returns nil if Connect() has not been called or no agents were returned.
+func (c *Client) SupportedAgents() []types.AgentInfo {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.initResult == nil {
+		return nil
+	}
+	return c.initResult.Agents
+}
+
 // parseInitResult converts the raw initialize response map into a typed InitializeResult.
 func parseInitResult(raw map[string]interface{}) *types.InitializeResult {
 	if raw == nil {
@@ -660,6 +902,33 @@ func parseInitResult(raw map[string]interface{}) *types.InitializeResult {
 				}
 			}
 			result.Models = models
+		}
+	}
+
+	// Parse "agents" array: each element has "name", "description", optional "model".
+	if agentsRaw, ok := raw["agents"]; ok {
+		if agentsSlice, ok := agentsRaw.([]interface{}); ok {
+			agents := make([]types.AgentInfo, 0, len(agentsSlice))
+			for _, item := range agentsSlice {
+				m, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				agent := types.AgentInfo{}
+				if v, ok := m["name"].(string); ok {
+					agent.Name = v
+				}
+				if v, ok := m["description"].(string); ok {
+					agent.Description = v
+				}
+				if v, ok := m["model"].(string); ok {
+					agent.Model = v
+				}
+				if agent.Name != "" {
+					agents = append(agents, agent)
+				}
+			}
+			result.Agents = agents
 		}
 	}
 

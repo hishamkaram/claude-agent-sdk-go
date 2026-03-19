@@ -457,3 +457,15 @@ func IsValidationError(err error) bool {
 	var e *ValidationError
 	return errors.As(err, &e)
 }
+
+// Sentinel errors for client method validation.
+var (
+	// ErrNoActiveQuery indicates the client has no active query to interrupt or stream input to.
+	ErrNoActiveQuery = errors.New("no active query")
+
+	// ErrClientClosed indicates the client has been closed and cannot accept new operations.
+	ErrClientClosed = errors.New("client is closed")
+
+	// ErrEmptyParameter indicates a required parameter was empty.
+	ErrEmptyParameter = errors.New("required parameter is empty")
+)

@@ -388,6 +388,13 @@ type ModelInfo struct {
 	Description string `json:"description,omitempty"`
 }
 
+// AgentInfo describes a supported agent type from the initialization response.
+type AgentInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Model       string `json:"model,omitempty"`
+}
+
 // InitializeResult holds the parsed response from session initialization.
 // It contains available commands, models, and session metadata returned
 // by the Claude CLI control protocol initialize response.
@@ -396,8 +403,19 @@ type InitializeResult struct {
 	Commands []SlashCommand `json:"commands,omitempty"`
 	// Models is the list of models available in this session.
 	Models []ModelInfo `json:"models,omitempty"`
+	// Agents is the list of agent types available in this session.
+	Agents []AgentInfo `json:"agents,omitempty"`
 	// Raw holds the full untyped response for forward compatibility.
 	Raw map[string]interface{} `json:"-"`
+}
+
+// RewindFilesResult represents the result of a RewindFiles operation.
+type RewindFilesResult struct {
+	CanRewind    bool     `json:"canRewind"`
+	Error        string   `json:"error,omitempty"`
+	FilesChanged []string `json:"filesChanged,omitempty"`
+	Insertions   int      `json:"insertions,omitempty"`
+	Deletions    int      `json:"deletions,omitempty"`
 }
 
 // ResultMessage represents a result message with cost and usage information.

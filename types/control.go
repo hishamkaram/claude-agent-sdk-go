@@ -242,6 +242,43 @@ type SDKControlMcpMessageRequest struct {
 	Message    interface{} `json:"message"`
 }
 
+// SDKControlStopTaskRequest represents a request to stop a background task.
+type SDKControlStopTaskRequest struct {
+	Subtype string `json:"subtype"` // "stop_task"
+	TaskID  string `json:"task_id"`
+}
+
+// SDKControlRewindFilesRequest represents a request to rewind files to a checkpoint.
+type SDKControlRewindFilesRequest struct {
+	Subtype       string `json:"subtype"`         // "rewind_files"
+	UserMessageID string `json:"user_message_id"`
+	DryRun        bool   `json:"dry_run"`
+}
+
+// SDKControlMcpStatusRequest represents a request for MCP server status.
+type SDKControlMcpStatusRequest struct {
+	Subtype string `json:"subtype"` // "mcp_status"
+}
+
+// SDKControlMcpReconnectRequest represents a request to reconnect an MCP server.
+type SDKControlMcpReconnectRequest struct {
+	Subtype    string `json:"subtype"`    // "mcp_reconnect"
+	ServerName string `json:"serverName"`
+}
+
+// SDKControlMcpToggleRequest represents a request to toggle an MCP server.
+type SDKControlMcpToggleRequest struct {
+	Subtype    string `json:"subtype"`    // "mcp_toggle"
+	ServerName string `json:"serverName"`
+	Enabled    bool   `json:"enabled"`
+}
+
+// SDKControlMcpSetServersRequest represents a request to set MCP servers.
+type SDKControlMcpSetServersRequest struct {
+	Subtype string                 `json:"subtype"` // "mcp_set_servers"
+	Servers map[string]interface{} `json:"servers"`
+}
+
 // SDKControlRequest represents a control request from the CLI.
 type SDKControlRequest struct {
 	Type      string          `json:"type"` // "control_request"
