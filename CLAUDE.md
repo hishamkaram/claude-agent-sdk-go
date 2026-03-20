@@ -46,8 +46,9 @@ Use `%w` (not `%v`). Define sentinel errors with `errors.New()`. Check with `err
 
 | Mechanism | Options | Implementation |
 |-----------|---------|----------------|
-| CLI flags | `--effort`, `--fallback-model`, `--session-id`, `--no-session-persistence`, `--json-schema` | `buildCommandArgs()` in `internal/transport/subprocess_cli.go` |
-| Settings JSON (`--settings`) | Thinking, Sandbox, EnableFileCheckpointing | `buildSettingsJSON()` in `internal/transport/subprocess_cli.go` |
+| CLI flags | `--effort`, `--fallback-model`, `--session-id`, `--no-session-persistence`, `--json-schema`, `--resume-session-at`, `--tools`, `--debug-file`, `--strict-mcp-config` | `buildCommandArgs()` in `internal/transport/subprocess_cli.go` |
+| Settings JSON (`--settings`) | Thinking, Sandbox, EnableFileCheckpointing, ToolConfig | `buildSettingsJSON()` in `internal/transport/subprocess_cli.go` |
+| Transport hook | SpawnProcess (custom ProcessSpawner) | `connectWithCustomSpawner()` in `internal/transport/subprocess_cli.go` |
 | Init control protocol | PromptSuggestions, JsonSchema | `Initialize()` in `internal/query.go` |
 
 ### New Types (types/options.go)
@@ -58,6 +59,10 @@ Use `%w` (not `%v`). Define sentinel errors with `errors.New()`. Check with `err
 | `ThinkingConfig` | Thinking mode: `Type` (adaptive/enabled/disabled), `BudgetTokens` |
 | `OutputFormat` | Structured output: `Type` (json), `Schema`, `Name` |
 | `SandboxConfig` | Sandbox controls: `Network` (SandboxNetworkConfig), `Filesystem` (SandboxFilesystemConfig) |
+| `SpawnOptions` | Custom process spawner input: `Command`, `Args`, `CWD`, `Env` |
+| `SpawnedProcess` | Interface for custom-spawned process: `Stdin()`, `Stdout()`, `Stderr()`, `Kill()`, `Wait()`, `ExitCode()`, `Killed()` |
+| `ProcessSpawner` | Function type: `func(ctx, SpawnOptions) (SpawnedProcess, error)` — inject via `WithSpawnProcess()` |
+| `ToolConfig` | Built-in tool configuration: `Bash` (BashToolConfig), `Computer` (ComputerToolConfig) |
 
 ### Hook Events (types/control.go)
 

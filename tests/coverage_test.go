@@ -28,7 +28,7 @@ func TestCoverageReport(t *testing.T) {
 		_ = os.Remove(coverageFile)
 	}()
 
-	cmd := exec.Command("go", "test", "-coverprofile="+coverageFile, "./...")
+	cmd := exec.Command("go", "test", "-short", "-coverprofile="+coverageFile, "./...")
 	cmd.Dir = projectRoot
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -316,7 +316,7 @@ func TestCoverageHTML(t *testing.T) {
 	htmlFile := filepath.Join(projectRoot, "coverage.html")
 
 	// Generate coverage
-	cmd := exec.Command("go", "test", "-coverprofile="+coverageFile, "./...")
+	cmd := exec.Command("go", "test", "-short", "-coverprofile="+coverageFile, "./...")
 	cmd.Dir = projectRoot
 	if _, err := cmd.CombinedOutput(); err != nil {
 		// Don't fail, just log

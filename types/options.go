@@ -3,6 +3,7 @@ package types
 import (
 	"context"
 	"fmt"
+	"io"
 )
 
 // EffortLevel represents reasoning effort levels.
@@ -59,6 +60,56 @@ type SandboxFilesystemConfig struct {
 	DenyRead                  []string `json:"denyRead,omitempty"`
 	AllowRead                 []string `json:"allowRead,omitempty"`
 	AllowManagedReadPathsOnly *bool    `json:"allowManagedReadPathsOnly,omitempty"`
+}
+
+// SpawnOptions contains everything needed to start a Claude Code process.
+// It is passed to a ProcessSpawner to create a subprocess in custom environments
+// (Docker, VMs, remote SSH, etc.).
+type SpawnOptions struct {
+	Command string            `json:"command"`
+	Args    []string          `json:"args"`
+	CWD     string            `json:"cwd,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+}
+
+// SpawnedProcess abstracts a running Claude Code process.
+// Consumers implement this interface to support custom execution environments
+// (Docker, SSH, VMs, remote processes). The SDK uses this interface to
+// communicate with the process via stdin/stdout/stderr pipes.
+type SpawnedProcess interface {
+	Stdin() io.WriteCloser
+	Stdout() io.ReadCloser
+	Stderr() io.ReadCloser
+	Kill() error
+	Wait() error
+	ExitCode() int
+	Killed() bool
+}
+
+// ProcessSpawner creates a Claude Code process from spawn options.
+// It is the injection point for custom process creation. When set on
+// ClaudeAgentOptions.SpawnProcess, the SDK calls this function instead of
+// using the default exec.Command subprocess.
+type ProcessSpawner func(ctx context.Context, opts SpawnOptions) (SpawnedProcess, error)
+
+// ToolConfig configures built-in tool behavior.
+// Delivered via settings JSON with key "toolConfig".
+type ToolConfig struct {
+	Bash     *BashToolConfig     `json:"bash,omitempty"`
+	Computer *ComputerToolConfig `json:"computer,omitempty"`
+}
+
+// BashToolConfig configures bash tool behavior.
+type BashToolConfig struct {
+	Timeout *int    `json:"timeout,omitempty"` // Command timeout in milliseconds
+	Command *string `json:"command,omitempty"` // Shell command override
+}
+
+// ComputerToolConfig configures computer tool behavior.
+type ComputerToolConfig struct {
+	Display *int `json:"display,omitempty"` // Display number
+	Width   *int `json:"width,omitempty"`   // Screen width in pixels
+	Height  *int `json:"height,omitempty"`  // Screen height in pixels
 }
 
 // SettingSource represents where settings are loaded from.
@@ -128,13 +179,17 @@ type SystemPromptPreset struct {
 
 // AgentDefinition represents a custom agent definition.
 type AgentDefinition struct {
-	Description   string                 `json:"description"`
-	Prompt        string                 `json:"prompt"`
-	Tools         []string               `json:"tools,omitempty"`
-	Model         *string                `json:"model,omitempty"`          // "sonnet", "opus", "haiku", "inherit"
-	ExecutionMode *SubagentExecutionMode `json:"execution_mode,omitempty"` // How this agent executes relative to others
-	Timeout       *float64               `json:"timeout,omitempty"`        // Maximum seconds to wait for agent response
-	MaxTurns      *int                   `json:"max_turns,omitempty"`      // Maximum conversation turns for this agent
+	Description            string                 `json:"description"`
+	Prompt                 string                 `json:"prompt"`
+	Tools                  []string               `json:"tools,omitempty"`
+	DisallowedTools        []string               `json:"disallowed_tools,omitempty"`                       // Tools explicitly disallowed for this agent
+	Model                  *string                `json:"model,omitempty"`                                  // "sonnet", "opus", "haiku", "inherit"
+	ExecutionMode          *SubagentExecutionMode `json:"execution_mode,omitempty"`                         // How this agent executes relative to others
+	Timeout                *float64               `json:"timeout,omitempty"`                                // Maximum seconds to wait for agent response
+	MaxTurns               *int                   `json:"max_turns,omitempty"`                              // Maximum conversation turns for this agent
+	McpServers             []interface{}          `json:"mcp_servers,omitempty"`                             // MCP server specs (string refs or inline configs)
+	Skills                 []string               `json:"skills,omitempty"`                                 // Skill names to preload
+	CriticalSystemReminder *string                `json:"criticalSystemReminder_EXPERIMENTAL,omitempty"`     // Experimental critical system reminder
 }
 
 // PluginConfig represents a Claude Code plugin configuration.
@@ -314,6 +369,25 @@ type ClaudeAgentOptions struct {
 
 	// Prompt suggestions
 	PromptSuggestions bool `json:"prompt_suggestions,omitempty"` // → init control protocol
+
+	// Custom process spawner (not marshaled — consumer provides implementation)
+	SpawnProcess ProcessSpawner `json:"-"`
+
+	// Resume session at a specific message UUID
+	ResumeSessionAt *string `json:"resume_session_at,omitempty"` // → --resume-session-at CLI flag
+
+	// Built-in tool configuration (delivered via settings JSON)
+	ToolConfig *ToolConfig `json:"tool_config,omitempty"` // → settings JSON "toolConfig" key
+
+	// Tool loading preset — []string of tool names or preset struct → --tools CLI flag
+	// This is different from AllowedTools which auto-approves tools.
+	Tools interface{} `json:"tools,omitempty"`
+
+	// Debug file path — implicitly enables debug mode
+	DebugFile *string `json:"debug_file,omitempty"` // → --debug-file CLI flag
+
+	// Strict MCP config validation
+	StrictMcpConfig bool `json:"strict_mcp_config,omitempty"` // → --strict-mcp-config CLI flag
 
 	// Debug and diagnostics
 	Verbose bool `json:"-"` // Enable verbose debug logging
@@ -702,5 +776,46 @@ func (o *ClaudeAgentOptions) WithSessionID(id string) *ClaudeAgentOptions {
 // WithPromptSuggestions enables or disables prompt suggestions.
 func (o *ClaudeAgentOptions) WithPromptSuggestions(enabled bool) *ClaudeAgentOptions {
 	o.PromptSuggestions = enabled
+	return o
+}
+
+// WithSpawnProcess sets a custom process spawner for running Claude Code
+// in non-local environments (Docker, VMs, SSH, etc.).
+// When set, the SDK calls this function instead of exec.Command.
+func (o *ClaudeAgentOptions) WithSpawnProcess(spawner ProcessSpawner) *ClaudeAgentOptions {
+	o.SpawnProcess = spawner
+	return o
+}
+
+// WithResumeSessionAt sets the message UUID to resume a session at.
+// This allows branching from a specific point in the conversation.
+func (o *ClaudeAgentOptions) WithResumeSessionAt(messageID string) *ClaudeAgentOptions {
+	o.ResumeSessionAt = &messageID
+	return o
+}
+
+// WithToolConfig sets the built-in tool configuration (bash timeout, computer display, etc.).
+func (o *ClaudeAgentOptions) WithToolConfig(config ToolConfig) *ClaudeAgentOptions {
+	o.ToolConfig = &config
+	return o
+}
+
+// WithTools sets the tool loading preset.
+// Accepts []string of tool names or a preset struct (e.g., map[string]string{"type": "preset", "preset": "claude_code"}).
+// This is different from AllowedTools which auto-approves tools.
+func (o *ClaudeAgentOptions) WithTools(tools interface{}) *ClaudeAgentOptions {
+	o.Tools = tools
+	return o
+}
+
+// WithDebugFile sets the debug log file path. Implicitly enables debug mode.
+func (o *ClaudeAgentOptions) WithDebugFile(path string) *ClaudeAgentOptions {
+	o.DebugFile = &path
+	return o
+}
+
+// WithStrictMcpConfig enables or disables strict MCP configuration validation.
+func (o *ClaudeAgentOptions) WithStrictMcpConfig(strict bool) *ClaudeAgentOptions {
+	o.StrictMcpConfig = strict
 	return o
 }

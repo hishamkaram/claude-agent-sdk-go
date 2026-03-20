@@ -1,13 +1,24 @@
 package transport
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
+	"sync"
 	"testing"
+
+	"go.uber.org/goleak"
 
 	"github.com/hishamkaram/claude-agent-sdk-go/internal/log"
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 // newTestTransport creates a SubprocessCLITransport for unit tests without
 // actually starting a subprocess. This allows testing buildCommandArgs() and
@@ -790,6 +801,683 @@ func TestBuildCommandArgs_CombinedNewFlags(t *testing.T) {
 	sidVal, _ := flagValue(args, "--session-id")
 	if sidVal != "abc-123" {
 		t.Errorf("--session-id = %q, want %q", sidVal, "abc-123")
+	}
+}
+
+// ===== Phase D: US1 — Custom Process Spawner Transport Tests =====
+
+// TestBuildCommandArgs_ResumeSessionAt tests --resume-session-at flag generation.
+func TestBuildCommandArgs_ResumeSessionAt(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		msgID     *string
+		wantFlag  bool
+		wantValue string
+	}{
+		{
+			name:      "set",
+			msgID:     strPtr("msg-uuid-456"),
+			wantFlag:  true,
+			wantValue: "msg-uuid-456",
+		},
+		{
+			name:     "nil",
+			msgID:    nil,
+			wantFlag: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			opts := types.NewClaudeAgentOptions()
+			opts.ResumeSessionAt = tt.msgID
+			tr := newTestTransport(t, opts)
+			args := tr.buildCommandArgs()
+
+			if tt.wantFlag {
+				val, found := flagValue(args, "--resume-session-at")
+				if !found {
+					t.Error("expected --resume-session-at flag")
+				}
+				if val != tt.wantValue {
+					t.Errorf("--resume-session-at = %q, want %q", val, tt.wantValue)
+				}
+			} else {
+				if hasFlag(args, "--resume-session-at") {
+					t.Error("unexpected --resume-session-at flag")
+				}
+			}
+		})
+	}
+}
+
+// TestBuildCommandArgs_Tools tests --tools flag generation.
+func TestBuildCommandArgs_Tools(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		tools     interface{}
+		wantFlag  bool
+		wantValue string
+	}{
+		{
+			name:      "string slice",
+			tools:     []string{"Bash", "Read", "Write"},
+			wantFlag:  true,
+			wantValue: "Bash,Read,Write",
+		},
+		{
+			name:     "nil",
+			tools:    nil,
+			wantFlag: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			opts := types.NewClaudeAgentOptions()
+			opts.Tools = tt.tools
+			tr := newTestTransport(t, opts)
+			args := tr.buildCommandArgs()
+
+			if tt.wantFlag {
+				val, found := flagValue(args, "--tools")
+				if !found {
+					t.Error("expected --tools flag")
+				}
+				if val != tt.wantValue {
+					t.Errorf("--tools = %q, want %q", val, tt.wantValue)
+				}
+			} else {
+				if hasFlag(args, "--tools") {
+					t.Error("unexpected --tools flag")
+				}
+			}
+		})
+	}
+}
+
+// TestBuildCommandArgs_DebugFile tests --debug-file flag generation.
+func TestBuildCommandArgs_DebugFile(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		debugFile *string
+		wantFlag  bool
+		wantValue string
+	}{
+		{
+			name:      "set",
+			debugFile: strPtr("/tmp/debug.log"),
+			wantFlag:  true,
+			wantValue: "/tmp/debug.log",
+		},
+		{
+			name:     "nil",
+			debugFile: nil,
+			wantFlag: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			opts := types.NewClaudeAgentOptions()
+			opts.DebugFile = tt.debugFile
+			tr := newTestTransport(t, opts)
+			args := tr.buildCommandArgs()
+
+			if tt.wantFlag {
+				val, found := flagValue(args, "--debug-file")
+				if !found {
+					t.Error("expected --debug-file flag")
+				}
+				if val != tt.wantValue {
+					t.Errorf("--debug-file = %q, want %q", val, tt.wantValue)
+				}
+			} else {
+				if hasFlag(args, "--debug-file") {
+					t.Error("unexpected --debug-file flag")
+				}
+			}
+		})
+	}
+}
+
+// TestBuildCommandArgs_StrictMcpConfig tests --strict-mcp-config flag generation.
+func TestBuildCommandArgs_StrictMcpConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		strict   bool
+		wantFlag bool
+	}{
+		{
+			name:     "enabled",
+			strict:   true,
+			wantFlag: true,
+		},
+		{
+			name:     "disabled",
+			strict:   false,
+			wantFlag: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			opts := types.NewClaudeAgentOptions()
+			opts.StrictMcpConfig = tt.strict
+			tr := newTestTransport(t, opts)
+			args := tr.buildCommandArgs()
+
+			if tt.wantFlag != hasFlag(args, "--strict-mcp-config") {
+				if tt.wantFlag {
+					t.Error("expected --strict-mcp-config flag")
+				} else {
+					t.Error("unexpected --strict-mcp-config flag")
+				}
+			}
+		})
+	}
+}
+
+// TestBuildSettingsJSON_ToolConfig tests toolConfig in settings JSON.
+func TestBuildSettingsJSON_ToolConfig(t *testing.T) {
+	t.Parallel()
+
+	timeout := 30000
+	cmd := "/bin/bash"
+	display := 1
+
+	tests := []struct {
+		name       string
+		toolConfig *types.ToolConfig
+		wantKey    bool
+	}{
+		{
+			name: "full tool config",
+			toolConfig: &types.ToolConfig{
+				Bash:     &types.BashToolConfig{Timeout: &timeout, Command: &cmd},
+				Computer: &types.ComputerToolConfig{Display: &display},
+			},
+			wantKey: true,
+		},
+		{
+			name:       "nil tool config",
+			toolConfig: nil,
+			wantKey:    false,
+		},
+		{
+			name: "bash only",
+			toolConfig: &types.ToolConfig{
+				Bash: &types.BashToolConfig{Timeout: &timeout},
+			},
+			wantKey: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			opts := types.NewClaudeAgentOptions()
+			opts.ToolConfig = tt.toolConfig
+			tr := newTestTransport(t, opts)
+			settingsJSON := tr.buildSettingsJSON()
+
+			if tt.wantKey {
+				if settingsJSON == "" {
+					t.Fatal("expected non-empty settings JSON")
+				}
+				var settings map[string]interface{}
+				if err := json.Unmarshal([]byte(settingsJSON), &settings); err != nil {
+					t.Fatalf("Failed to parse settings JSON: %v", err)
+				}
+				if _, exists := settings["toolConfig"]; !exists {
+					t.Error("expected 'toolConfig' key in settings JSON")
+				}
+			} else {
+				if settingsJSON != "" {
+					var settings map[string]interface{}
+					if err := json.Unmarshal([]byte(settingsJSON), &settings); err == nil {
+						if _, exists := settings["toolConfig"]; exists {
+							t.Error("unexpected 'toolConfig' key in settings JSON")
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestBuildSettingsJSON_ToolConfig_NilSubStructs verifies nil sub-structs are omitted.
+func TestBuildSettingsJSON_ToolConfig_NilSubStructs(t *testing.T) {
+	t.Parallel()
+
+	opts := types.NewClaudeAgentOptions()
+	opts.ToolConfig = &types.ToolConfig{
+		Bash:     nil,
+		Computer: nil,
+	}
+	tr := newTestTransport(t, opts)
+	settingsJSON := tr.buildSettingsJSON()
+
+	if settingsJSON == "" {
+		t.Fatal("expected non-empty settings JSON")
+	}
+
+	var settings map[string]interface{}
+	if err := json.Unmarshal([]byte(settingsJSON), &settings); err != nil {
+		t.Fatalf("Failed to parse settings JSON: %v", err)
+	}
+
+	toolConfig, ok := settings["toolConfig"].(map[string]interface{})
+	if !ok {
+		t.Fatal("toolConfig should be a map")
+	}
+
+	if _, exists := toolConfig["bash"]; exists {
+		t.Error("nil Bash should not appear in JSON")
+	}
+	if _, exists := toolConfig["computer"]; exists {
+		t.Error("nil Computer should not appear in JSON")
+	}
+}
+
+// TestBuildCommandArgs_ToolsAlongsideAllowedTools verifies both are independent.
+func TestBuildCommandArgs_ToolsAlongsideAllowedTools(t *testing.T) {
+	t.Parallel()
+
+	opts := types.NewClaudeAgentOptions()
+	opts.AllowedTools = []string{"Bash"}
+	opts.Tools = []string{"Read", "Write"}
+	tr := newTestTransport(t, opts)
+	args := tr.buildCommandArgs()
+
+	// --tools should be present regardless of AllowedTools being set
+	toolsVal, toolsFound := flagValue(args, "--tools")
+	if !toolsFound {
+		t.Error("expected --tools flag")
+	}
+	if toolsVal != "Read,Write" {
+		t.Errorf("--tools = %q, want %q", toolsVal, "Read,Write")
+	}
+}
+
+// TestBuildCommandArgs_ResumeSessionAtWithoutResume verifies they work independently.
+func TestBuildCommandArgs_ResumeSessionAtWithoutResume(t *testing.T) {
+	t.Parallel()
+
+	opts := types.NewClaudeAgentOptions()
+	opts.ResumeSessionAt = strPtr("msg-uuid-789")
+	// Resume is nil — only ResumeSessionAt is set
+	tr := newTestTransport(t, opts)
+	args := tr.buildCommandArgs()
+
+	// ResumeSessionAt should be present
+	val, found := flagValue(args, "--resume-session-at")
+	if !found {
+		t.Error("expected --resume-session-at flag")
+	}
+	if val != "msg-uuid-789" {
+		t.Errorf("--resume-session-at = %q, want %q", val, "msg-uuid-789")
+	}
+
+	// --resume should NOT be present
+	if hasFlag(args, "--resume") {
+		t.Error("unexpected --resume flag when only ResumeSessionAt is set")
+	}
+}
+
+// TestBuildCommandArgs_AgentDefinitionNewFields verifies Phase D fields are serialized.
+func TestBuildCommandArgs_AgentDefinitionNewFields(t *testing.T) {
+	t.Parallel()
+
+	reminder := "critical reminder text"
+	opts := types.NewClaudeAgentOptions()
+	opts.Agents = map[string]types.AgentDefinition{
+		"test-agent": {
+			Description:            "test agent",
+			Prompt:                 "do stuff",
+			DisallowedTools:        []string{"Bash", "Write"},
+			McpServers:             []interface{}{"server1", map[string]interface{}{"name": "server2"}},
+			Skills:                 []string{"skill-a", "skill-b"},
+			CriticalSystemReminder: &reminder,
+		},
+	}
+	tr := newTestTransport(t, opts)
+	args := tr.buildCommandArgs()
+
+	agentsVal, found := flagValue(args, "--agents")
+	if !found {
+		t.Fatal("expected --agents flag")
+	}
+
+	var agentsMap map[string]map[string]interface{}
+	if err := json.Unmarshal([]byte(agentsVal), &agentsMap); err != nil {
+		t.Fatalf("failed to parse --agents JSON: %v", err)
+	}
+
+	agent, ok := agentsMap["test-agent"]
+	if !ok {
+		t.Fatal("test-agent not found in agents JSON")
+	}
+
+	// Verify new fields are present
+	if _, ok := agent["disallowed_tools"]; !ok {
+		t.Error("disallowed_tools missing from agent JSON")
+	}
+	if _, ok := agent["mcp_servers"]; !ok {
+		t.Error("mcp_servers missing from agent JSON")
+	}
+	if _, ok := agent["skills"]; !ok {
+		t.Error("skills missing from agent JSON")
+	}
+	if val, ok := agent["criticalSystemReminder_EXPERIMENTAL"]; !ok {
+		t.Error("criticalSystemReminder_EXPERIMENTAL missing from agent JSON")
+	} else if val != "critical reminder text" {
+		t.Errorf("criticalSystemReminder_EXPERIMENTAL = %v, want %q", val, "critical reminder text")
+	}
+}
+
+// ===== Phase D: Custom Spawner Integration Tests (T004-T, T005-T) =====
+
+// mockSpawnedProcess implements types.SpawnedProcess for testing.
+type mockSpawnedProcess struct {
+	mu       sync.Mutex
+	stdin    *mockWriteCloser
+	stdout   *io.PipeReader
+	stdoutW  *io.PipeWriter
+	stderr   *io.PipeReader
+	stderrW  *io.PipeWriter
+	killed   bool
+	exitCode int
+	waitErr  error
+	waitCh   chan struct{}
+}
+
+func newMockSpawnedProcess() *mockSpawnedProcess {
+	stdoutR, stdoutW := io.Pipe()
+	stderrR, stderrW := io.Pipe()
+	return &mockSpawnedProcess{
+		stdin:   &mockWriteCloser{buf: &bytes.Buffer{}},
+		stdout:  stdoutR,
+		stdoutW: stdoutW,
+		stderr:  stderrR,
+		stderrW: stderrW,
+		waitCh:  make(chan struct{}),
+	}
+}
+
+func (m *mockSpawnedProcess) Stdin() io.WriteCloser  { return m.stdin }
+func (m *mockSpawnedProcess) Stdout() io.ReadCloser   { return m.stdout }
+func (m *mockSpawnedProcess) Stderr() io.ReadCloser   { return m.stderr }
+
+func (m *mockSpawnedProcess) Kill() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.killed = true
+	// Close stdout/stderr to unblock readers
+	_ = m.stdoutW.Close()
+	_ = m.stderrW.Close()
+	// Signal Wait() to return
+	select {
+	case <-m.waitCh:
+	default:
+		close(m.waitCh)
+	}
+	return nil
+}
+
+func (m *mockSpawnedProcess) Wait() error {
+	<-m.waitCh
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.waitErr
+}
+
+func (m *mockSpawnedProcess) ExitCode() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.exitCode
+}
+
+func (m *mockSpawnedProcess) Killed() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.killed
+}
+
+type mockWriteCloser struct {
+	buf    *bytes.Buffer
+	closed bool
+}
+
+func (m *mockWriteCloser) Write(p []byte) (int, error) {
+	if m.closed {
+		return 0, errors.New("write to closed writer")
+	}
+	return m.buf.Write(p)
+}
+
+func (m *mockWriteCloser) Close() error {
+	m.closed = true
+	return nil
+}
+
+// TestConnectWithCustomSpawner verifies that Connect() uses the custom spawner
+// when SpawnProcess is set and that it receives correct SpawnOptions.
+func TestConnectWithCustomSpawner(t *testing.T) {
+	t.Parallel()
+
+	var receivedOpts types.SpawnOptions
+	var receivedCtx context.Context
+	mockProc := newMockSpawnedProcess()
+
+	spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+		receivedCtx = ctx
+		receivedOpts = opts
+		return mockProc, nil
+	})
+
+	opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
+	tr := NewSubprocessCLITransport("/usr/bin/claude", "/tmp/test", map[string]string{"MY_VAR": "my_val"}, log.NewLogger(true), "", opts)
+
+	ctx := context.Background()
+	err := tr.Connect(ctx)
+	if err != nil {
+		t.Fatalf("Connect() failed: %v", err)
+	}
+
+	// Verify spawner received correct options
+	if receivedOpts.Command != "/usr/bin/claude" {
+		t.Errorf("SpawnOptions.Command = %q, want %q", receivedOpts.Command, "/usr/bin/claude")
+	}
+	if receivedOpts.CWD != "/tmp/test" {
+		t.Errorf("SpawnOptions.CWD = %q, want %q", receivedOpts.CWD, "/tmp/test")
+	}
+	if receivedCtx == nil {
+		t.Error("spawner received nil context")
+	}
+	// Verify env vars contain both SDK vars and custom vars
+	if receivedOpts.Env["MY_VAR"] != "my_val" {
+		t.Error("custom env var not passed to spawner")
+	}
+	if receivedOpts.Env["CLAUDE_CODE_ENTRYPOINT"] != "agent" {
+		t.Errorf("CLAUDE_CODE_ENTRYPOINT = %q, want %q", receivedOpts.Env["CLAUDE_CODE_ENTRYPOINT"], "agent")
+	}
+
+	// Verify transport state
+	if tr.customProcess == nil {
+		t.Error("customProcess should be set after Connect()")
+	}
+	if tr.cmd != nil {
+		t.Error("cmd should be nil when using custom spawner")
+	}
+
+	// Cleanup
+	_ = mockProc.Kill()
+	ctx2, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = tr.Close(ctx2)
+}
+
+// TestConnectWithCustomSpawner_Error verifies Connect() propagates spawner errors.
+func TestConnectWithCustomSpawner_Error(t *testing.T) {
+	t.Parallel()
+
+	expectedErr := errors.New("spawner failed: VM not available")
+	spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+		return nil, expectedErr
+	})
+
+	opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
+	tr := NewSubprocessCLITransport("/usr/bin/claude", "", nil, log.NewLogger(true), "", opts)
+
+	err := tr.Connect(context.Background())
+	if err == nil {
+		t.Fatal("Connect() should have failed")
+	}
+	if !strings.Contains(err.Error(), "spawner failed") {
+		t.Errorf("error should contain spawner message, got: %v", err)
+	}
+}
+
+// TestConnectWithCustomSpawner_NilPipes verifies Connect() rejects a process with nil pipes.
+func TestConnectWithCustomSpawner_NilPipes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		process types.SpawnedProcess
+	}{
+		{
+			name: "nil stdin",
+			process: &mockSpawnedProcessNilPipe{nilStdin: true},
+		},
+		{
+			name: "nil stdout",
+			process: &mockSpawnedProcessNilPipe{nilStdout: true},
+		},
+		{
+			name: "nil stderr",
+			process: &mockSpawnedProcessNilPipe{nilStderr: true},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+				return tt.process, nil
+			})
+
+			opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
+			tr := NewSubprocessCLITransport("/usr/bin/claude", "", nil, log.NewLogger(true), "", opts)
+
+			err := tr.Connect(context.Background())
+			if err == nil {
+				t.Fatal("Connect() should fail with nil pipe")
+			}
+			if !strings.Contains(err.Error(), "nil") {
+				t.Errorf("error should mention nil pipe, got: %v", err)
+			}
+		})
+	}
+}
+
+// mockSpawnedProcessNilPipe returns nil for specified pipes.
+type mockSpawnedProcessNilPipe struct {
+	nilStdin  bool
+	nilStdout bool
+	nilStderr bool
+}
+
+func (m *mockSpawnedProcessNilPipe) Stdin() io.WriteCloser {
+	if m.nilStdin {
+		return nil
+	}
+	return &mockWriteCloser{buf: &bytes.Buffer{}}
+}
+func (m *mockSpawnedProcessNilPipe) Stdout() io.ReadCloser {
+	if m.nilStdout {
+		return nil
+	}
+	r, _ := io.Pipe()
+	return r
+}
+func (m *mockSpawnedProcessNilPipe) Stderr() io.ReadCloser {
+	if m.nilStderr {
+		return nil
+	}
+	r, _ := io.Pipe()
+	return r
+}
+func (m *mockSpawnedProcessNilPipe) Kill() error    { return nil }
+func (m *mockSpawnedProcessNilPipe) Wait() error    { return nil }
+func (m *mockSpawnedProcessNilPipe) ExitCode() int  { return 0 }
+func (m *mockSpawnedProcessNilPipe) Killed() bool   { return false }
+
+// TestCloseCustomProcess verifies Close() calls Wait() on custom process.
+func TestCloseCustomProcess(t *testing.T) {
+	t.Parallel()
+
+	mockProc := newMockSpawnedProcess()
+	tr := NewSubprocessCLITransport("/usr/bin/claude", "", nil, log.NewLogger(true), "", nil)
+
+	// Manually set transport state as if connectWithCustomSpawner ran
+	tr.customProcess = mockProc
+	tr.stdin = mockProc.Stdin()
+	tr.stdout = mockProc.Stdout()
+	tr.stderr = mockProc.Stderr()
+	tr.ready = true
+	ctx, cancel := context.WithCancel(context.Background())
+	tr.ctx = ctx
+	tr.cancel = cancel
+
+	// Simulate process exiting cleanly after stdin is closed
+	go func() {
+		select {
+		case <-mockProc.waitCh:
+		default:
+			close(mockProc.waitCh)
+		}
+	}()
+
+	err := tr.Close(context.Background())
+	if err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+
+	if tr.customProcess != nil {
+		t.Error("customProcess should be nil after Close()")
+	}
+}
+
+// TestCloseCustomProcess_NotConnected verifies Close() is a no-op when not connected.
+func TestCloseCustomProcess_NotConnected(t *testing.T) {
+	t.Parallel()
+
+	tr := NewSubprocessCLITransport("/usr/bin/claude", "", nil, log.NewLogger(true), "", nil)
+
+	err := tr.Close(context.Background())
+	if err != nil {
+		t.Fatalf("Close() should succeed when not connected, got: %v", err)
 	}
 }
 

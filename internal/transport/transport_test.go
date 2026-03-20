@@ -281,10 +281,9 @@ func TestJSONLineWriter(t *testing.T) {
 
 // TestSubprocessCLITransportConnect tests subprocess connection
 func TestSubprocessCLITransportConnect(t *testing.T) {
-	// Skip if no echo command available
-	echoPath, err := FindMockCLI()
+	echoPath, err := FindMockCLI(t)
 	if err != nil {
-		t.Skip("No echo command available for testing")
+		t.Skip("No mock CLI available for testing")
 	}
 
 	logger := log.NewLogger(false) // Non-verbose for tests
@@ -311,10 +310,9 @@ func TestSubprocessCLITransportConnect(t *testing.T) {
 
 // TestSubprocessCLITransportWrite tests writing to subprocess
 func TestSubprocessCLITransportWrite(t *testing.T) {
-	// Use cat command as a simple echo subprocess
-	catPath, err := FindMockCLI()
+	catPath, err := FindMockCLI(t)
 	if err != nil {
-		t.Skip("No cat command available for testing")
+		t.Skip("No mock CLI available for testing")
 	}
 
 	logger := log.NewLogger(false) // Non-verbose for tests
@@ -340,9 +338,9 @@ func TestSubprocessCLITransportWrite(t *testing.T) {
 
 // TestSubprocessCLITransportClose tests subprocess cleanup
 func TestSubprocessCLITransportClose(t *testing.T) {
-	echoPath, err := FindMockCLI()
+	echoPath, err := FindMockCLI(t)
 	if err != nil {
-		t.Skip("No echo command available for testing")
+		t.Skip("No mock CLI available for testing")
 	}
 
 	logger := log.NewLogger(false) // Non-verbose for tests
@@ -426,9 +424,9 @@ func TestMessageReaderLoop(t *testing.T) {
 
 // TestSubprocessEnvironment tests environment variable setup
 func TestSubprocessEnvironment(t *testing.T) {
-	echoPath, err := FindMockCLI()
+	echoPath, err := FindMockCLI(t)
 	if err != nil {
-		t.Skip("No echo command available for testing")
+		t.Skip("No mock CLI available for testing")
 	}
 
 	env := map[string]string{
@@ -456,19 +454,20 @@ func TestSubprocessEnvironment(t *testing.T) {
 	}
 }
 
-// FindMockCLI finds a command suitable for testing (cat, echo, etc.)
-func FindMockCLI() (string, error) {
-	// Try to find cat command (available on Unix systems)
-	if path, err := exec.LookPath("cat"); err == nil {
-		return path, nil
+// FindMockCLI creates a mock CLI script for testing. The transport always passes
+// flags like --input-format=stream-json to the subprocess, which real commands
+// (e.g. cat, echo) don't understand and exit on. This wrapper ignores all args
+// and reads from stdin via exec cat, matching the expected transport behavior.
+func FindMockCLI(t *testing.T) (string, error) {
+	t.Helper()
+	if _, err := exec.LookPath("sh"); err != nil {
+		return "", types.NewCLINotFoundError("sh not found")
 	}
-
-	// Try echo as fallback
-	if path, err := exec.LookPath("echo"); err == nil {
-		return path, nil
+	scriptPath := filepath.Join(t.TempDir(), "mock-claude")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nexec cat\n"), 0755); err != nil {
+		return "", types.NewCLINotFoundError("failed to create mock CLI: " + err.Error())
 	}
-
-	return "", types.NewCLINotFoundError("no suitable test command found (cat or echo)")
+	return scriptPath, nil
 }
 
 // BenchmarkJSONLineReader benchmarks JSON line reading performance

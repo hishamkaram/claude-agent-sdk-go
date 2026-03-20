@@ -29,10 +29,11 @@ type SubprocessCLITransport struct {
 	resumeSessionID string                    // Optional session ID to resume conversation
 	options         *types.ClaudeAgentOptions // Options for CLI configuration
 
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout io.ReadCloser
-	stderr io.ReadCloser
+	cmd            *exec.Cmd
+	customProcess  types.SpawnedProcess // Non-nil when using custom spawner
+	stdin          io.WriteCloser
+	stdout         io.ReadCloser
+	stderr         io.ReadCloser
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -74,7 +75,7 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if t.cmd != nil {
+	if t.cmd != nil || t.customProcess != nil {
 		return nil // Already connected
 	}
 
@@ -89,6 +90,68 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) error {
 	// Log the full command for debugging
 	t.logger.Debug("Claude CLI command: %s %v", t.cliPath, args)
 
+	// Build environment variables map
+	envMap := t.buildEnvMap()
+
+	// Check if a custom process spawner is provided
+	if t.options != nil && t.options.SpawnProcess != nil {
+		return t.connectWithCustomSpawner(ctx, args, envMap)
+	}
+
+	return t.connectWithExecCommand(args, envMap)
+}
+
+// connectWithCustomSpawner uses the user-provided ProcessSpawner to create the process.
+func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, args []string, envMap map[string]string) error {
+	spawnOpts := types.SpawnOptions{
+		Command: t.cliPath,
+		Args:    args,
+		CWD:     t.cwd,
+		Env:     envMap,
+	}
+
+	process, err := t.options.SpawnProcess(ctx, spawnOpts)
+	if err != nil {
+		t.logger.Error("Custom process spawner failed: %v", err)
+		return types.NewCLIConnectionErrorWithCause("custom process spawner failed", err)
+	}
+
+	// Validate the spawned process provides required pipes
+	if process.Stdin() == nil {
+		return types.NewCLIConnectionError("custom spawner returned nil stdin")
+	}
+	if process.Stdout() == nil {
+		return types.NewCLIConnectionError("custom spawner returned nil stdout")
+	}
+	if process.Stderr() == nil {
+		return types.NewCLIConnectionError("custom spawner returned nil stderr")
+	}
+
+	t.customProcess = process
+	t.stdin = process.Stdin()
+	t.stdout = process.Stdout()
+	t.stderr = process.Stderr()
+
+	t.logger.Debug("Custom-spawned process connected successfully")
+
+	// Create JSON line writer for stdin
+	t.writer = NewJSONLineWriter(t.stdin)
+
+	// Launch message reader loop in goroutine
+	go t.messageReaderLoop(t.ctx)
+
+	// Launch stderr reader for debugging
+	go t.readStderr(t.ctx)
+
+	// Mark as ready
+	t.ready = true
+	t.logger.Debug("Transport ready for communication")
+
+	return nil
+}
+
+// connectWithExecCommand uses the default exec.Command to create the process.
+func (t *SubprocessCLITransport) connectWithExecCommand(args []string, envMap map[string]string) error {
 	// Create command with arguments
 	t.cmd = exec.CommandContext(t.ctx, t.cliPath, args...)
 
@@ -98,35 +161,9 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) error {
 	}
 
 	// Set up environment variables
-	// Start with current environment
 	t.cmd.Env = os.Environ()
-
-	// Add SDK-specific variables
-	t.cmd.Env = append(t.cmd.Env, "CLAUDE_CODE_ENTRYPOINT=agent")
-	t.cmd.Env = append(t.cmd.Env, fmt.Sprintf("CLAUDE_AGENT_SDK_VERSION=%s", SDKVersion))
-
-	// Add model environment variable if specified in options (ANTHROPIC_MODEL)
-	// This is critical - both CLI flag and env var should be set for maximum compatibility
-	if t.options != nil && t.options.Model != nil {
-		t.cmd.Env = append(t.cmd.Env, fmt.Sprintf("ANTHROPIC_MODEL=%s", *t.options.Model))
-		t.logger.Debug("Setting ANTHROPIC_MODEL environment variable: %s", *t.options.Model)
-	} else {
-		t.logger.Debug("ANTHROPIC_MODEL not set (using CLI default)")
-	}
-
-	// Add base URL environment variable if specified in options (ANTHROPIC_BASE_URL)
-	// If not set, Claude CLI will use default Anthropic API endpoint
-	if t.options != nil && t.options.BaseURL != nil {
-		t.cmd.Env = append(t.cmd.Env, fmt.Sprintf("ANTHROPIC_BASE_URL=%s", *t.options.BaseURL))
-		t.logger.Debug("Setting ANTHROPIC_BASE_URL environment variable: %s", *t.options.BaseURL)
-	} else {
-		t.logger.Debug("ANTHROPIC_BASE_URL not set (using default Anthropic API)")
-	}
-
-	// Add custom environment variables (these can override the above if needed)
-	for key, value := range t.env {
+	for key, value := range envMap {
 		t.cmd.Env = append(t.cmd.Env, fmt.Sprintf("%s=%s", key, value))
-		t.logger.Debug("Setting custom environment variable: %s=%s", key, value)
 	}
 
 	// Set up pipes
@@ -168,6 +205,35 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) error {
 	t.logger.Debug("Transport ready for communication")
 
 	return nil
+}
+
+// buildEnvMap constructs the environment variable map for the subprocess.
+func (t *SubprocessCLITransport) buildEnvMap() map[string]string {
+	envMap := make(map[string]string)
+
+	// SDK-specific variables
+	envMap["CLAUDE_CODE_ENTRYPOINT"] = "agent"
+	envMap["CLAUDE_AGENT_SDK_VERSION"] = SDKVersion
+
+	// Model environment variable
+	if t.options != nil && t.options.Model != nil {
+		envMap["ANTHROPIC_MODEL"] = *t.options.Model
+		t.logger.Debug("Setting ANTHROPIC_MODEL environment variable: %s", *t.options.Model)
+	}
+
+	// Base URL environment variable
+	if t.options != nil && t.options.BaseURL != nil {
+		envMap["ANTHROPIC_BASE_URL"] = *t.options.BaseURL
+		t.logger.Debug("Setting ANTHROPIC_BASE_URL environment variable: %s", *t.options.BaseURL)
+	}
+
+	// Custom environment variables (can override the above)
+	for key, value := range t.env {
+		envMap[key] = value
+		t.logger.Debug("Setting custom environment variable: %s", key)
+	}
+
+	return envMap
 }
 
 // messageReaderLoop reads JSON lines from stdout and parses them into messages.
@@ -419,6 +485,18 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 			if agent.MaxTurns != nil {
 				agentMap["max_turns"] = *agent.MaxTurns
 			}
+			if len(agent.DisallowedTools) > 0 {
+				agentMap["disallowed_tools"] = agent.DisallowedTools
+			}
+			if len(agent.McpServers) > 0 {
+				agentMap["mcp_servers"] = agent.McpServers
+			}
+			if len(agent.Skills) > 0 {
+				agentMap["skills"] = agent.Skills
+			}
+			if agent.CriticalSystemReminder != nil {
+				agentMap["criticalSystemReminder_EXPERIMENTAL"] = *agent.CriticalSystemReminder
+			}
 
 			agentsJSON[name] = agentMap
 		}
@@ -501,6 +579,44 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		}
 	}
 
+	// Add --resume-session-at flag
+	if t.options != nil && t.options.ResumeSessionAt != nil {
+		args = append(args, "--resume-session-at", *t.options.ResumeSessionAt)
+		t.logger.Debug("Setting resume session at: %s", *t.options.ResumeSessionAt)
+	}
+
+	// Add --tools flag ([]string joined by comma, or JSON for preset)
+	if t.options != nil && t.options.Tools != nil {
+		switch v := t.options.Tools.(type) {
+		case []string:
+			if len(v) > 0 {
+				args = append(args, "--tools", joinStrings(v, ","))
+				t.logger.Debug("Setting tools: %v", v)
+			}
+		default:
+			// Serialize non-string-slice values as JSON (e.g., preset objects)
+			toolsJSON, err := json.Marshal(v)
+			if err != nil {
+				t.logger.Warning("Failed to marshal tools to JSON: %v", err)
+			} else {
+				args = append(args, "--tools", string(toolsJSON))
+				t.logger.Debug("Setting tools (JSON): %s", string(toolsJSON))
+			}
+		}
+	}
+
+	// Add --debug-file flag
+	if t.options != nil && t.options.DebugFile != nil {
+		args = append(args, "--debug-file", *t.options.DebugFile)
+		t.logger.Debug("Setting debug file: %s", *t.options.DebugFile)
+	}
+
+	// Add --strict-mcp-config flag
+	if t.options != nil && t.options.StrictMcpConfig {
+		args = append(args, "--strict-mcp-config")
+		t.logger.Debug("Enabling strict MCP config")
+	}
+
 	return args
 }
 
@@ -523,8 +639,9 @@ func (t *SubprocessCLITransport) buildSettingsJSON() string {
 	hasThinking := t.options.Thinking != nil
 	hasSandbox := t.options.Sandbox != nil
 	hasCheckpointing := t.options.EnableFileCheckpointing
+	hasToolConfig := t.options.ToolConfig != nil
 
-	if !hasThinking && !hasSandbox && !hasCheckpointing && t.options.Settings == nil {
+	if !hasThinking && !hasSandbox && !hasCheckpointing && !hasToolConfig && t.options.Settings == nil {
 		return ""
 	}
 
@@ -537,7 +654,7 @@ func (t *SubprocessCLITransport) buildSettingsJSON() string {
 	}
 
 	// If no typed fields are set, just return the original settings string
-	if !hasThinking && !hasSandbox && !hasCheckpointing {
+	if !hasThinking && !hasSandbox && !hasCheckpointing && !hasToolConfig {
 		if t.options.Settings != nil {
 			return *t.options.Settings
 		}
@@ -553,6 +670,9 @@ func (t *SubprocessCLITransport) buildSettingsJSON() string {
 	}
 	if hasCheckpointing {
 		settings["enableFileCheckpointing"] = true
+	}
+	if hasToolConfig {
+		settings["toolConfig"] = t.options.ToolConfig
 	}
 
 	result, err := json.Marshal(settings)
@@ -572,7 +692,7 @@ func (t *SubprocessCLITransport) Close(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if t.cmd == nil {
+	if t.cmd == nil && t.customProcess == nil {
 		return nil // Not connected
 	}
 
@@ -580,15 +700,59 @@ func (t *SubprocessCLITransport) Close(ctx context.Context) error {
 	t.ready = false
 
 	// 1. Close stdin FIRST — signals subprocess to exit gracefully.
-	//    This must happen before cancelling the transport context, because
-	//    exec.CommandContext sends SIGKILL on context cancel, preventing
-	//    a clean exit.
 	if t.stdin != nil {
 		_ = t.stdin.Close()
 		t.stdin = nil
 	}
 
 	// 2. Wait for process to exit.
+	if t.customProcess != nil {
+		return t.closeCustomProcess(ctx)
+	}
+	return t.closeExecCommand(ctx)
+}
+
+// closeCustomProcess handles cleanup for a custom-spawned process.
+func (t *SubprocessCLITransport) closeCustomProcess(ctx context.Context) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- t.customProcess.Wait()
+	}()
+
+	var waitErr error
+	select {
+	case <-ctx.Done():
+		// Caller's timeout expired — force kill.
+		_ = t.customProcess.Kill()
+		if t.cancel != nil {
+			t.cancel()
+			t.cancel = nil
+		}
+		<-done
+		t.customProcess = nil
+		return types.NewProcessError("subprocess did not exit gracefully, killed")
+
+	case waitErr = <-done:
+		if t.cancel != nil {
+			t.cancel()
+			t.cancel = nil
+		}
+	}
+
+	exitCode := t.customProcess.ExitCode()
+	t.customProcess = nil
+
+	if waitErr != nil {
+		return types.NewProcessErrorWithCode(
+			"subprocess exited with error",
+			exitCode,
+		)
+	}
+	return nil
+}
+
+// closeExecCommand handles cleanup for exec.Command-spawned process.
+func (t *SubprocessCLITransport) closeExecCommand(ctx context.Context) error {
 	done := make(chan error, 1)
 	go func() {
 		done <- t.cmd.Wait()
