@@ -1,8 +1,52 @@
 <!-- Last updated: 2026-03-22. If you change the project setup, commands, or architecture — update this file in the same PR. -->
 
+> Part of [**AgentD**](../README.md) — remote control for AI coding agents with E2E encryption and mobile approval gates.
+
 # Claude Agent SDK for Go
 
+[![Go 1.24](https://img.shields.io/badge/Go-1.24-00add8?logo=go&logoColor=white)](https://go.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Go SDK for the Claude Code CLI subprocess protocol — spawns Claude Code as a child process, communicates via JSON lines, and provides a typed Go API for queries, multi-turn conversations, and tool use hooks.
+
+## Why this component?
+
+The SDK handles the messy details of communicating with Claude Code — subprocess management, JSON line parsing, and typed message streaming — so the daemon can focus on session orchestration. Without it, every consumer of Claude Code would need to reimplement process lifecycle management, the streaming control protocol, and the 23-event hook system from scratch.
+
+## Feature highlights
+
+| Feature | Value |
+|---------|-------|
+| **Typed Go API** | Work with `Message`, `ContentBlock`, and `HookEvent` structs instead of parsing raw JSON. The compiler catches protocol mismatches before runtime. |
+| **23 hook event callbacks** | Intercept tool use, permission requests, session lifecycle, notifications, and more — all with strongly-typed input/output structs and a consistent callback pattern. |
+| **One-shot and interactive modes** | `Query()` for fire-and-forget prompts that return a channel of messages. `Client` for multi-turn conversations with session persistence, resume, and fork. |
+| **Zero external runtime deps** | Only `golang.org/x/net` at build time. No CGO, no gRPC, no framework overhead. The binary your daemon ships is self-contained. |
+
+## Architecture
+
+```
+                         AgentD System
+  +------------------------------------------------------------------+
+  |                                                                    |
+  |   Developer Machine               Cloud                Phone      |
+  |  +------------------+     +------------------+  +--------------+  |
+  |  |                  |     |                  |  |              |  |
+  |  |  Claude Code     |     |   agentd-relay   |  |  agentd-web  |  |
+  |  |       |          |     |   (dumb pipe)    |  |    (PWA)     |  |
+  |  | *claude-agent-*  |     |                  |  |              |  |
+  |  | *sdk-go*         |     +--------+---------+  +------+-------+  |
+  |  |       |          |              |                   |          |
+  |  |   agentd         +----- wss ---+---- wss ----------+          |
+  |  |   (daemon)       |     E2E encrypted relay channel             |
+  |  |       |          |                                             |
+  |  |       +--- ws ---+------------------------------------ [PWA]  |
+  |  |                  |     Direct local connection (LAN)           |
+  |  +------------------+                                             |
+  |                                                                    |
+  +------------------------------------------------------------------+
+```
+
+The SDK sits at the bottom of the stack on the developer's machine. It spawns Claude Code as a subprocess, translates the JSON line protocol into typed Go channels, and exposes a clean API that the agentd daemon consumes for session management.
 
 ## What it does
 
@@ -119,6 +163,10 @@ claude-agent-sdk-go/
 - `make test` runs in `-short` mode (no Claude CLI needed); `make test-all` spawns real Claude processes and requires authentication
 - The module path is `github.com/hishamkaram/claude-agent-sdk-go` — the existing README references an old upstream path that is incorrect
 - `v0.2.0` is retracted in go.mod — do not use that version
+
+## Contributing
+
+See the [Contributing Guide](../CONTRIBUTING.md) in the workspace root for development setup, coding standards, and submission process.
 
 ## License
 
