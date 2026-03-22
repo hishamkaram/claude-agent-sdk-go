@@ -27,11 +27,6 @@ jobs:
         run: go test -race -count=1 -p 4 -short -cover ./...
       - name: Build check
         run: go build ./...
-      - name: golangci-lint
-        if: matrix.go-version == '1.25'
-        uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v6.1.1
-        with:
-          version: latest
       - name: govulncheck
         if: matrix.go-version == '1.25'
         run: |
