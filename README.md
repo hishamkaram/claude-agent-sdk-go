@@ -119,3 +119,7 @@ claude-agent-sdk-go/
 - `make test` runs in `-short` mode (no Claude CLI needed); `make test-all` spawns real Claude processes and requires authentication
 - The module path is `github.com/hishamkaram/claude-agent-sdk-go` — the existing README references an old upstream path that is incorrect
 - `v0.2.0` is retracted in go.mod — do not use that version
+
+## License
+
+[MIT](LICENSE)
