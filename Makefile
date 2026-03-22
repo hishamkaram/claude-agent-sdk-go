@@ -1,4 +1,4 @@
-.PHONY: help build test test-all test-integration bench fmt lint clean coverage
+.PHONY: help build test test-all test-integration bench fmt lint clean coverage hooks
 
 help:
 	@echo "Claude Agent SDK for Go - Development Tasks"
@@ -71,5 +71,9 @@ examples:
 		fi; \
 	done
 	@echo "Examples built"
+
+hooks:
+	@which lefthook > /dev/null 2>&1 || go install github.com/evilmartians/lefthook@latest
+	lefthook install
 
 .DEFAULT_GOAL := help
