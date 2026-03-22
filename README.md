@@ -1,592 +1,121 @@
+<!-- Last updated: 2026-03-22. If you change the project setup, commands, or architecture — update this file in the same PR. -->
+
 # Claude Agent SDK for Go
 
-[![Tests](https://github.com/schlunsen/claude-agent-sdk-go/workflows/Tests/badge.svg)](https://github.com/schlunsen/claude-agent-sdk-go/actions)
-[![Go Version](https://img.shields.io/badge/Go-1.24%2B-00ADD8?logo=go)](https://golang.org/dl/)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/schlunsen/claude-agent-sdk-go)](https://github.com/schlunsen/claude-agent-sdk-go/releases/latest)
-[![Go Report Card](https://goreportcard.com/badge/github.com/schlunsen/claude-agent-sdk-go)](https://goreportcard.com/report/github.com/schlunsen/claude-agent-sdk-go)
+Go SDK for the Claude Code CLI subprocess protocol — spawns Claude Code as a child process, communicates via JSON lines, and provides a typed Go API for queries, multi-turn conversations, and tool use hooks.
 
-**Unofficial community port** of the [official Python SDK](https://github.com/anthropics/claude-agent-sdk-python)
+## What it does
 
-⚠️ This is **not affiliated with or endorsed by Anthropic**. Use at your own risk.
+- Spawns Claude Code CLI as a subprocess with `--agent --stdio` flags
+- Streams typed messages (assistant output, tool use, errors, hooks) via channels
+- Supports one-shot queries (`Query()`) and interactive multi-turn sessions (`Client`)
+- Provides 23 hook event callbacks for intercepting tool use, permissions, and lifecycle events
+- Handles MCP (Model Context Protocol) server configuration and tool routing
 
-A Go SDK for building multi-turn AI agent applications with Claude via the Claude Code CLI. Build agentic workflows, interact with tools, manage permissions, and stream responses with full control over execution.
+## Tech stack
 
-## Features
+- Go 1.24
+- Zero external runtime dependencies (only `golang.org/x/net` for internal transport)
+- Claude Code CLI (spawned as subprocess — must be installed separately)
 
-- 🚀 **One-shot queries** - Simple `Query()` function for single interactions
-- 🔄 **Interactive sessions** - Bidirectional control protocol with `Client` for complex workflows
-- 🛠️ **Tool integration** - Permission callbacks and tool use controls
-- 🎣 **Hook system** - Respond to lifecycle events (PreToolUse, PostToolUse, etc.)
-- 📡 **MCP support** - Model Context Protocol servers (external and SDK-based) + **[NEW] Factory function** for simplified server creation (Issue #24)
-- ⚡ **Streaming** - Full message streaming with partial outputs
-- 🎯 **Idiomatic Go** - Uses goroutines, channels, and context for natural concurrency
-- 📦 **Zero dependencies** - Core SDK uses only Go stdlib (except test examples)
+## Prerequisites
 
-### Comparison with Python SDK
+- Go 1.24+
+- Claude Code CLI installed: `npm install -g @anthropic-ai/claude-code`
+- Authentication (one required):
+  - `CLAUDE_API_KEY` environment variable (pay-as-you-go)
+  - `CLAUDE_CODE_OAUTH_TOKEN` environment variable (Max subscription)
 
-Coming from Python? We have comprehensive guides:
-- **[📊 Feature Parity Guide](docs/FEATURE_PARITY.md)** - See what's implemented and how it compares
-- **[🏗️ Architecture Differences](docs/ARCHITECTURE.md)** - Understand async/await vs goroutines
-- **[🔄 Migration Guide](docs/MIGRATION_FROM_PYTHON.md)** - Python → Go code examples
-- **[📝 Side-by-side examples](docs/examples/python_vs_go/)** - Compare implementations
-
-## Status
-
-✅ **Production Ready - v0.1.0 Released**
-
-- [x] Phase 1: Foundation & Types (100%)
-- [x] Phase 2: Transport Layer (100%)
-- [x] Phase 3: Message Parsing (100%)
-- [x] Phase 4: Control Protocol (100%)
-- [x] Phase 5: Public API (100%)
-- [x] Phase 6: Testing & Validation (100%)
-- [x] Phase 7: Documentation & Examples (100%)
-- [x] Phase 8: Polish & Release (100%)
-
-**Code Statistics:**
-- Production code: ~9,800 lines
-- Test code: ~2,100 lines
-- Examples: 4 working demonstrations
-- Test coverage: 60%+ across all packages
-- CI/CD: GitHub Actions (Go 1.24, 1.25)
-
-## Quick Start
-
-### Installation
+## Getting started
 
 ```bash
-go get github.com/schlunsen/claude-agent-sdk-go
-```
-
-### Basic Usage
-
-#### One-Shot Query
-
-```go
-package main
-
-import (
-	"context"
-	"fmt"
-
-	sdk "github.com/schlunsen/claude-agent-sdk-go"
-)
-
-func main() {
-	ctx := context.Background()
-
-	// Simple query
-	messages, err := sdk.Query(ctx, "What is 2 + 2?", nil)
-	if err != nil {
-		panic(err)
-	}
-
-	for msg := range messages {
-		fmt.Println(msg)
-	}
-}
-```
-
-#### Interactive Client
-
-```go
-package main
-
-import (
-	"context"
-	"fmt"
-
-	sdk "github.com/schlunsen/claude-agent-sdk-go"
-)
-
-func main() {
-	ctx := context.Background()
-
-	options := sdk.NewClaudeAgentOptions().
-		WithModel("claude-opus-4-20250514").
-		WithAllowedTools("Bash", "Write", "Read")
-
-	client, err := sdk.NewClient(options)
-	if err != nil {
-		panic(err)
-	}
-
-	// Connect and start session
-	if err := client.Connect(ctx); err != nil {
-		panic(err)
-	}
-	defer client.Close(ctx)
-
-	// Send query
-	if err := client.Query(ctx, "List the files in the current directory"); err != nil {
-		panic(err)
-	}
-
-	// Receive streaming responses
-	for msg := range client.ReceiveResponse(ctx) {
-		fmt.Println(msg)
-	}
-}
-```
-
-#### With Permission Callbacks
-
-```go
-package main
-
-import (
-	"context"
-	"fmt"
-
-	sdk "github.com/schlunsen/claude-agent-sdk-go"
-)
-
-func main() {
-	ctx := context.Background()
-
-	options := sdk.NewClaudeAgentOptions().
-		WithModel("claude-opus-4-20250514").
-		WithAllowedTools("Bash", "Write").
-		WithPermissionCallback(func(ctx context.Context, toolName string, input interface{}) (bool, error) {
-			// Approve or deny tool usage
-			fmt.Printf("Tool %s requested. Allow? (y/n): ", toolName)
-			// ... prompt user or implement custom logic
-			return true, nil
-		})
-
-	// Use with client or query
-	messages, err := sdk.Query(ctx, "Delete all files in /tmp", options)
-	if err != nil {
-		panic(err)
-	}
-
-	for msg := range messages {
-		fmt.Println(msg)
-	}
-}
-```
-
-## Requirements
-
-- **Go 1.24+**
-- **Claude Code CLI** installed globally:
-  ```bash
-  npm install -g @anthropic-ai/claude-code
-  ```
-- **Authentication** (choose one method):
-  - **API Key** (Pay-as-you-go): Set `CLAUDE_API_KEY` environment variable
-  - **OAuth Token** (Max subscription): Set `CLAUDE_CODE_OAUTH_TOKEN` environment variable
-
-## Authentication
-
-The SDK supports two authentication methods depending on your Anthropic subscription plan:
-
-### Method 1: API Key (Pay-as-you-go Plans)
-
-For standard API usage with pay-as-you-go billing:
-
-```bash
-export CLAUDE_API_KEY=your-api-key-here
-```
-
-Get your API key from the [Anthropic Console](https://console.anthropic.com/).
-
-### Method 2: OAuth Token (Max Subscription Plans)
-
-For Anthropic Max subscription plans that include Claude Code:
-
-1. **Setup OAuth token** with Claude Code CLI:
-   ```bash
-   claude setup-token
-   ```
-   This will open a browser window to authenticate and generate your OAuth token.
-
-2. **Export the token** to your environment:
-   ```bash
-   export CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token-here
-   ```
-
-3. **Use the SDK** - The Claude Code CLI will automatically use the OAuth token when available.
-
-**Note**: OAuth tokens are tied to your Max subscription and provide access to Claude Code features. API keys are for direct API access with usage-based billing.
-
-## Architecture
-
-The SDK is organized into logical layers:
-
-```
-User Application
-    ↓
-Public API (Query, Client)
-    ↓
-Internal Orchestration
-    ↓
-Query (Control Protocol)
-    ↓
-Message Parser
-    ↓
-Transport (Abstract)
-    ↓
-SubprocessCLITransport
-    ↓
-Claude Code CLI (Node.js)
-```
-
-### Key Layers
-
-- **Transport**: Manages subprocess communication and JSON lines protocol
-- **Query**: Implements bidirectional control protocol (permissions, hooks, MCP)
-- **Message Parser**: Converts JSON to Go types
-- **Public API**: User-facing `Query()` function and `Client` type
-
-## API Reference
-
-### Query Function (One-Shot)
-
-```go
-func Query(
-	ctx context.Context,
-	prompt string,
-	options *ClaudeAgentOptions,
-) (<-chan Message, error)
-```
-
-Executes a single query and streams responses as a channel of `Message`.
-
-**Example:**
-```go
-messages, err := Query(ctx, "What's the weather?", nil)
-for msg := range messages {
-	// Process each message
-}
-```
-
-### Client Type (Interactive)
-
-```go
-type Client interface {
-	Connect(ctx context.Context) error
-	Query(ctx context.Context, prompt string) error
-	ReceiveResponse(ctx context.Context) <-chan Message
-	Close(ctx context.Context) error
-}
-```
-
-**Lifecycle:**
-1. `Connect()` - Establish session
-2. `Query()` - Send prompt (repeatable)
-3. `ReceiveResponse()` - Get streaming responses
-4. `Close()` - Cleanup
-
-### Options Builder
-
-```go
-options := NewClaudeAgentOptions().
-	WithModel("claude-opus-4-20250514").
-	WithAllowedTools("Bash", "Write", "Read").
-	WithSystemPrompt("You are a helpful assistant.").
-	WithPermissionCallback(func(ctx context.Context, tool string, input interface{}) (bool, error) {
-		// Custom permission logic
-		return true, nil
-	}).
-	WithHook("PreToolUse", func(ctx context.Context, event interface{}) (HookDecision, error) {
-		// Pre-tool-use hook
-		return HookAllow, nil
-	})
-```
-
-### Message Types
-
-All responses from Claude are `Message` types:
-
-```go
-type Message interface {
-	Type() string
-	// UserMessage, AssistantMessage, SystemMessage, ResultMessage, etc.
-}
-```
-
-**Message Content:**
-```go
-type ContentBlock interface {
-	// TextBlock, ToolUseBlock, ToolResultBlock, etc.
-}
-```
-
-## Control Protocol
-
-The SDK uses a bidirectional control protocol to handle:
-
-### 1. Tool Permissions
-
-When Claude attempts to use a tool, the SDK can intercept and make a decision:
-
-```go
-WithPermissionCallback(func(ctx context.Context, toolName string, input interface{}) (bool, error) {
-	if toolName == "Bash" && isRiskyCommand(input) {
-		return false, nil  // Deny
-	}
-	return true, nil  // Allow
-})
-```
-
-### 2. Hooks
-
-Respond to lifecycle events:
-
-```go
-WithHook("PreToolUse", func(ctx context.Context, event interface{}) (HookDecision, error) {
-	// Called before each tool use
-	// Return: HookAllow, HookDeny, or HookBlock
-	return HookAllow, nil
-})
-
-WithHook("PostToolUse", func(ctx context.Context, event interface{}) (HookDecision, error) {
-	// Called after tool completes
-	return HookAllow, nil
-})
-```
-
-### 3. MCP Servers
-
-Define custom tools via SDK MCP servers:
-
-```go
-// TODO: Implement custom MCP server support
-```
-
-## Debugging and Stderr Logging
-
-The SDK provides flexible options for capturing and logging stderr output from the Claude CLI subprocess.
-
-### SDK-Managed File Logging (Simple)
-
-For basic use cases, enable automatic file logging with SDK-managed file handling:
-
-```go
-// Use default location: ~/.claude/agents_server/cli_stderr.log
-opts := NewClaudeAgentOptions().
-	WithDefaultStderrLogFile()
-
-// Or use custom path
-opts := NewClaudeAgentOptions().
-	WithCustomStderrLogFile("/tmp/claude-stderr.log")
-```
-
-The SDK will:
-- Create parent directories if they don't exist
-- Log all stderr output with timestamps
-- Provide helpful error messages if logging fails
-- Continue execution even if file logging fails
-
-### Runtime Control with Stderr Callback (Advanced)
-
-For runtime control over what gets logged, use the `Stderr` callback:
-
-```go
-type App struct {
-	enableLogging atomic.Bool
-	logFile       *os.File
+# Install the SDK
+go get github.com/hishamkaram/claude-agent-sdk-go
+
+# One-shot query
+import claude "github.com/hishamkaram/claude-agent-sdk-go"
+
+msgs := claude.Query(ctx, "Explain this Go code", claude.NewClaudeAgentOptions())
+for msg := range msgs {
+    // Process streamed messages
 }
 
-func (app *App) setup() {
-	opts := NewClaudeAgentOptions().
-		WithStderr(func(line string) {
-			// Full runtime control over stderr handling
-			if app.enableLogging.Load() {
-				fmt.Fprintf(app.logFile, "[stderr] %s\n", line)
-			}
-
-			// Can also filter, transform, or send to monitoring
-			if strings.Contains(line, "ERROR") {
-				app.sendAlert(line)
-			}
-		})
-}
-
-// Toggle logging at runtime
-func (app *App) EnableLogging()  { app.enableLogging.Store(true) }
-func (app *App) DisableLogging() { app.enableLogging.Store(false) }
+# Interactive client
+client, _ := claude.NewClient(ctx, claude.NewClaudeAgentOptions())
+defer client.Close()
+client.Connect()
+response := client.Query(ctx, "What files are in this directory?")
 ```
 
-### Combined Approach
+## Project structure
 
-You can use both SDK-managed file logging AND a custom callback:
-
-```go
-opts := NewClaudeAgentOptions().
-	WithDefaultStderrLogFile().  // SDK logs to file
-	WithStderr(func(line string) {
-		// Your custom logic (monitoring, filtering, etc.)
-		if strings.Contains(line, "CRITICAL") {
-			alert.Send(line)
-		}
-	})
+```
+claude-agent-sdk-go/
+├── query.go                # Query() — one-shot prompt → channel of messages
+├── client.go               # Client — multi-turn interactive sessions
+├── sessions.go             # Session management
+├── types/                  # Public types (all exported)
+│   ├── messages.go         # Message types, content blocks (text, tool_use, thinking, etc.)
+│   ├── control.go          # 23 hook event types, hook callbacks, permission results
+│   ├── options.go          # ClaudeAgentOptions builder (With* methods)
+│   ├── errors.go           # Typed errors with predicate functions
+│   ├── mcp.go              # MCP server config and tool types
+│   ├── mcp_types.go        # MCP type definitions
+│   └── session_types.go    # Session-related types
+├── internal/
+│   ├── transport/          # Subprocess CLI transport, CLI discovery, stream reader
+│   │   ├── subprocess_cli.go  # Spawns Claude CLI, manages stdin/stdout pipes
+│   │   ├── cli_version.go     # CLI version detection and validation
+│   │   ├── cli_discovery.go   # CLI binary discovery
+│   │   ├── stream.go          # JSON line reader with configurable buffer
+│   │   └── transport.go       # Transport interface
+│   ├── message_parser.go  # JSON to Go type conversion
+│   ├── query.go            # Control protocol handler
+│   └── log/                # Internal logging utilities
+├── examples/               # Working examples
+│   ├── simple_query/       # Basic one-shot query
+│   ├── interactive_client/ # Multi-turn conversation
+│   ├── with_permissions/   # Tool permission callbacks
+│   ├── with_hooks/         # Hook event handling
+│   ├── with_plugins/       # Plugin system example
+│   ├── with_betas/         # Beta features example
+│   ├── plugins/            # Plugin definitions
+│   └── mcp_server_simple/  # MCP server example
+├── Makefile                # build, test, test-all, lint, coverage
+├── VERSION                 # 0.5.1
+└── go.mod
 ```
 
-**Benefits:**
-- **Simple things simple**: Just enable file logging for basic debugging
-- **Complex things possible**: Use callbacks for filtering, monitoring, alerts
-- **Non-intrusive**: Disabled by default, no files created unless requested
-- **Helpful errors**: Clear messages if directory creation or file opening fails
+## Available commands
 
-## Environment Variables
+| Command | Description |
+|---------|-------------|
+| `make build` | Build all packages |
+| `make test` | Run unit tests (skips integration — no Claude CLI needed) |
+| `make test-all` | Run all tests including integration (requires Claude CLI) |
+| `make test-integration` | Run integration tests only |
+| `make coverage` | Unit tests with coverage report |
+| `make lint` | Run `go vet` + golangci-lint |
+| `make fmt` | Format all Go files |
 
-| Variable | Purpose |
-|----------|---------|
-| `CLAUDE_API_KEY` | Claude API key for pay-as-you-go plans (choose one auth method) |
-| `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token for Max subscription plans (choose one auth method) |
-| `CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK` | Skip CLI version validation (dev only) |
-| Custom variables | Passed to CLI process via `WithEnv()` |
+## Environment variables
 
-**Authentication**: Set either `CLAUDE_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, not both. See [Authentication](#authentication) section for details.
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `CLAUDE_API_KEY` | One of these | Anthropic API key (pay-as-you-go) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | required | OAuth token (Max subscription) |
+| `CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK` | Optional | Skip Claude CLI version validation |
 
-**Note:** For stderr logging, use the options-based approach (`WithDefaultStderrLogFile()` or `WithStderr()`) instead of environment variables. See [Debugging and Stderr Logging](#debugging-and-stderr-logging).
+## How it connects to the rest of the workspace
 
-## Error Handling
+- **agentd** — The daemon imports this SDK via `go get` with a workspace `replace` directive pointing to `../claude-agent-sdk-go`. Used in `agentd/internal/agents/claudecode.go` to spawn and manage Claude Code sessions.
+- **agentd-relay** — No relationship. The SDK communicates locally with the Claude CLI subprocess.
+- **agentd-web** — No relationship. The PWA communicates with the daemon, not the SDK.
 
-The SDK provides typed errors for better handling:
+## Known limitations / gotchas
 
-```go
-import "errors"
-import "github.com/schlunsen/claude-agent-sdk-go/types"
-
-messages, err := Query(ctx, "...", nil)
-if err != nil {
-	switch {
-	case types.IsCLINotFoundError(err):
-		fmt.Println("Claude Code CLI not installed")
-	case types.IsCLIConnectionError(err):
-		fmt.Println("Failed to connect to CLI")
-	default:
-		fmt.Printf("Error: %v\n", err)
-	}
-}
-```
-
-## Comparison with Python SDK
-
-| Feature | Python | Go |
-|---------|--------|-----|
-| One-shot queries | ✅ | ✅ |
-| Interactive client | ✅ | ✅ |
-| Tool permissions | ✅ | ✅ |
-| Hook system | ✅ | ✅ |
-| MCP servers | ✅ | ✅ |
-| Streaming | ✅ | ✅ |
-| CLI discovery | ✅ | ✅ |
-| Error types | ✅ | ✅ |
-
-**Key Differences:**
-- **Concurrency**: Go uses channels + goroutines instead of async/await
-- **Context**: All operations require explicit `context.Context`
-- **Builder pattern**: Go uses fluent API for options (vs Python's dataclass)
-- **Message iteration**: Channels instead of async generators
-
-## Examples
-
-See `examples/` directory for complete, runnable examples:
-
-- **`examples/simple_query/main.go`** - Basic one-shot query
-  ```bash
-  cd examples/simple_query && go run main.go
-  ```
-
-- **`examples/interactive_client/main.go`** - Multi-turn conversation with prompt
-  ```bash
-  cd examples/interactive_client && go run main.go
-  ```
-
-- **`examples/with_permissions/main.go`** - Tool permission callbacks for safety
-  ```bash
-  cd examples/with_permissions && go run main.go
-  ```
-
-- **`examples/with_hooks/main.go`** - Hook lifecycle events (PreToolUse, PostToolUse)
-  ```bash
-  cd examples/with_hooks && go run main.go
-  ```
-
-## Development
-
-### Prerequisites
-
-```bash
-go 1.24+
-```
-
-### Build
-
-```bash
-make build
-```
-
-### Run Tests
-
-```bash
-# Run unit tests only (recommended for development)
-make test
-
-# Run ALL tests including integration tests (spawns Claude processes)
-make test-all
-
-# Run only integration tests (requires CLAUDE_API_KEY)
-make test-integration
-```
-
-**Note:** By default, `make test` runs in short mode and skips integration tests to avoid spawning Claude CLI processes. Use `make test-all` only when you explicitly want to test against the real Claude CLI.
-
-### Lint & Format
-
-```bash
-make lint
-make fmt
-```
-
-## Known Limitations
-
-- No automatic CLI version updates
-- Limited Windows support
-- No gRPC transport alternative
-
-## Contributing
-
-Contributions welcome! Please note this is an unofficial port. If you find issues or want to contribute:
-
-1. Fork the repo
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a PR
-
-## License
-
-This project is licensed under the same license as the [official Python SDK](https://github.com/anthropics/claude-agent-sdk-python). See `LICENSE` file.
-
-## Disclaimer
-
-⚠️ **This is an unofficial community port** and is not affiliated with Anthropic. Use at your own risk.
-
-- Always review code before granting tool permissions
-- Be cautious with sensitive operations (file deletion, network access, etc.)
-- Test thoroughly in development environments first
-- The Go port may have different behavior than the Python SDK
-
-## Support
-
-For issues with:
-
-- **This Go SDK**: Open an issue on [GitHub](https://github.com/schlunsen/claude-agent-sdk-go/issues)
-- **Claude Code CLI**: See [official docs](https://claude.com)
-- **Claude API**: Contact [Anthropic support](https://support.anthropic.com)
-
-## Resources
-
-- [Official Python SDK](https://github.com/anthropics/claude-agent-sdk-python)
-- [Claude Code Documentation](https://claude.com/docs)
-- [Claude API Documentation](https://docs.anthropic.com)
-
----
-
-**Status**: ✅ Production Ready - v0.1.0 | **Go Version**: 1.24+ | **Last Updated**: October 2025
+- The SDK spawns Claude Code as a subprocess — it does not make direct API calls to Anthropic
+- Requires Claude Code CLI v2.0.0+ (checked at connect time, skip with `CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK=1`)
+- `make test` runs in `-short` mode (no Claude CLI needed); `make test-all` spawns real Claude processes and requires authentication
+- The module path is `github.com/hishamkaram/claude-agent-sdk-go` — the existing README references an old upstream path that is incorrect
+- `v0.2.0` is retracted in go.mod — do not use that version
