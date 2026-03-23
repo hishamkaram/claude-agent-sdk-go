@@ -1,11 +1,17 @@
 <!-- Last updated: 2026-03-22. If you change the project setup, commands, or architecture — update this file in the same PR. -->
 
-> Part of [**AgentD**](../README.md) — remote control for AI coding agents with E2E encryption and mobile approval gates.
+<div align="center">
+
+<img src="docs/assets/logo.jpg" alt="AgentD" width="160" />
 
 # Claude Agent SDK for Go
 
 [![Go 1.24](https://img.shields.io/badge/Go-1.24-00add8?logo=go&logoColor=white)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+> Part of [**AgentD**](https://github.com/hishamkaram/agentd-workspace) — remote control for AI coding agents with E2E encryption and mobile approval gates.
+
+</div>
 
 Go SDK for the Claude Code CLI subprocess protocol — spawns Claude Code as a child process, communicates via JSON lines, and provides a typed Go API for queries, multi-turn conversations, and tool use hooks.
 
