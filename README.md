@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<img src="docs/assets/logo.jpg" alt="AgentD" width="160" />
+<img src="docs/assets/logo.png" alt="AgentD" width="150" />
 
 # Claude Agent SDK for Go
 
