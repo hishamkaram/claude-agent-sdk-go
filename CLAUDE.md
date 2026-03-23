@@ -4,7 +4,7 @@
 
 Go SDK for the Claude Code CLI subprocess protocol — handles subprocess transport, streaming message parsing, and control protocol (tool use, approval gates).
 
-**Module**: `github.com/hishamkaram/claude-agent-sdk-go` | **Go**: 1.24+ | **License**: MIT
+**Module**: `github.com/hishamkaram/claude-agent-sdk-go` | **Go**: 1.25.8+ | **License**: MIT
 
 ## Build & Test
 
