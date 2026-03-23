@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Go SDK for the Claude Code CLI subprocess protocol — handles subprocess transport, streaming message parsing, and control protocol (tool use, approval gates). Consumed exclusively by `agentd/internal/agents/claudecode.go`.
+Go SDK for the Claude Code CLI subprocess protocol — handles subprocess transport, streaming message parsing, and control protocol (tool use, approval gates).
 
 **Module**: `github.com/hishamkaram/claude-agent-sdk-go` | **Go**: 1.24+ | **License**: MIT
 
@@ -70,19 +70,6 @@ Use `%w` (not `%v`). Define sentinel errors with `errors.New()`. Check with `err
 
 New events: `PostToolUseFailure`, `Notification`, `SessionStart`, `SessionEnd`, `StopFailure`, `SubagentStart`, `PostCompact`, `PermissionRequest`, `Setup`, `TeammateIdle`, `TaskCompleted`, `Elicitation`, `ElicitationResult`, `ConfigChange`, `WorktreeCreate`, `WorktreeRemove`, `InstructionsLoaded`
 
-## Used By
-
-`agentd/internal/agents/claudecode.go` imports:
-```go
-import (
-    claude "github.com/hishamkaram/claude-agent-sdk-go"
-    "github.com/hishamkaram/claude-agent-sdk-go/types"
-)
-```
-
-Upgrade in agentd: `cd agentd && go get github.com/hishamkaram/claude-agent-sdk-go@<tag> && go mod tidy`
-
 ## Full Specification
 
-See `AGENTD_PLAN.md` in the workspace root for interfaces, wire formats, phase plans, and architecture decisions.
 See `.claude/rules/go-source.md`, `go-tests.md`, `error-handling.md`, `logging.md` for full coding standard rules.

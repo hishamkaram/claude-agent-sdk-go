@@ -1,23 +1,13 @@
-<!-- Last updated: 2026-03-22. If you change the project setup, commands, or architecture — update this file in the same PR. -->
-
-<div align="center">
-
-<img src="docs/assets/logo.png" alt="AgentD" width="150" />
-
 # Claude Agent SDK for Go
 
 [![Go 1.24](https://img.shields.io/badge/Go-1.24-00add8?logo=go&logoColor=white)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> Part of [**AgentD**](https://github.com/hishamkaram/agentd-workspace) — remote control for AI coding agents with E2E encryption and mobile approval gates.
-
-</div>
-
 Go SDK for the Claude Code CLI subprocess protocol — spawns Claude Code as a child process, communicates via JSON lines, and provides a typed Go API for queries, multi-turn conversations, and tool use hooks.
 
-## Why this component?
+## Why this SDK?
 
-The SDK handles the messy details of communicating with Claude Code — subprocess management, JSON line parsing, and typed message streaming — so the daemon can focus on session orchestration. Without it, every consumer of Claude Code would need to reimplement process lifecycle management, the streaming control protocol, and the 23-event hook system from scratch.
+Claude Code exposes a powerful subprocess protocol over JSON lines, but consuming it directly means parsing raw JSON, managing subprocess lifecycle, handling streaming, and implementing the 23-event hook system from scratch. This SDK handles all of that and exposes a clean, typed Go API.
 
 ## Feature highlights
 
@@ -26,47 +16,7 @@ The SDK handles the messy details of communicating with Claude Code — subproce
 | **Typed Go API** | Work with `Message`, `ContentBlock`, and `HookEvent` structs instead of parsing raw JSON. The compiler catches protocol mismatches before runtime. |
 | **23 hook event callbacks** | Intercept tool use, permission requests, session lifecycle, notifications, and more — all with strongly-typed input/output structs and a consistent callback pattern. |
 | **One-shot and interactive modes** | `Query()` for fire-and-forget prompts that return a channel of messages. `Client` for multi-turn conversations with session persistence, resume, and fork. |
-| **Zero external runtime deps** | Only `golang.org/x/net` at build time. No CGO, no gRPC, no framework overhead. The binary your daemon ships is self-contained. |
-
-## Architecture
-
-```
-                         AgentD System
-  +------------------------------------------------------------------+
-  |                                                                    |
-  |   Developer Machine               Cloud                Phone      |
-  |  +------------------+     +------------------+  +--------------+  |
-  |  |                  |     |                  |  |              |  |
-  |  |  Claude Code     |     |   agentd-relay   |  |  agentd-web  |  |
-  |  |       |          |     |   (dumb pipe)    |  |    (PWA)     |  |
-  |  | *claude-agent-*  |     |                  |  |              |  |
-  |  | *sdk-go*         |     +--------+---------+  +------+-------+  |
-  |  |       |          |              |                   |          |
-  |  |   agentd         +----- wss ---+---- wss ----------+          |
-  |  |   (daemon)       |     E2E encrypted relay channel             |
-  |  |       |          |                                             |
-  |  |       +--- ws ---+------------------------------------ [PWA]  |
-  |  |                  |     Direct local connection (LAN)           |
-  |  +------------------+                                             |
-  |                                                                    |
-  +------------------------------------------------------------------+
-```
-
-The SDK sits at the bottom of the stack on the developer's machine. It spawns Claude Code as a subprocess, translates the JSON line protocol into typed Go channels, and exposes a clean API that the agentd daemon consumes for session management.
-
-## What it does
-
-- Spawns Claude Code CLI as a subprocess with `--agent --stdio` flags
-- Streams typed messages (assistant output, tool use, errors, hooks) via channels
-- Supports one-shot queries (`Query()`) and interactive multi-turn sessions (`Client`)
-- Provides 23 hook event callbacks for intercepting tool use, permissions, and lifecycle events
-- Handles MCP (Model Context Protocol) server configuration and tool routing
-
-## Tech stack
-
-- Go 1.24
-- Zero external runtime dependencies (only `golang.org/x/net` for internal transport)
-- Claude Code CLI (spawned as subprocess — must be installed separately)
+| **Zero external runtime deps** | Only `golang.org/x/net` at build time. No CGO, no gRPC, no framework overhead. |
 
 ## Prerequisites
 
@@ -79,23 +29,55 @@ The SDK sits at the bottom of the stack on the developer's machine. It spawns Cl
 ## Getting started
 
 ```bash
-# Install the SDK
 go get github.com/hishamkaram/claude-agent-sdk-go
+```
 
-# One-shot query
+### One-shot query
+
+```go
 import claude "github.com/hishamkaram/claude-agent-sdk-go"
 
 msgs := claude.Query(ctx, "Explain this Go code", claude.NewClaudeAgentOptions())
 for msg := range msgs {
-    // Process streamed messages
+    fmt.Println(msg)
+}
+```
+
+### Interactive multi-turn session
+
+```go
+client, err := claude.NewClient(ctx, claude.NewClaudeAgentOptions())
+if err != nil {
+    log.Fatal(err)
+}
+defer client.Close()
+
+if err := client.Connect(); err != nil {
+    log.Fatal(err)
 }
 
-# Interactive client
-client, _ := claude.NewClient(ctx, claude.NewClaudeAgentOptions())
-defer client.Close()
-client.Connect()
 response := client.Query(ctx, "What files are in this directory?")
 ```
+
+### Hook event interception
+
+```go
+opts := claude.NewClaudeAgentOptions().
+    WithPermissionRequestHandler(func(ctx context.Context, e types.PermissionRequestInput) types.PermissionRequestResult {
+        // inspect e.ToolName, e.ToolInput — allow or deny
+        return types.PermissionRequestResult{Behavior: types.PermissionAllow}
+    })
+
+client, _ := claude.NewClient(ctx, opts)
+```
+
+## What it does
+
+- Spawns Claude Code CLI as a subprocess with `--agent --stdio` flags
+- Streams typed messages (assistant output, tool use, errors, hooks) via channels
+- Supports one-shot queries (`Query()`) and interactive multi-turn sessions (`Client`)
+- Provides 23 hook event callbacks for intercepting tool use, permissions, and lifecycle events
+- Handles MCP (Model Context Protocol) server configuration and tool routing
 
 ## Project structure
 
@@ -119,7 +101,7 @@ claude-agent-sdk-go/
 │   │   ├── cli_discovery.go   # CLI binary discovery
 │   │   ├── stream.go          # JSON line reader with configurable buffer
 │   │   └── transport.go       # Transport interface
-│   ├── message_parser.go  # JSON to Go type conversion
+│   ├── message_parser.go   # JSON to Go type conversion
 │   ├── query.go            # Control protocol handler
 │   └── log/                # Internal logging utilities
 ├── examples/               # Working examples
@@ -156,23 +138,16 @@ claude-agent-sdk-go/
 | `CLAUDE_CODE_OAUTH_TOKEN` | required | OAuth token (Max subscription) |
 | `CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK` | Optional | Skip Claude CLI version validation |
 
-## How it connects to the rest of the workspace
-
-- **agentd** — The daemon imports this SDK via `go get` with a workspace `replace` directive pointing to `../claude-agent-sdk-go`. Used in `agentd/internal/agents/claudecode.go` to spawn and manage Claude Code sessions.
-- **agentd-relay** — No relationship. The SDK communicates locally with the Claude CLI subprocess.
-- **agentd-web** — No relationship. The PWA communicates with the daemon, not the SDK.
-
-## Known limitations / gotchas
+## Known limitations
 
 - The SDK spawns Claude Code as a subprocess — it does not make direct API calls to Anthropic
 - Requires Claude Code CLI v2.0.0+ (checked at connect time, skip with `CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK=1`)
 - `make test` runs in `-short` mode (no Claude CLI needed); `make test-all` spawns real Claude processes and requires authentication
-- The module path is `github.com/hishamkaram/claude-agent-sdk-go` — the existing README references an old upstream path that is incorrect
 - `v0.2.0` is retracted in go.mod — do not use that version
 
 ## Contributing
 
-See the [Contributing Guide](../CONTRIBUTING.md) in the workspace root for development setup, coding standards, and submission process.
+Issues and pull requests welcome. Run `make test` before submitting — no Claude CLI required for the unit test suite.
 
 ## License
 
