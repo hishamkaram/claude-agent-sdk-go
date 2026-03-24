@@ -182,14 +182,14 @@ type AgentDefinition struct {
 	Description            string                 `json:"description"`
 	Prompt                 string                 `json:"prompt"`
 	Tools                  []string               `json:"tools,omitempty"`
-	DisallowedTools        []string               `json:"disallowed_tools,omitempty"`                       // Tools explicitly disallowed for this agent
-	Model                  *string                `json:"model,omitempty"`                                  // "sonnet", "opus", "haiku", "inherit"
-	ExecutionMode          *SubagentExecutionMode `json:"execution_mode,omitempty"`                         // How this agent executes relative to others
-	Timeout                *float64               `json:"timeout,omitempty"`                                // Maximum seconds to wait for agent response
-	MaxTurns               *int                   `json:"max_turns,omitempty"`                              // Maximum conversation turns for this agent
-	McpServers             []interface{}          `json:"mcp_servers,omitempty"`                             // MCP server specs (string refs or inline configs)
-	Skills                 []string               `json:"skills,omitempty"`                                 // Skill names to preload
-	CriticalSystemReminder *string                `json:"criticalSystemReminder_EXPERIMENTAL,omitempty"`     // Experimental critical system reminder
+	DisallowedTools        []string               `json:"disallowed_tools,omitempty"`                    // Tools explicitly disallowed for this agent
+	Model                  *string                `json:"model,omitempty"`                               // "sonnet", "opus", "haiku", "inherit"
+	ExecutionMode          *SubagentExecutionMode `json:"execution_mode,omitempty"`                      // How this agent executes relative to others
+	Timeout                *float64               `json:"timeout,omitempty"`                             // Maximum seconds to wait for agent response
+	MaxTurns               *int                   `json:"max_turns,omitempty"`                           // Maximum conversation turns for this agent
+	McpServers             []interface{}          `json:"mcp_servers,omitempty"`                         // MCP server specs (string refs or inline configs)
+	Skills                 []string               `json:"skills,omitempty"`                              // Skill names to preload
+	CriticalSystemReminder *string                `json:"criticalSystemReminder_EXPERIMENTAL,omitempty"` // Experimental critical system reminder
 }
 
 // PluginConfig represents a Claude Code plugin configuration.

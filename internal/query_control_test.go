@@ -40,8 +40,8 @@ func sendControlResponse(t *testing.T, transport *mockTransport, extraFields map
 	}
 
 	transport.sendMessage(&types.SystemMessage{
-		Type:    "control_response",
-		Subtype: "control_response",
+		Type:     "control_response",
+		Subtype:  "control_response",
 		Response: resp,
 	})
 }
