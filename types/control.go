@@ -80,23 +80,23 @@ const (
 	HookEventPreCompact       HookEvent = "PreCompact"
 
 	// Phase C: 17 new hook events for TS SDK parity
-	HookEventPostToolUseFailure  HookEvent = "PostToolUseFailure"
-	HookEventNotification        HookEvent = "Notification"
-	HookEventSessionStart        HookEvent = "SessionStart"
-	HookEventSessionEnd          HookEvent = "SessionEnd"
-	HookEventStopFailure         HookEvent = "StopFailure"
-	HookEventSubagentStart       HookEvent = "SubagentStart"
-	HookEventPostCompact         HookEvent = "PostCompact"
-	HookEventPermissionRequest   HookEvent = "PermissionRequest"
-	HookEventSetup               HookEvent = "Setup"
-	HookEventTeammateIdle        HookEvent = "TeammateIdle"
-	HookEventTaskCompleted       HookEvent = "TaskCompleted"
-	HookEventElicitation         HookEvent = "Elicitation"
-	HookEventElicitationResult   HookEvent = "ElicitationResult"
-	HookEventConfigChange        HookEvent = "ConfigChange"
-	HookEventWorktreeCreate      HookEvent = "WorktreeCreate"
-	HookEventWorktreeRemove      HookEvent = "WorktreeRemove"
-	HookEventInstructionsLoaded  HookEvent = "InstructionsLoaded"
+	HookEventPostToolUseFailure HookEvent = "PostToolUseFailure"
+	HookEventNotification       HookEvent = "Notification"
+	HookEventSessionStart       HookEvent = "SessionStart"
+	HookEventSessionEnd         HookEvent = "SessionEnd"
+	HookEventStopFailure        HookEvent = "StopFailure"
+	HookEventSubagentStart      HookEvent = "SubagentStart"
+	HookEventPostCompact        HookEvent = "PostCompact"
+	HookEventPermissionRequest  HookEvent = "PermissionRequest"
+	HookEventSetup              HookEvent = "Setup"
+	HookEventTeammateIdle       HookEvent = "TeammateIdle"
+	HookEventTaskCompleted      HookEvent = "TaskCompleted"
+	HookEventElicitation        HookEvent = "Elicitation"
+	HookEventElicitationResult  HookEvent = "ElicitationResult"
+	HookEventConfigChange       HookEvent = "ConfigChange"
+	HookEventWorktreeCreate     HookEvent = "WorktreeCreate"
+	HookEventWorktreeRemove     HookEvent = "WorktreeRemove"
+	HookEventInstructionsLoaded HookEvent = "InstructionsLoaded"
 )
 
 // BaseHookInput contains common fields for all hook inputs.
@@ -202,7 +202,7 @@ type SubagentStartHookInput struct {
 type PostCompactHookInput struct {
 	BaseHookInput
 	HookEventName string `json:"hook_event_name"` // "PostCompact"
-	Trigger       string `json:"trigger"`          // "manual" or "auto"
+	Trigger       string `json:"trigger"`         // "manual" or "auto"
 }
 
 // PermissionRequestHookInput represents input for PermissionRequest hook events.
@@ -236,7 +236,7 @@ type TaskCompletedHookInput struct {
 // ElicitationHookInput represents input for Elicitation hook events.
 type ElicitationHookInput struct {
 	BaseHookInput
-	HookEventName string                 `json:"hook_event_name"` // "Elicitation"
+	HookEventName string                   `json:"hook_event_name"` // "Elicitation"
 	Questions     []map[string]interface{} `json:"questions"`
 }
 
@@ -483,7 +483,7 @@ type SDKControlStopTaskRequest struct {
 
 // SDKControlRewindFilesRequest represents a request to rewind files to a checkpoint.
 type SDKControlRewindFilesRequest struct {
-	Subtype       string `json:"subtype"`         // "rewind_files"
+	Subtype       string `json:"subtype"` // "rewind_files"
 	UserMessageID string `json:"user_message_id"`
 	DryRun        bool   `json:"dry_run"`
 }
@@ -495,13 +495,13 @@ type SDKControlMcpStatusRequest struct {
 
 // SDKControlMcpReconnectRequest represents a request to reconnect an MCP server.
 type SDKControlMcpReconnectRequest struct {
-	Subtype    string `json:"subtype"`    // "mcp_reconnect"
+	Subtype    string `json:"subtype"` // "mcp_reconnect"
 	ServerName string `json:"serverName"`
 }
 
 // SDKControlMcpToggleRequest represents a request to toggle an MCP server.
 type SDKControlMcpToggleRequest struct {
-	Subtype    string `json:"subtype"`    // "mcp_toggle"
+	Subtype    string `json:"subtype"` // "mcp_toggle"
 	ServerName string `json:"serverName"`
 	Enabled    bool   `json:"enabled"`
 }

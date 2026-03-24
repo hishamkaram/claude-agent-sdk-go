@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,6 +20,16 @@ const (
 	SDKVersion = "0.1.0"
 )
 
+// getExitCode extracts the numeric exit code from an *exec.ExitError.
+// Returns -1 for any other error type.
+func getExitCode(err error) int {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return -1
+}
+
 // SubprocessCLITransport implements Transport using a Claude Code CLI subprocess.
 // It manages the subprocess lifecycle, stdin/stdout/stderr pipes, and message streaming.
 type SubprocessCLITransport struct {
@@ -29,11 +40,11 @@ type SubprocessCLITransport struct {
 	resumeSessionID string                    // Optional session ID to resume conversation
 	options         *types.ClaudeAgentOptions // Options for CLI configuration
 
-	cmd            *exec.Cmd
-	customProcess  types.SpawnedProcess // Non-nil when using custom spawner
-	stdin          io.WriteCloser
-	stdout         io.ReadCloser
-	stderr         io.ReadCloser
+	cmd           *exec.Cmd
+	customProcess types.SpawnedProcess // Non-nil when using custom spawner
+	stdin         io.WriteCloser
+	stdout        io.ReadCloser
+	stderr        io.ReadCloser
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -43,6 +54,10 @@ type SubprocessCLITransport struct {
 
 	// Writer for stdin
 	writer *JSONLineWriter
+
+	// procDone is closed by the watcher goroutine after cmd.Wait() / customProcess.Wait() returns.
+	// closeExecCommand / closeCustomProcess drains this channel instead of spawning a second Wait().
+	procDone chan struct{}
 
 	// Error tracking
 	mu    sync.Mutex
@@ -137,11 +152,33 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 	// Create JSON line writer for stdin
 	t.writer = NewJSONLineWriter(t.stdin)
 
-	// Launch message reader loop in goroutine
-	go t.messageReaderLoop(t.ctx)
+	// Launch watcher goroutine: mirrors the exec-command path.
+	// customProcess.Wait() is called exactly once here; closeCustomProcess drains procDone.
+	t.procDone = make(chan struct{})
+	go func() {
+		waitErr := t.customProcess.Wait()
+		close(t.procDone) // signal Close() that Wait() is done — BEFORE acquiring mutex
+		t.mu.Lock()
+		wasReady := t.ready
+		t.ready = false
+		if waitErr != nil && t.err == nil {
+			t.err = types.NewProcessErrorWithCode("subprocess exited unexpectedly", t.customProcess.ExitCode())
+		}
+		t.mu.Unlock()
+		if wasReady {
+			if t.cancel != nil {
+				t.cancel()
+			}
+		}
+	}()
+
+	// Launch message reader loop in goroutine.
+	// Capture stdout/stderr here (under caller's mutex) to avoid a race with
+	// a subsequent Connect() call overwriting the struct fields.
+	go t.messageReaderLoop(t.ctx, t.stdout)
 
 	// Launch stderr reader for debugging
-	go t.readStderr(t.ctx)
+	go t.readStderr(t.ctx, t.stderr)
 
 	// Mark as ready
 	t.ready = true
@@ -194,11 +231,38 @@ func (t *SubprocessCLITransport) connectWithExecCommand(args []string, envMap ma
 	// Create JSON line writer for stdin
 	t.writer = NewJSONLineWriter(t.stdin)
 
-	// Launch message reader loop in goroutine
-	go t.messageReaderLoop(t.ctx)
+	// Launch watcher goroutine: calls cmd.Wait() exactly once, sets ready=false
+	// immediately on subprocess exit, and cancels the transport context so that
+	// messageReaderLoop and readStderr exit cleanly.
+	//
+	// IMPORTANT: procDone is closed BEFORE acquiring t.mu to prevent a deadlock
+	// where Close() holds t.mu while waiting for procDone, and the watcher needs
+	// t.mu to close procDone.
+	t.procDone = make(chan struct{})
+	go func() {
+		waitErr := t.cmd.Wait()
+		close(t.procDone) // signal Close() that Wait() is done — BEFORE acquiring mutex
+		t.mu.Lock()
+		wasReady := t.ready
+		t.ready = false
+		if waitErr != nil && t.err == nil {
+			t.err = types.NewProcessErrorWithCode("subprocess exited unexpectedly", getExitCode(waitErr))
+		}
+		t.mu.Unlock()
+		if wasReady {
+			if t.cancel != nil {
+				t.cancel()
+			}
+		}
+	}()
+
+	// Launch message reader loop in goroutine.
+	// Capture stdout/stderr here (under caller's mutex) to avoid a race with
+	// a subsequent Connect() call overwriting the struct fields.
+	go t.messageReaderLoop(t.ctx, t.stdout)
 
 	// Launch stderr reader for debugging
-	go t.readStderr(t.ctx)
+	go t.readStderr(t.ctx, t.stderr)
 
 	// Mark as ready
 	t.ready = true
@@ -239,11 +303,12 @@ func (t *SubprocessCLITransport) buildEnvMap() map[string]string {
 // messageReaderLoop reads JSON lines from stdout and parses them into messages.
 // It runs in a goroutine and sends messages to the messages channel.
 // It respects context cancellation and closes the messages channel when done.
-func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context) {
+// stdout is passed as a parameter to avoid a data race with Connect() overwriting t.stdout.
+func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout io.Reader) {
 	defer close(t.messages)
 
 	t.logger.Debug("Message reader loop started")
-	reader := NewJSONLineReader(t.stdout)
+	reader := NewJSONLineReader(stdout)
 
 	for {
 		// Check for context cancellation
@@ -265,7 +330,9 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context) {
 
 			// If the transport context is already cancelled, read errors
 			// are expected (pipe closed during shutdown) — log at Debug.
-			if t.ctx.Err() != nil {
+			// Use the passed-in ctx (not t.ctx) to avoid a data race with
+			// Connect() overwriting t.ctx under t.mu.
+			if ctx.Err() != nil {
 				t.logger.Debug("Message reader loop stopped during shutdown: %v", err)
 				return
 			}
@@ -713,80 +780,61 @@ func (t *SubprocessCLITransport) Close(ctx context.Context) error {
 }
 
 // closeCustomProcess handles cleanup for a custom-spawned process.
+// customProcess.Wait() is owned by the watcher goroutine (launched in connectWithCustomSpawner).
+// This method drains procDone — it must NOT call customProcess.Wait() again.
 func (t *SubprocessCLITransport) closeCustomProcess(ctx context.Context) error {
-	done := make(chan error, 1)
-	go func() {
-		done <- t.customProcess.Wait()
-	}()
-
-	var waitErr error
 	select {
 	case <-ctx.Done():
-		// Caller's timeout expired — force kill.
+		// Caller's timeout expired — force kill, then drain.
 		_ = t.customProcess.Kill()
 		if t.cancel != nil {
 			t.cancel()
 			t.cancel = nil
 		}
-		<-done
+		// Safe to block here while holding t.mu: the watcher goroutine guarantees
+		// close(procDone) happens BEFORE it acquires t.mu, so no deadlock is possible.
+		<-t.procDone
 		t.customProcess = nil
 		return types.NewProcessError("subprocess did not exit gracefully, killed")
 
-	case waitErr = <-done:
+	case <-t.procDone:
+		// Watcher already called Wait() and closed procDone.
 		if t.cancel != nil {
 			t.cancel()
 			t.cancel = nil
 		}
 	}
 
-	exitCode := t.customProcess.ExitCode()
 	t.customProcess = nil
-
-	if waitErr != nil {
-		return types.NewProcessErrorWithCode(
-			"subprocess exited with error",
-			exitCode,
-		)
-	}
 	return nil
 }
 
 // closeExecCommand handles cleanup for exec.Command-spawned process.
+// cmd.Wait() is owned by the watcher goroutine (launched in connectWithExecCommand).
+// This method drains procDone — it must NOT call cmd.Wait() again.
 func (t *SubprocessCLITransport) closeExecCommand(ctx context.Context) error {
-	done := make(chan error, 1)
-	go func() {
-		done <- t.cmd.Wait()
-	}()
-
-	var waitErr error
 	select {
 	case <-ctx.Done():
-		// Caller's timeout expired — force kill via context cancel.
+		// Caller's timeout expired — force kill via context cancel, then drain.
 		if t.cancel != nil {
 			t.cancel()
 			t.cancel = nil
 		}
-		<-done // Wait for Wait() to return after kill
+		// Safe to block here while holding t.mu: the watcher goroutine guarantees
+		// close(procDone) happens BEFORE it acquires t.mu, so no deadlock is possible.
+		<-t.procDone
+		t.cmd = nil
 		return types.NewProcessError("subprocess did not exit gracefully, killed")
 
-	case waitErr = <-done:
-		// Process exited — cancel transport context to clean up
-		// goroutines (messageReaderLoop, readStderr).
+	case <-t.procDone:
+		// Watcher already called Wait() and closed procDone — just cancel context.
 		if t.cancel != nil {
 			t.cancel()
 			t.cancel = nil
 		}
 	}
 
-	if waitErr != nil {
-		if exitErr, ok := waitErr.(*exec.ExitError); ok {
-			return types.NewProcessErrorWithCode(
-				"subprocess exited with error",
-				exitErr.ExitCode(),
-			)
-		}
-		return types.NewProcessErrorWithCause("subprocess exited with error", waitErr)
-	}
+	t.cmd = nil
 	return nil
 }
 
@@ -833,8 +881,9 @@ func (t *SubprocessCLITransport) ProcessID() int {
 // readStderr reads stderr output in a goroutine for debugging.
 // This is a helper function for monitoring subprocess errors.
 // It also parses known error patterns and stores them as typed errors.
-func (t *SubprocessCLITransport) readStderr(ctx context.Context) {
-	if t.stderr == nil {
+// stderr is passed as a parameter to avoid a data race with Connect() overwriting t.stderr.
+func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadCloser) {
+	if stderr == nil {
 		return
 	}
 
@@ -882,7 +931,7 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context) {
 		}()
 	}
 
-	reader := NewJSONLineReader(t.stderr)
+	reader := NewJSONLineReader(stderr)
 	for {
 		select {
 		case <-ctx.Done():

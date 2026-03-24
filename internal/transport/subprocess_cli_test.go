@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"go.uber.org/goleak"
 
@@ -60,33 +61,33 @@ func TestBuildCommandArgs_Effort(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		effort     *types.EffortLevel
-		wantFlag   bool
-		wantValue  string
+		name      string
+		effort    *types.EffortLevel
+		wantFlag  bool
+		wantValue string
 	}{
 		{
-			name:     "effort high",
-			effort:   effortPtr(types.EffortHigh),
-			wantFlag: true,
+			name:      "effort high",
+			effort:    effortPtr(types.EffortHigh),
+			wantFlag:  true,
 			wantValue: "high",
 		},
 		{
-			name:     "effort low",
-			effort:   effortPtr(types.EffortLow),
-			wantFlag: true,
+			name:      "effort low",
+			effort:    effortPtr(types.EffortLow),
+			wantFlag:  true,
 			wantValue: "low",
 		},
 		{
-			name:     "effort medium",
-			effort:   effortPtr(types.EffortMedium),
-			wantFlag: true,
+			name:      "effort medium",
+			effort:    effortPtr(types.EffortMedium),
+			wantFlag:  true,
 			wantValue: "medium",
 		},
 		{
-			name:     "effort max",
-			effort:   effortPtr(types.EffortMax),
-			wantFlag: true,
+			name:      "effort max",
+			effort:    effortPtr(types.EffortMax),
+			wantFlag:  true,
 			wantValue: "max",
 		},
 		{
@@ -202,7 +203,7 @@ func TestBuildCommandArgs_SessionID(t *testing.T) {
 			wantValue: "8587b432-e504-42c8-b9a7-e3fd0b4b2c60",
 		},
 		{
-			name:     "session ID nil — flag absent",
+			name:      "session ID nil — flag absent",
 			sessionID: nil,
 			wantFlag:  false,
 		},
@@ -921,9 +922,9 @@ func TestBuildCommandArgs_DebugFile(t *testing.T) {
 			wantValue: "/tmp/debug.log",
 		},
 		{
-			name:     "nil",
+			name:      "nil",
 			debugFile: nil,
-			wantFlag: false,
+			wantFlag:  false,
 		},
 	}
 
@@ -1222,9 +1223,9 @@ func newMockSpawnedProcess() *mockSpawnedProcess {
 	}
 }
 
-func (m *mockSpawnedProcess) Stdin() io.WriteCloser  { return m.stdin }
-func (m *mockSpawnedProcess) Stdout() io.ReadCloser   { return m.stdout }
-func (m *mockSpawnedProcess) Stderr() io.ReadCloser   { return m.stderr }
+func (m *mockSpawnedProcess) Stdin() io.WriteCloser { return m.stdin }
+func (m *mockSpawnedProcess) Stdout() io.ReadCloser { return m.stdout }
+func (m *mockSpawnedProcess) Stderr() io.ReadCloser { return m.stderr }
 
 func (m *mockSpawnedProcess) Kill() error {
 	m.mu.Lock()
@@ -1365,15 +1366,15 @@ func TestConnectWithCustomSpawner_NilPipes(t *testing.T) {
 		process types.SpawnedProcess
 	}{
 		{
-			name: "nil stdin",
+			name:    "nil stdin",
 			process: &mockSpawnedProcessNilPipe{nilStdin: true},
 		},
 		{
-			name: "nil stdout",
+			name:    "nil stdout",
 			process: &mockSpawnedProcessNilPipe{nilStdout: true},
 		},
 		{
-			name: "nil stderr",
+			name:    "nil stderr",
 			process: &mockSpawnedProcessNilPipe{nilStderr: true},
 		},
 	}
@@ -1428,10 +1429,10 @@ func (m *mockSpawnedProcessNilPipe) Stderr() io.ReadCloser {
 	r, _ := io.Pipe()
 	return r
 }
-func (m *mockSpawnedProcessNilPipe) Kill() error    { return nil }
-func (m *mockSpawnedProcessNilPipe) Wait() error    { return nil }
-func (m *mockSpawnedProcessNilPipe) ExitCode() int  { return 0 }
-func (m *mockSpawnedProcessNilPipe) Killed() bool   { return false }
+func (m *mockSpawnedProcessNilPipe) Kill() error   { return nil }
+func (m *mockSpawnedProcessNilPipe) Wait() error   { return nil }
+func (m *mockSpawnedProcessNilPipe) ExitCode() int { return 0 }
+func (m *mockSpawnedProcessNilPipe) Killed() bool  { return false }
 
 // TestCloseCustomProcess verifies Close() calls Wait() on custom process.
 func TestCloseCustomProcess(t *testing.T) {
@@ -1449,6 +1450,13 @@ func TestCloseCustomProcess(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	tr.ctx = ctx
 	tr.cancel = cancel
+
+	// Initialize procDone and launch watcher goroutine (mirrors connectWithCustomSpawner)
+	tr.procDone = make(chan struct{})
+	go func() {
+		_ = mockProc.Wait()
+		close(tr.procDone)
+	}()
 
 	// Simulate process exiting cleanly after stdin is closed
 	go func() {
@@ -1501,4 +1509,212 @@ func keysOf(m map[string]interface{}) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// ===== Phase E: Subprocess Crash Tests (T003-T) =====
+//
+// These tests use a mockSpawnedProcess (custom spawner) to simulate subprocess crashes.
+// They verify the watcher goroutine behaviour added in T007.
+//
+// RED before T007: IsReady() stays true after Kill() — no watcher to clear it.
+// GREEN after T007: watcher sets ready=false; all assertions pass.
+
+// waitForNotReady polls IsReady() until it returns false or the deadline is reached.
+func waitForNotReady(tr *SubprocessCLITransport, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !tr.IsReady() {
+			return true
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return false
+}
+
+// TestSubprocessCrash_ReadyFalse verifies that IsReady() returns false
+// immediately after the subprocess exits spontaneously.
+func TestSubprocessCrash_ReadyFalse(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+	}{
+		{name: "process killed externally"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mockProc := newMockSpawnedProcess()
+			spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+				return mockProc, nil
+			})
+
+			opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
+			tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+
+			ctx := context.Background()
+			if err := tr.Connect(ctx); err != nil {
+				t.Fatalf("Connect() failed: %v", err)
+			}
+
+			if !tr.IsReady() {
+				t.Fatal("transport should be ready before crash")
+			}
+
+			// Simulate subprocess crash.
+			_ = mockProc.Kill()
+
+			// Watcher goroutine must set ready=false within 2s.
+			if !waitForNotReady(tr, 2*time.Second) {
+				t.Error("IsReady() should return false after subprocess crash, but it is still true")
+			}
+
+			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = tr.Close(closeCtx)
+		})
+	}
+}
+
+// TestSubprocessCrash_WriteReturnsError verifies that Write() returns a non-nil
+// error after the subprocess exits — without touching the closed pipe (no EPIPE).
+func TestSubprocessCrash_WriteReturnsError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+	}{
+		{name: "write after crash returns error"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mockProc := newMockSpawnedProcess()
+			spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+				return mockProc, nil
+			})
+
+			opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
+			tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+
+			ctx := context.Background()
+			if err := tr.Connect(ctx); err != nil {
+				t.Fatalf("Connect() failed: %v", err)
+			}
+
+			// Crash the subprocess.
+			_ = mockProc.Kill()
+
+			// Wait for watcher to mark transport not-ready.
+			waitForNotReady(tr, 2*time.Second)
+
+			// Write must return an error — must not attempt to write to the dead pipe.
+			err := tr.Write(ctx, `{"type":"user","message":"hello"}`)
+			if err == nil {
+				t.Error("Write() should return a non-nil error after subprocess crash")
+			}
+
+			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = tr.Close(closeCtx)
+		})
+	}
+}
+
+// TestSubprocessCrash_CloseDoesNotHang verifies that Close() completes within
+// a 2s timeout after a spontaneous subprocess exit (no deadlock / double-Wait).
+func TestSubprocessCrash_CloseDoesNotHang(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+	}{
+		{name: "close after spontaneous exit completes within timeout"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mockProc := newMockSpawnedProcess()
+			spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+				return mockProc, nil
+			})
+
+			opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
+			tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+
+			ctx := context.Background()
+			if err := tr.Connect(ctx); err != nil {
+				t.Fatalf("Connect() failed: %v", err)
+			}
+
+			// Simulate spontaneous subprocess exit.
+			_ = mockProc.Kill()
+
+			// Wait for watcher to detect exit (ensures procDone is closed before Close).
+			waitForNotReady(tr, 2*time.Second)
+
+			// Close() must complete within 2s — must not hang or deadlock.
+			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := tr.Close(closeCtx); closeCtx.Err() != nil {
+				t.Errorf("Close() hung: context expired before Close() returned (err=%v)", err)
+			}
+		})
+	}
+}
+
+// TestSubprocessCrash_NoGoroutineLeak verifies that no goroutines are leaked
+// after a subprocess crash followed by Close(). goleak.VerifyTestMain in
+// TestMain catches any leaks across the entire test suite as well.
+func TestSubprocessCrash_NoGoroutineLeak(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+	}{
+		{name: "crash then close leaks no goroutines"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mockProc := newMockSpawnedProcess()
+			spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+				return mockProc, nil
+			})
+
+			opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
+			tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+
+			ctx := context.Background()
+			if err := tr.Connect(ctx); err != nil {
+				t.Fatalf("Connect() failed: %v", err)
+			}
+
+			// Crash the subprocess.
+			_ = mockProc.Kill()
+
+			// Wait for watcher goroutine to complete.
+			waitForNotReady(tr, 2*time.Second)
+
+			// Close the transport — all goroutines must exit.
+			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = tr.Close(closeCtx)
+
+			// goleak.VerifyTestMain catches any remaining goroutines for the whole suite.
+			// This test ensures the specific crash+close lifecycle runs cleanly.
+		})
+	}
 }

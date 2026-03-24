@@ -397,7 +397,7 @@ func TestMessageReaderLoop(t *testing.T) {
 	transport.stdout = pr
 
 	// Start reader loop
-	go transport.messageReaderLoop(ctx)
+	go transport.messageReaderLoop(ctx, pr)
 
 	// Read messages from channel
 	var messages []types.Message
