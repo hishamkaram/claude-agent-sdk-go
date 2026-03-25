@@ -1,6 +1,6 @@
 # Claude Agent SDK for Go
 
-[![Go 1.24](https://img.shields.io/badge/Go-1.24-00add8?logo=go&logoColor=white)](https://go.dev/)
+[![Go 1.25](https://img.shields.io/badge/Go-1.25-00add8?logo=go&logoColor=white)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Go SDK for the Claude Code CLI subprocess protocol — spawns Claude Code as a child process, communicates via JSON lines, and provides a typed Go API for queries, multi-turn conversations, and tool use hooks.
@@ -20,7 +20,7 @@ Claude Code exposes a powerful subprocess protocol over JSON lines, but consumin
 
 ## Prerequisites
 
-- Go 1.24+
+- Go 1.25+
 - Claude Code CLI installed: `npm install -g @anthropic-ai/claude-code`
 - Authentication (one required):
   - `CLAUDE_API_KEY` environment variable (pay-as-you-go)
