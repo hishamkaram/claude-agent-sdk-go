@@ -1,43 +1,78 @@
 package log
 
 import (
-	"fmt"
-	"os"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
-// Logger provides simple logging for the SDK.
-// It writes to stderr with an [SDK] prefix to distinguish from CLI output.
+// Logger wraps a *zap.Logger for the SDK.
+// It provides structured logging using zap fields.
 type Logger struct {
-	verbose bool
+	zap *zap.Logger
 }
 
 // NewLogger creates a new logger instance.
+// When verbose is true, Debug and Info messages are emitted; otherwise only
+// Warn and Error messages are logged.
 func NewLogger(verbose bool) *Logger {
-	return &Logger{
-		verbose: verbose,
+	level := zapcore.WarnLevel
+	if verbose {
+		level = zapcore.DebugLevel
 	}
-}
 
-// Debug logs a debug message (only when verbose mode is enabled).
-func (l *Logger) Debug(format string, args ...interface{}) {
-	if l.verbose {
-		fmt.Fprintf(os.Stderr, "[SDK DEBUG] "+format+"\n", args...)
+	cfg := zap.Config{
+		Level:            zap.NewAtomicLevelAt(level),
+		Encoding:         "console",
+		OutputPaths:      []string{"stderr"},
+		ErrorOutputPaths: []string{"stderr"},
+		EncoderConfig: zapcore.EncoderConfig{
+			MessageKey:     "msg",
+			LevelKey:       "level",
+			TimeKey:        "", // omit timestamp for concise SDK output
+			EncodeLevel:    zapcore.CapitalLevelEncoder,
+			EncodeDuration: zapcore.StringDurationEncoder,
+		},
 	}
-}
 
-// Info logs an informational message (only when verbose mode is enabled).
-func (l *Logger) Info(format string, args ...interface{}) {
-	if l.verbose {
-		fmt.Fprintf(os.Stderr, "[SDK INFO] "+format+"\n", args...)
+	logger, err := cfg.Build(zap.AddCallerSkip(1))
+	if err != nil {
+		// Fall back to nop logger if build fails (should not happen with a valid config).
+		return &Logger{zap: zap.NewNop()}
 	}
+
+	return &Logger{zap: logger.Named("SDK")}
 }
 
-// Warning logs a warning message (always displayed).
-func (l *Logger) Warning(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "[SDK WARNING] "+format+"\n", args...)
+// NewLoggerFromZap creates a Logger wrapping an existing *zap.Logger.
+// This is useful for testing or when the caller already has a configured logger.
+func NewLoggerFromZap(z *zap.Logger) *Logger {
+	if z == nil {
+		return &Logger{zap: zap.NewNop()}
+	}
+	return &Logger{zap: z}
 }
 
-// Error logs an error message (always displayed).
-func (l *Logger) Error(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "[SDK ERROR] "+format+"\n", args...)
+// Debug logs a debug-level message with structured fields.
+func (l *Logger) Debug(msg string, fields ...zap.Field) {
+	l.zap.Debug(msg, fields...)
+}
+
+// Info logs an info-level message with structured fields.
+func (l *Logger) Info(msg string, fields ...zap.Field) {
+	l.zap.Info(msg, fields...)
+}
+
+// Warn logs a warning-level message with structured fields.
+func (l *Logger) Warn(msg string, fields ...zap.Field) {
+	l.zap.Warn(msg, fields...)
+}
+
+// Error logs an error-level message with structured fields.
+func (l *Logger) Error(msg string, fields ...zap.Field) {
+	l.zap.Error(msg, fields...)
+}
+
+// Zap returns the underlying *zap.Logger for direct access.
+func (l *Logger) Zap() *zap.Logger {
+	return l.zap
 }

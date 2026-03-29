@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/hishamkaram/claude-agent-sdk-go/internal"
 	"github.com/hishamkaram/claude-agent-sdk-go/internal/log"
 	"github.com/hishamkaram/claude-agent-sdk-go/internal/transport"
@@ -189,7 +191,7 @@ func (c *Client) Connect(ctx context.Context) error {
 
 	// Connect transport
 	if err := c.transport.Connect(ctx); err != nil {
-		c.logger.Error("Failed to connect transport: %v", err)
+		c.logger.Error("failed to connect transport", zap.Error(err))
 		return types.NewCLIConnectionErrorWithCause("failed to connect to Claude CLI", err)
 	}
 	c.logger.Debug("Transport connected successfully")
@@ -203,7 +205,7 @@ func (c *Client) Connect(ctx context.Context) error {
 	default:
 		// Check if transport reported an error (e.g., session not found)
 		if err := c.transport.GetError(); err != nil {
-			c.logger.Error("Transport error detected during connection: %v", err)
+			c.logger.Error("transport error detected during connection", zap.Error(err))
 			_ = c.transport.Close(ctx)
 			return err
 		}
@@ -215,7 +217,7 @@ func (c *Client) Connect(ctx context.Context) error {
 
 	// Start message processing
 	if err := c.query.Start(ctx); err != nil {
-		c.logger.Error("Failed to start message processing: %v", err)
+		c.logger.Error("failed to start message processing", zap.Error(err))
 		_ = c.transport.Close(ctx)
 		return err
 	}
@@ -224,7 +226,7 @@ func (c *Client) Connect(ctx context.Context) error {
 	// Initialize control protocol
 	initRaw, err := c.query.Initialize(ctx)
 	if err != nil {
-		c.logger.Error("Failed to initialize control protocol: %v", err)
+		c.logger.Error("failed to initialize control protocol", zap.Error(err))
 		_ = c.query.Stop(ctx)
 		_ = c.transport.Close(ctx)
 		return types.NewControlProtocolErrorWithCause("failed to initialize control protocol", err)
@@ -297,7 +299,7 @@ func (c *Client) Query(ctx context.Context, prompt string) error {
 	}
 
 	if err := c.transport.Write(ctx, string(data)); err != nil {
-		return err
+		return fmt.Errorf("Client.Query: write to transport: %w", err)
 	}
 
 	return nil
@@ -368,7 +370,7 @@ func (c *Client) QueryWithContent(ctx context.Context, content interface{}) erro
 	}
 
 	if err := c.transport.Write(ctx, string(data)); err != nil {
-		return err
+		return fmt.Errorf("Client.QueryWithContent: write to transport: %w", err)
 	}
 
 	return nil
@@ -473,7 +475,7 @@ func (c *Client) Close(ctx context.Context) error {
 	// Stop query handler
 	if c.query != nil {
 		if err := c.query.Stop(ctx); err != nil {
-			c.logger.Warning("Error stopping query handler: %v", err)
+			c.logger.Warn("error stopping query handler", zap.Error(err))
 			errs = append(errs, err)
 		}
 		c.query = nil
@@ -482,7 +484,7 @@ func (c *Client) Close(ctx context.Context) error {
 	// Close transport
 	if c.transport != nil {
 		if err := c.transport.Close(ctx); err != nil {
-			c.logger.Warning("Error closing transport: %v", err)
+			c.logger.Warn("error closing transport", zap.Error(err))
 			errs = append(errs, err)
 		}
 	}
@@ -564,7 +566,10 @@ func (c *Client) SetModel(ctx context.Context, model string) error {
 		req["model"] = model
 	}
 	_, err := c.query.SendControlMessage(ctx, req)
-	return err
+	if err != nil {
+		return fmt.Errorf("Client.SetModel: %w", err)
+	}
+	return nil
 }
 
 // SetPermissionMode changes the permission mode mid-session.
@@ -583,7 +588,10 @@ func (c *Client) SetPermissionMode(ctx context.Context, mode types.PermissionMod
 		"mode":    string(mode),
 	}
 	_, err := c.query.SendControlMessage(ctx, req)
-	return err
+	if err != nil {
+		return fmt.Errorf("Client.SetPermissionMode: %w", err)
+	}
+	return nil
 }
 
 // ProcessID returns the OS process ID of the Claude Code subprocess.
@@ -613,7 +621,10 @@ func (c *Client) Interrupt(ctx context.Context) error {
 
 	req := map[string]interface{}{"subtype": "interrupt"}
 	_, err := c.query.SendControlMessage(ctx, req)
-	return err
+	if err != nil {
+		return fmt.Errorf("Client.Interrupt: %w", err)
+	}
+	return nil
 }
 
 // StreamInput writes user content to the subprocess stdin during an active stream.

@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"go.uber.org/zap"
+
 	"github.com/hishamkaram/claude-agent-sdk-go/internal/log"
 	"github.com/hishamkaram/claude-agent-sdk-go/internal/transport"
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
@@ -43,6 +45,7 @@ type Query struct {
 	closeMessagesOnce sync.Once // guards close(messagesChan) — called from Stop() or messageLoop()
 	stopChan          chan struct{}
 	readLoopDone      chan struct{}
+	handlerWg         sync.WaitGroup // tracks in-flight handleControlRequest goroutines
 	started           bool
 	initialized       bool
 	initializeResult  map[string]interface{}
@@ -142,7 +145,7 @@ func (q *Query) Initialize(ctx context.Context) (map[string]interface{}, error) 
 
 	result, err := q.sendControlRequest(ctx, request)
 	if err != nil {
-		q.logger.Error("Control protocol initialization failed: %v", err)
+		q.logger.Error("control protocol initialization failed", zap.Error(err))
 		return nil, types.NewControlProtocolErrorWithCause("initialization failed", err)
 	}
 
@@ -189,6 +192,11 @@ func (q *Query) Stop(ctx context.Context) error {
 		return ctx.Err()
 	}
 
+	// Wait for any in-flight handleControlRequest goroutines to finish.
+	// This is safe after readLoopDone because no new handlers will be dispatched
+	// once the message loop exits.
+	q.handlerWg.Wait()
+
 	// Close message channel (safe even if messageLoop already closed it on transport EOF).
 	q.closeMessagesOnce.Do(func() { close(q.messagesChan) })
 
@@ -228,7 +236,7 @@ func (q *Query) messageLoop() {
 
 			// Route message based on type
 			if err := q.routeMessage(msg); err != nil {
-				q.logger.Warning("Message routing error: %v", err)
+				q.logger.Warn("message routing error", zap.Error(err))
 				// Log error but continue processing
 				// In a production system, we might want to report this via an error channel
 				continue
@@ -241,7 +249,7 @@ func (q *Query) messageLoop() {
 func (q *Query) routeMessage(msg types.Message) error {
 	// Check message type
 	msgType := msg.GetMessageType()
-	q.logger.Debug("Routing message: type=%s", msgType)
+	q.logger.Debug("routing message", zap.String("type", msgType))
 
 	// Handle control responses
 	if msgType == "control_response" {
@@ -255,6 +263,7 @@ func (q *Query) routeMessage(msg types.Message) error {
 	if msgType == "control_request" {
 		q.logger.Debug("Handling control request from CLI")
 		if sysMsg, ok := msg.(*types.SystemMessage); ok {
+			q.handlerWg.Add(1)
 			go q.handleControlRequest(sysMsg)
 			return nil
 		}
@@ -322,7 +331,9 @@ func (q *Query) handleControlResponse(msg *types.SystemMessage) error {
 
 // handleControlRequest handles an incoming control request from CLI.
 func (q *Query) handleControlRequest(msg *types.SystemMessage) {
-	q.logger.Debug("handleControlRequest: entered, msg.RequestID='%s', msg.Request=%+v", msg.RequestID, msg.Request)
+	defer q.handlerWg.Done()
+
+	q.logger.Debug("handleControlRequest: entered", zap.String("request_id", msg.RequestID), zap.Any("request", msg.Request))
 
 	// Get request ID from top-level field (CLI sends it here)
 	requestID := msg.RequestID
@@ -330,13 +341,13 @@ func (q *Query) handleControlRequest(msg *types.SystemMessage) {
 	// Get request data from Request field
 	requestData := msg.Request
 
-	q.logger.Debug("handleControlRequest: requestID='%s', requestData=%+v", requestID, requestData)
+	q.logger.Debug("handleControlRequest: parsed fields", zap.String("request_id", requestID), zap.Any("request_data", requestData))
 
 	// For CLI-initiated requests (like can_use_tool), there might not be a request_id
 	// Generate one if needed
 	if requestID == "" {
 		requestID = fmt.Sprintf("cli-request-%d", atomic.AddInt64(&q.nextRequestID, 1))
-		q.logger.Debug("handleControlRequest: generated requestID=%s for CLI-initiated request", requestID)
+		q.logger.Debug("handleControlRequest: generated request ID", zap.String("request_id", requestID))
 	}
 
 	if requestData == nil {
@@ -346,7 +357,7 @@ func (q *Query) handleControlRequest(msg *types.SystemMessage) {
 	}
 
 	subtype, _ := requestData["subtype"].(string)
-	q.logger.Debug("handleControlRequest: subtype=%s", subtype)
+	q.logger.Debug("handleControlRequest: dispatching", zap.String("subtype", subtype))
 
 	var response map[string]interface{}
 	var err error
@@ -378,10 +389,10 @@ func (q *Query) handleControlRequest(msg *types.SystemMessage) {
 
 // handlePermissionRequest handles a permission request for tool use.
 func (q *Query) handlePermissionRequest(requestData map[string]interface{}) (map[string]interface{}, error) {
-	q.logger.Debug("handlePermissionRequest: entered, requestData=%+v", requestData)
+	q.logger.Debug("handlePermissionRequest: entered", zap.Any("request_data", requestData))
 
 	if q.canUseTool == nil {
-		q.logger.Error("handlePermissionRequest: canUseTool callback is nil!")
+		q.logger.Error("handlePermissionRequest: canUseTool callback is nil")
 		return nil, types.NewControlProtocolError("canUseTool callback is not provided")
 	}
 
@@ -391,7 +402,7 @@ func (q *Query) handlePermissionRequest(requestData map[string]interface{}) (map
 	input, _ := requestData["input"].(map[string]interface{})
 	suggestions, _ := requestData["permission_suggestions"].([]interface{})
 
-	q.logger.Debug("handlePermissionRequest: toolName=%s, input=%+v", toolName, input)
+	q.logger.Debug("handlePermissionRequest: parsed fields", zap.String("tool_name", toolName), zap.Any("input", input))
 
 	if toolName == "" {
 		q.logger.Error("handlePermissionRequest: missing tool_name")
@@ -400,7 +411,7 @@ func (q *Query) handlePermissionRequest(requestData map[string]interface{}) (map
 	if input == nil {
 		// Some tools (e.g. ExitPlanMode) legitimately send null input.
 		// Normalize to an empty map so CanUseTool is always called.
-		q.logger.Debug("handlePermissionRequest: nil input normalized to empty map for tool=%s", toolName)
+		q.logger.Debug("handlePermissionRequest: nil input normalized to empty map", zap.String("tool_name", toolName))
 		input = map[string]interface{}{}
 	}
 
@@ -410,7 +421,11 @@ func (q *Query) handlePermissionRequest(requestData map[string]interface{}) (map
 		if suggestionMap, ok := s.(map[string]interface{}); ok {
 			// Parse suggestion into PermissionUpdate
 			// This is a simplified version - production code should handle all fields
-			suggestionJSON, _ := json.Marshal(suggestionMap)
+			suggestionJSON, err := json.Marshal(suggestionMap)
+			if err != nil {
+				q.logger.Warn("handlePermissionRequest: marshal suggestion", zap.Error(err))
+				continue
+			}
 			var update types.PermissionUpdate
 			if err := json.Unmarshal(suggestionJSON, &update); err == nil {
 				permissionUpdates = append(permissionUpdates, update)
@@ -423,11 +438,11 @@ func (q *Query) handlePermissionRequest(requestData map[string]interface{}) (map
 	}
 
 	// Call permission callback
-	q.logger.Debug("handlePermissionRequest: CALLING canUseTool callback for tool=%s", toolName)
+	q.logger.Debug("handlePermissionRequest: calling canUseTool callback", zap.String("tool_name", toolName))
 	result, err := q.canUseTool(q.ctx, toolName, input, ctx)
-	q.logger.Debug("handlePermissionRequest: canUseTool callback returned: result=%+v, err=%v", result, err)
+	q.logger.Debug("handlePermissionRequest: canUseTool callback returned", zap.Any("result", result), zap.Error(err))
 	if err != nil {
-		q.logger.Error("handlePermissionRequest: canUseTool callback returned error: %v", err)
+		q.logger.Error("handlePermissionRequest: canUseTool callback returned error", zap.Error(err))
 		return nil, err
 	}
 
@@ -645,13 +660,13 @@ func (q *Query) sendSuccessResponse(requestID string, response map[string]interf
 
 	data, err := json.Marshal(controlResponse)
 	if err != nil {
-		q.logger.Error("sendSuccessResponse: failed to marshal response: %v", err)
+		q.logger.Error("sendSuccessResponse: failed to marshal response", zap.Error(err))
 		return
 	}
 
-	q.logger.Debug("sendSuccessResponse: sending control_response: %s", string(data))
+	q.logger.Debug("sendSuccessResponse: sending control_response", zap.String("data", string(data)))
 	if err := q.transport.Write(q.ctx, string(data)); err != nil {
-		q.logger.Error("sendSuccessResponse: failed to write: %v", err)
+		q.logger.Error("sendSuccessResponse: failed to write", zap.Error(err))
 	}
 }
 

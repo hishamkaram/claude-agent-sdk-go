@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/hishamkaram/claude-agent-sdk-go/internal/log"
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
@@ -59,6 +61,9 @@ type SubprocessCLITransport struct {
 	// closeExecCommand / closeCustomProcess drains this channel instead of spawning a second Wait().
 	procDone chan struct{}
 
+	// wg tracks the readStderr goroutine so Close() can wait for it to finish.
+	wg sync.WaitGroup
+
 	// Error tracking
 	mu    sync.Mutex
 	err   error
@@ -94,7 +99,7 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) error {
 		return nil // Already connected
 	}
 
-	t.logger.Debug("Starting Claude CLI subprocess: %s", t.cliPath)
+	t.logger.Debug("starting Claude CLI subprocess", zap.String("cli_path", t.cliPath))
 
 	// Create cancellable context
 	t.ctx, t.cancel = context.WithCancel(ctx)
@@ -103,7 +108,7 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) error {
 	args := t.buildCommandArgs()
 
 	// Log the full command for debugging
-	t.logger.Debug("Claude CLI command: %s %v", t.cliPath, args)
+	t.logger.Debug("Claude CLI command", zap.String("cli_path", t.cliPath), zap.Strings("args", args))
 
 	// Build environment variables map
 	envMap := t.buildEnvMap()
@@ -127,7 +132,7 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 
 	process, err := t.options.SpawnProcess(ctx, spawnOpts)
 	if err != nil {
-		t.logger.Error("Custom process spawner failed: %v", err)
+		t.logger.Error("custom process spawner failed", zap.Error(err))
 		return types.NewCLIConnectionErrorWithCause("custom process spawner failed", err)
 	}
 
@@ -177,7 +182,8 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 	// a subsequent Connect() call overwriting the struct fields.
 	go t.messageReaderLoop(t.ctx, t.stdout)
 
-	// Launch stderr reader for debugging
+	// Launch stderr reader for debugging (tracked by wg for clean shutdown)
+	t.wg.Add(1)
 	go t.readStderr(t.ctx, t.stderr)
 
 	// Mark as ready
@@ -223,10 +229,10 @@ func (t *SubprocessCLITransport) connectWithExecCommand(args []string, envMap ma
 
 	// Start the process
 	if err := t.cmd.Start(); err != nil {
-		t.logger.Error("Failed to start subprocess: %v", err)
+		t.logger.Error("failed to start subprocess", zap.Error(err))
 		return types.NewCLIConnectionErrorWithCause("failed to start subprocess", err)
 	}
-	t.logger.Debug("CLI subprocess started successfully (PID: %d)", t.cmd.Process.Pid)
+	t.logger.Debug("CLI subprocess started successfully", zap.Int("pid", t.cmd.Process.Pid))
 
 	// Create JSON line writer for stdin
 	t.writer = NewJSONLineWriter(t.stdin)
@@ -261,7 +267,8 @@ func (t *SubprocessCLITransport) connectWithExecCommand(args []string, envMap ma
 	// a subsequent Connect() call overwriting the struct fields.
 	go t.messageReaderLoop(t.ctx, t.stdout)
 
-	// Launch stderr reader for debugging
+	// Launch stderr reader for debugging (tracked by wg for clean shutdown)
+	t.wg.Add(1)
 	go t.readStderr(t.ctx, t.stderr)
 
 	// Mark as ready
@@ -282,19 +289,19 @@ func (t *SubprocessCLITransport) buildEnvMap() map[string]string {
 	// Model environment variable
 	if t.options != nil && t.options.Model != nil {
 		envMap["ANTHROPIC_MODEL"] = *t.options.Model
-		t.logger.Debug("Setting ANTHROPIC_MODEL environment variable: %s", *t.options.Model)
+		t.logger.Debug("setting ANTHROPIC_MODEL environment variable", zap.String("model", *t.options.Model))
 	}
 
 	// Base URL environment variable
 	if t.options != nil && t.options.BaseURL != nil {
 		envMap["ANTHROPIC_BASE_URL"] = *t.options.BaseURL
-		t.logger.Debug("Setting ANTHROPIC_BASE_URL environment variable: %s", *t.options.BaseURL)
+		t.logger.Debug("setting ANTHROPIC_BASE_URL environment variable", zap.String("base_url", *t.options.BaseURL))
 	}
 
 	// Custom environment variables (can override the above)
 	for key, value := range t.env {
 		envMap[key] = value
-		t.logger.Debug("Setting custom environment variable: %s", key)
+		t.logger.Debug("setting custom environment variable", zap.String("key", key))
 	}
 
 	return envMap
@@ -333,11 +340,11 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 			// Use the passed-in ctx (not t.ctx) to avoid a data race with
 			// Connect() overwriting t.ctx under t.mu.
 			if ctx.Err() != nil {
-				t.logger.Debug("Message reader loop stopped during shutdown: %v", err)
+				t.logger.Debug("message reader loop stopped during shutdown", zap.Error(err))
 				return
 			}
 
-			t.logger.Error("Failed to read from CLI stdout: %v", err)
+			t.logger.Error("failed to read from CLI stdout", zap.Error(err))
 			// Store error and return
 			t.OnError(types.NewJSONDecodeErrorWithCause(
 				"failed to read JSON line from subprocess",
@@ -355,13 +362,13 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 		// Parse JSON into message
 		msg, err := types.UnmarshalMessage(line)
 		if err != nil {
-			t.logger.Warning("Failed to parse message from CLI: %v", err)
+			t.logger.Warn("failed to parse message from CLI", zap.Error(err))
 			// Store parse error but continue reading
 			t.OnError(err)
 			continue
 		}
 
-		t.logger.Debug("Received message from CLI: type=%s", msg.GetMessageType())
+		t.logger.Debug("received message from CLI", zap.String("type", msg.GetMessageType()))
 
 		// Send message to channel (respect context cancellation)
 		select {
@@ -393,7 +400,7 @@ func (t *SubprocessCLITransport) Write(ctx context.Context, data string) error {
 	if err := t.writer.WriteLine(data); err != nil {
 		t.ready = false
 		t.err = types.NewCLIConnectionErrorWithCause("failed to write to subprocess stdin", err)
-		t.logger.Error("Failed to write to CLI stdin: %v", err)
+		t.logger.Error("failed to write to CLI stdin", zap.Error(err))
 		return t.err
 	}
 
@@ -418,13 +425,13 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 	// Add permission prompt tool if specified
 	if t.options != nil && t.options.PermissionPromptToolName != nil {
 		args = append(args, "--permission-prompt-tool", *t.options.PermissionPromptToolName)
-		t.logger.Debug("Setting permission prompt tool: %s", *t.options.PermissionPromptToolName)
+		t.logger.Debug("setting permission prompt tool", zap.String("tool", *t.options.PermissionPromptToolName))
 	}
 
 	// Add permission mode if specified
 	if t.options != nil && t.options.PermissionMode != nil {
 		args = append(args, "--permission-mode", string(*t.options.PermissionMode))
-		t.logger.Debug("Setting permission mode: %s", string(*t.options.PermissionMode))
+		t.logger.Debug("setting permission mode", zap.String("mode", string(*t.options.PermissionMode)))
 	}
 
 	// Add system prompt - always pass the flag to match Python SDK behavior
@@ -437,12 +444,12 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		} else if promptStr, ok := t.options.SystemPrompt.(string); ok {
 			// Handle string prompt
 			args = append(args, "--system-prompt", promptStr)
-			t.logger.Debug("Setting system prompt: %s", promptStr)
+			t.logger.Debug("setting system prompt", zap.String("prompt", promptStr))
 		} else if preset, ok := t.options.SystemPrompt.(types.SystemPromptPreset); ok {
 			// Handle preset case - append to default Claude Code prompt
 			if preset.Append != nil {
 				args = append(args, "--append-system-prompt", *preset.Append)
-				t.logger.Debug("Appending to system prompt preset: %s", *preset.Append)
+				t.logger.Debug("appending to system prompt preset", zap.String("append", *preset.Append))
 			}
 		}
 	} else {
@@ -454,13 +461,13 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 	// Add model if specified
 	if t.options != nil && t.options.Model != nil {
 		args = append(args, "--model", *t.options.Model)
-		t.logger.Debug("Setting model: %s", *t.options.Model)
+		t.logger.Debug("setting model", zap.String("model", *t.options.Model))
 	}
 
 	// Add --resume flag if resuming a conversation
 	if t.resumeSessionID != "" {
 		args = append(args, "--resume", t.resumeSessionID)
-		t.logger.Debug("Resuming Claude CLI conversation with session ID: %s", t.resumeSessionID)
+		t.logger.Debug("resuming Claude CLI conversation", zap.String("session_id", t.resumeSessionID))
 	}
 
 	// Add --fork-session flag if forking a resumed session
@@ -487,20 +494,20 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 	// Add extended thinking token limit if specified
 	if t.options != nil && t.options.MaxThinkingTokens != nil {
 		args = append(args, "--max-thinking-tokens", fmt.Sprintf("%d", *t.options.MaxThinkingTokens))
-		t.logger.Debug("Setting max thinking tokens: %d", *t.options.MaxThinkingTokens)
+		t.logger.Debug("setting max thinking tokens", zap.Int("max_thinking_tokens", *t.options.MaxThinkingTokens))
 	}
 
 	// Add budget limit if specified
 	if t.options != nil && t.options.MaxBudgetUSD != nil {
 		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", *t.options.MaxBudgetUSD))
-		t.logger.Debug("Setting max budget: $%.2f USD", *t.options.MaxBudgetUSD)
+		t.logger.Debug("setting max budget", zap.Float64("max_budget_usd", *t.options.MaxBudgetUSD))
 	}
 
 	// Add beta feature flags if specified
 	if t.options != nil && len(t.options.Betas) > 0 {
 		for _, beta := range t.options.Betas {
 			args = append(args, "--betas", beta)
-			t.logger.Debug("Adding beta feature flag: %s", beta)
+			t.logger.Debug("adding beta feature flag", zap.String("beta", beta))
 		}
 	}
 
@@ -509,10 +516,10 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		for _, plugin := range t.options.Plugins {
 			if plugin.Type == "local" {
 				args = append(args, "--plugin-dir", plugin.Path)
-				t.logger.Debug("Adding plugin directory: %s", plugin.Path)
+				t.logger.Debug("adding plugin directory", zap.String("path", plugin.Path))
 			} else {
 				// This shouldn't happen if NewPluginConfig is used, but handle it anyway
-				t.logger.Warning("Skipping unsupported plugin type: %s", plugin.Type)
+				t.logger.Warn("skipping unsupported plugin type", zap.String("type", plugin.Type))
 			}
 		}
 	}
@@ -524,7 +531,7 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 			sources[i] = string(src)
 		}
 		args = append(args, "--setting-sources", joinStrings(sources, ","))
-		t.logger.Debug("Setting sources: %s", joinStrings(sources, ","))
+		t.logger.Debug("setting sources", zap.String("sources", joinStrings(sources, ",")))
 	}
 
 	// Add agents if specified
@@ -570,29 +577,29 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 
 		agentsJSONBytes, err := json.Marshal(agentsJSON)
 		if err != nil {
-			t.logger.Warning("Failed to marshal agents to JSON: %v", err)
+			t.logger.Warn("failed to marshal agents to JSON", zap.Error(err))
 		} else {
 			args = append(args, "--agents", string(agentsJSONBytes))
-			t.logger.Debug("Agents configuration: %s", string(agentsJSONBytes))
+			t.logger.Debug("agents configuration", zap.String("agents_json", string(agentsJSONBytes)))
 		}
 	}
 
 	// Add effort level if specified
 	if t.options != nil && t.options.Effort != nil {
 		args = append(args, "--effort", string(*t.options.Effort))
-		t.logger.Debug("Setting effort level: %s", string(*t.options.Effort))
+		t.logger.Debug("setting effort level", zap.String("effort", string(*t.options.Effort)))
 	}
 
 	// Add fallback model if specified
 	if t.options != nil && t.options.FallbackModel != nil {
 		args = append(args, "--fallback-model", *t.options.FallbackModel)
-		t.logger.Debug("Setting fallback model: %s", *t.options.FallbackModel)
+		t.logger.Debug("setting fallback model", zap.String("fallback_model", *t.options.FallbackModel))
 	}
 
 	// Add session ID if specified
 	if t.options != nil && t.options.SessionID != nil {
 		args = append(args, "--session-id", *t.options.SessionID)
-		t.logger.Debug("Setting session ID: %s", *t.options.SessionID)
+		t.logger.Debug("setting session ID", zap.String("session_id", *t.options.SessionID))
 	}
 
 	// Add no-session-persistence flag if PersistSession is explicitly false
@@ -605,10 +612,10 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 	if t.options != nil && t.options.OutputFormat != nil {
 		schemaJSON, err := json.Marshal(t.options.OutputFormat)
 		if err != nil {
-			t.logger.Warning("Failed to marshal output format to JSON: %v", err)
+			t.logger.Warn("failed to marshal output format to JSON", zap.Error(err))
 		} else {
 			args = append(args, "--json-schema", string(schemaJSON))
-			t.logger.Debug("Setting JSON schema output format: %s", string(schemaJSON))
+			t.logger.Debug("setting JSON schema output format", zap.String("schema", string(schemaJSON)))
 		}
 	}
 
@@ -617,7 +624,7 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		settingsJSON := t.buildSettingsJSON()
 		if settingsJSON != "" {
 			args = append(args, "--settings", settingsJSON)
-			t.logger.Debug("Setting settings JSON: %s", settingsJSON)
+			t.logger.Debug("setting settings JSON", zap.String("settings", settingsJSON))
 		}
 	}
 
@@ -638,10 +645,10 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		if len(subagentJSON) > 0 {
 			subagentJSONBytes, err := json.Marshal(subagentJSON)
 			if err != nil {
-				t.logger.Warning("Failed to marshal subagent execution config to JSON: %v", err)
+				t.logger.Warn("failed to marshal subagent execution config to JSON", zap.Error(err))
 			} else {
 				args = append(args, "--subagent-execution", string(subagentJSONBytes))
-				t.logger.Debug("Subagent execution configuration: %s", string(subagentJSONBytes))
+				t.logger.Debug("subagent execution configuration", zap.String("config", string(subagentJSONBytes)))
 			}
 		}
 	}
@@ -649,7 +656,7 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 	// Add --resume-session-at flag
 	if t.options != nil && t.options.ResumeSessionAt != nil {
 		args = append(args, "--resume-session-at", *t.options.ResumeSessionAt)
-		t.logger.Debug("Setting resume session at: %s", *t.options.ResumeSessionAt)
+		t.logger.Debug("setting resume session at", zap.String("resume_at", *t.options.ResumeSessionAt))
 	}
 
 	// Add --tools flag ([]string joined by comma, or JSON for preset)
@@ -658,16 +665,16 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		case []string:
 			if len(v) > 0 {
 				args = append(args, "--tools", joinStrings(v, ","))
-				t.logger.Debug("Setting tools: %v", v)
+				t.logger.Debug("setting tools", zap.Strings("tools", v))
 			}
 		default:
 			// Serialize non-string-slice values as JSON (e.g., preset objects)
 			toolsJSON, err := json.Marshal(v)
 			if err != nil {
-				t.logger.Warning("Failed to marshal tools to JSON: %v", err)
+				t.logger.Warn("failed to marshal tools to JSON", zap.Error(err))
 			} else {
 				args = append(args, "--tools", string(toolsJSON))
-				t.logger.Debug("Setting tools (JSON): %s", string(toolsJSON))
+				t.logger.Debug("setting tools (JSON)", zap.String("tools_json", string(toolsJSON)))
 			}
 		}
 	}
@@ -675,7 +682,7 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 	// Add --debug-file flag
 	if t.options != nil && t.options.DebugFile != nil {
 		args = append(args, "--debug-file", *t.options.DebugFile)
-		t.logger.Debug("Setting debug file: %s", *t.options.DebugFile)
+		t.logger.Debug("setting debug file", zap.String("debug_file", *t.options.DebugFile))
 	}
 
 	// Add --strict-mcp-config flag
@@ -716,7 +723,7 @@ func (t *SubprocessCLITransport) buildSettingsJSON() string {
 	settings := make(map[string]interface{})
 	if t.options.Settings != nil && *t.options.Settings != "" {
 		if err := json.Unmarshal([]byte(*t.options.Settings), &settings); err != nil {
-			t.logger.Warning("Failed to parse user settings JSON, using typed fields only: %v", err)
+			t.logger.Warn("failed to parse user settings JSON, using typed fields only", zap.Error(err))
 		}
 	}
 
@@ -744,7 +751,7 @@ func (t *SubprocessCLITransport) buildSettingsJSON() string {
 
 	result, err := json.Marshal(settings)
 	if err != nil {
-		t.logger.Warning("Failed to marshal settings JSON: %v", err)
+		t.logger.Warn("failed to marshal settings JSON", zap.Error(err))
 		return ""
 	}
 	return string(result)
@@ -757,9 +764,9 @@ func (t *SubprocessCLITransport) buildSettingsJSON() string {
 // caller's context expires before the process exits.
 func (t *SubprocessCLITransport) Close(ctx context.Context) error {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 
 	if t.cmd == nil && t.customProcess == nil {
+		t.mu.Unlock()
 		return nil // Not connected
 	}
 
@@ -773,10 +780,20 @@ func (t *SubprocessCLITransport) Close(ctx context.Context) error {
 	}
 
 	// 2. Wait for process to exit.
+	var err error
 	if t.customProcess != nil {
-		return t.closeCustomProcess(ctx)
+		err = t.closeCustomProcess(ctx)
+	} else {
+		err = t.closeExecCommand(ctx)
 	}
-	return t.closeExecCommand(ctx)
+	t.mu.Unlock()
+
+	// 3. Wait for readStderr goroutine to finish.
+	// This MUST happen after releasing t.mu because readStderr may call
+	// OnError which acquires t.mu — waiting under lock would deadlock.
+	t.wg.Wait()
+
+	return err
 }
 
 // closeCustomProcess handles cleanup for a custom-spawned process.
@@ -883,6 +900,8 @@ func (t *SubprocessCLITransport) ProcessID() int {
 // It also parses known error patterns and stores them as typed errors.
 // stderr is passed as a parameter to avoid a data race with Connect() overwriting t.stderr.
 func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadCloser) {
+	defer t.wg.Done()
+
 	if stderr == nil {
 		return
 	}
@@ -919,7 +938,7 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadC
 						"  3. Use custom path: opts.WithCustomStderrLogFile(\"/path/to/file.log\")\n",
 					logPath, err, logDir, logPath)
 			} else {
-				t.logger.Debug("Stderr file logging enabled: %s", logPath)
+				t.logger.Debug("stderr file logging enabled", zap.String("path", logPath))
 			}
 		}
 	}
@@ -979,7 +998,7 @@ func (t *SubprocessCLITransport) parseStderrError(stderrText string) {
 		t.OnError(err)
 
 		// Log it
-		t.logger.Error("Claude session not found: %s", sessionID)
+		t.logger.Error("Claude session not found", zap.String("session_id", sessionID))
 	}
 }
 

@@ -2,6 +2,7 @@ package transport
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
@@ -77,17 +78,23 @@ func NewJSONLineWriter(w io.Writer) *JSONLineWriter {
 // The data is written to the buffer and then immediately flushed.
 func (w *JSONLineWriter) WriteLine(data string) error {
 	if _, err := w.writer.WriteString(data); err != nil {
-		return err
+		return fmt.Errorf("transport.JSONLineWriter.WriteLine: write data: %w", err)
 	}
 
 	if _, err := w.writer.WriteString("\n"); err != nil {
-		return err
+		return fmt.Errorf("transport.JSONLineWriter.WriteLine: write newline: %w", err)
 	}
 
-	return w.writer.Flush()
+	if err := w.writer.Flush(); err != nil {
+		return fmt.Errorf("transport.JSONLineWriter.WriteLine: flush: %w", err)
+	}
+	return nil
 }
 
 // Flush flushes any buffered data to the underlying writer.
 func (w *JSONLineWriter) Flush() error {
-	return w.writer.Flush()
+	if err := w.writer.Flush(); err != nil {
+		return fmt.Errorf("transport.JSONLineWriter.Flush: %w", err)
+	}
+	return nil
 }

@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"fmt"
 )
 
 // SystemMessageSubtype constants for common system message subtypes
@@ -182,7 +183,7 @@ func (m *UserMessage) UnmarshalJSON(data []byte) error {
 	}
 
 	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
+		return fmt.Errorf("types.UserMessage.UnmarshalJSON: %w", err)
 	}
 
 	var contentRaw json.RawMessage
@@ -225,7 +226,7 @@ func (m *UserMessage) UnmarshalJSON(data []byte) error {
 		for i, rawBlock := range contentArr {
 			block, err := UnmarshalContentBlock(rawBlock)
 			if err != nil {
-				return err
+				return fmt.Errorf("types.UserMessage.UnmarshalJSON: unmarshal content block %d: %w", i, err)
 			}
 			blocks[i] = block
 		}
@@ -268,7 +269,7 @@ func (m *AssistantMessage) UnmarshalJSON(data []byte) error {
 	}
 
 	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
+		return fmt.Errorf("types.AssistantMessage.UnmarshalJSON: %w", err)
 	}
 
 	var contentBlocks []json.RawMessage
@@ -300,7 +301,7 @@ func (m *AssistantMessage) UnmarshalJSON(data []byte) error {
 	for i, rawBlock := range contentBlocks {
 		block, err := UnmarshalContentBlock(rawBlock)
 		if err != nil {
-			return err
+			return fmt.Errorf("types.AssistantMessage.UnmarshalJSON: unmarshal content block %d: %w", i, err)
 		}
 		m.Content[i] = block
 	}
