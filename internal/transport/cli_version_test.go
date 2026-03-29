@@ -55,7 +55,9 @@ func TestParseSemanticVersion(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			version, err := ParseSemanticVersion(tt.versionStr)
 
 			if tt.expectError {
@@ -136,7 +138,9 @@ func TestSemanticVersionIsAtLeast(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := tt.version.IsAtLeast(tt.required)
 			if result != tt.expected {
 				t.Errorf("Expected %v.IsAtLeast(%v) to be %v, got %v",
@@ -167,7 +171,9 @@ func TestSemanticVersionString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.expected, func(t *testing.T) {
+			t.Parallel()
 			result := tt.version.String()
 			if result != tt.expected {
 				t.Errorf("Expected %s, got %s", tt.expected, result)

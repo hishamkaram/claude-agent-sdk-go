@@ -686,6 +686,7 @@ func (q *Query) sendErrorResponse(requestID string, errorMsg string) {
 
 	data, err := json.Marshal(controlResponse)
 	if err != nil {
+		q.logger.Error("sendErrorResponse: failed to marshal error response", zap.Error(err))
 		return
 	}
 

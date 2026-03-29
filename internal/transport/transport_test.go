@@ -67,6 +67,7 @@ func TestFindCLI(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			cleanup := tt.setup()
 			defer cleanup()
@@ -131,7 +132,9 @@ func TestExpandHome(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Replace placeholder with actual home dir
 			want := strings.ReplaceAll(tt.want, "HOME_DIR", homeDir)
 
@@ -181,7 +184,9 @@ func TestJSONLineReader(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			reader := NewJSONLineReader(strings.NewReader(tt.input))
 
 			var got []string
@@ -266,7 +271,9 @@ func TestJSONLineWriter(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var buf bytes.Buffer
 			writer := NewJSONLineWriter(&buf)
 
@@ -634,7 +641,9 @@ func TestExtractSessionNotFoundError(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			gotMatched, gotSessionID := extractSessionNotFoundError(tt.stderrText)
 
 			if gotMatched != tt.wantMatched {
@@ -722,7 +731,9 @@ func TestForkSessionFlag(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Create options with fork session setting
 			opts := types.NewClaudeAgentOptions().
 				WithForkSession(tt.forkSession)
@@ -807,7 +818,9 @@ func TestBuildCommandArgs_SystemPrompt(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			opts := types.NewClaudeAgentOptions()
 			if tt.systemPrompt != nil {
 				opts.WithSystemPrompt(tt.systemPrompt)
@@ -981,7 +994,9 @@ func TestBuildCommandArgs_Plugins(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			opts := types.NewClaudeAgentOptions().WithPlugins(tt.plugins)
 
 			logger := log.NewLogger(false)

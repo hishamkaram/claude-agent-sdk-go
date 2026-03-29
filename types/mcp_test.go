@@ -50,7 +50,9 @@ func TestNewSDKMCPServer_Success(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			server, err := NewSDKMCPServer("test-server", tt.tools...)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("NewSDKMCPServer() error = %v, wantErr %v", err, tt.wantErr)
@@ -138,7 +140,9 @@ func TestNewSDKMCPServer_Errors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := NewSDKMCPServer(tt.serverName, tt.tools...)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("NewSDKMCPServer() error = %v, wantErr %v", err, tt.wantErr)
@@ -562,7 +566,9 @@ func TestToolValidate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			err := tt.tool.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)

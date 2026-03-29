@@ -131,7 +131,9 @@ func TestQueryIntegration_ErrorHandling(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			opts := types.NewClaudeAgentOptions().WithCLIPath(tt.cliPath)
 			_, err := claude.Query(ctx, tt.prompt, opts)
 
