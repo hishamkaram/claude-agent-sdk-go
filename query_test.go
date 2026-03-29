@@ -9,6 +9,7 @@ import (
 )
 
 func TestQuery_EmptyPrompt(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts := types.NewClaudeAgentOptions()
 
@@ -22,6 +23,7 @@ func TestQuery_EmptyPrompt(t *testing.T) {
 }
 
 func TestQuery_NilOptions(t *testing.T) {
+	t.Parallel()
 	// This test just ensures nil options don't panic
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -41,6 +43,7 @@ func TestQuery_NilOptions(t *testing.T) {
 }
 
 func TestQuery_CLINotFound(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts := types.NewClaudeAgentOptions().WithCLIPath("/nonexistent/path/to/claude")
 
@@ -55,6 +58,7 @@ func TestQuery_CLINotFound(t *testing.T) {
 }
 
 func TestQuery_ContextCancellation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
@@ -82,6 +86,7 @@ func TestQuery_ContextCancellation(t *testing.T) {
 }
 
 func TestQuery_WithOptions(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
@@ -106,6 +111,7 @@ func TestQuery_WithOptions(t *testing.T) {
 // TestQuery_Integration is an integration test that requires Claude CLI to be installed.
 // It's skipped by default but can be run with: go test -tags=integration
 func TestQuery_Integration(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}

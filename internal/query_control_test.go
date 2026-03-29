@@ -49,7 +49,8 @@ func sendControlResponse(t *testing.T, transport *mockTransport, extraFields map
 // newTestQuery creates a Query for unit tests with an already-started loop.
 func newTestQuery(t *testing.T, transport *mockTransport) *Query {
 	t.Helper()
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
 	opts := types.NewClaudeAgentOptions()
 	logger := log.NewLogger(false)
 	q := NewQuery(ctx, transport, opts, logger, true)

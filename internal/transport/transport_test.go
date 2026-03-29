@@ -19,6 +19,7 @@ import (
 
 // TestFindCLI tests CLI discovery in various scenarios
 func TestFindCLI(t *testing.T) {
+	// Cannot use t.Parallel() because t.Setenv is used below.
 	// Disable version checking for these tests since we're using mock binaries
 	t.Setenv("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK", "1")
 
@@ -95,6 +96,7 @@ func TestFindCLI(t *testing.T) {
 
 // TestExpandHome tests home directory expansion
 func TestExpandHome(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -143,6 +145,7 @@ func TestExpandHome(t *testing.T) {
 
 // TestJSONLineReader tests buffered JSON line reading
 func TestJSONLineReader(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -217,6 +220,7 @@ func TestJSONLineReader(t *testing.T) {
 
 // TestJSONLineReaderBufferOverflow tests buffer size limits
 func TestJSONLineReaderBufferOverflow(t *testing.T) {
+	t.Parallel()
 	// Create a JSON line larger than the buffer
 	// Note: bufio.Scanner needs significantly larger input to trigger the error
 	smallBufferSize := 1024
@@ -237,6 +241,7 @@ func TestJSONLineReaderBufferOverflow(t *testing.T) {
 
 // TestJSONLineWriter tests buffered JSON line writing
 func TestJSONLineWriter(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		lines []string
@@ -281,6 +286,7 @@ func TestJSONLineWriter(t *testing.T) {
 
 // TestSubprocessCLITransportConnect tests subprocess connection
 func TestSubprocessCLITransportConnect(t *testing.T) {
+	t.Parallel()
 	echoPath, err := FindMockCLI(t)
 	if err != nil {
 		t.Skip("No mock CLI available for testing")
@@ -310,6 +316,7 @@ func TestSubprocessCLITransportConnect(t *testing.T) {
 
 // TestSubprocessCLITransportWrite tests writing to subprocess
 func TestSubprocessCLITransportWrite(t *testing.T) {
+	t.Parallel()
 	catPath, err := FindMockCLI(t)
 	if err != nil {
 		t.Skip("No mock CLI available for testing")
@@ -338,6 +345,7 @@ func TestSubprocessCLITransportWrite(t *testing.T) {
 
 // TestSubprocessCLITransportClose tests subprocess cleanup
 func TestSubprocessCLITransportClose(t *testing.T) {
+	t.Parallel()
 	echoPath, err := FindMockCLI(t)
 	if err != nil {
 		t.Skip("No mock CLI available for testing")
@@ -366,6 +374,7 @@ func TestSubprocessCLITransportClose(t *testing.T) {
 
 // TestMessageReaderLoop tests message reading and parsing
 func TestMessageReaderLoop(t *testing.T) {
+	t.Parallel()
 	// Create a mock JSON stream
 	jsonStream := `{"type":"user","content":"hello"}` + "\n" +
 		`{"type":"assistant","content":[{"type":"text","text":"hi"}],"model":"claude-3"}` + "\n" +
@@ -424,6 +433,7 @@ func TestMessageReaderLoop(t *testing.T) {
 
 // TestSubprocessEnvironment tests environment variable setup
 func TestSubprocessEnvironment(t *testing.T) {
+	t.Parallel()
 	echoPath, err := FindMockCLI(t)
 	if err != nil {
 		t.Skip("No mock CLI available for testing")
@@ -515,6 +525,7 @@ func BenchmarkJSONLineWriter(b *testing.B) {
 // TestIntegrationSubprocessCLI tests end-to-end subprocess communication
 // This test requires the actual Claude CLI to be installed
 func TestIntegrationSubprocessCLI(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
@@ -577,6 +588,7 @@ func TestIntegrationSubprocessCLI(t *testing.T) {
 
 // TestExtractSessionNotFoundError tests parsing of session not found errors from stderr
 func TestExtractSessionNotFoundError(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		stderrText    string
@@ -638,6 +650,7 @@ func TestExtractSessionNotFoundError(t *testing.T) {
 
 // TestParseStderrError tests the stderr error parsing and error creation
 func TestParseStderrError(t *testing.T) {
+	t.Parallel()
 	logger := log.NewLogger(false)
 	transport := &SubprocessCLITransport{
 		logger:   logger,
@@ -670,6 +683,7 @@ func TestParseStderrError(t *testing.T) {
 
 // TestForkSessionFlag tests that --fork-session flag is passed when ForkSession is true
 func TestForkSessionFlag(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		resumeSessionID string
@@ -758,6 +772,7 @@ func contains(slice []string, str string) bool {
 
 // TestBuildCommandArgs_SystemPrompt tests system prompt handling to match Python SDK behavior
 func TestBuildCommandArgs_SystemPrompt(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		systemPrompt interface{}
@@ -835,6 +850,7 @@ func TestBuildCommandArgs_SystemPrompt(t *testing.T) {
 
 // TestBuildCommandArgs_SystemPromptPreset tests system prompt preset handling
 func TestBuildCommandArgs_SystemPromptPreset(t *testing.T) {
+	t.Parallel()
 	appendText := "Additional instructions here"
 	preset := types.SystemPromptPreset{
 		Type:   "preset",
@@ -892,6 +908,7 @@ func TestBuildCommandArgs_SystemPromptPreset(t *testing.T) {
 
 // TestBuildCommandArgs_NoOptions tests that empty system prompt is used when no options provided
 func TestBuildCommandArgs_NoOptions(t *testing.T) {
+	t.Parallel()
 	logger := log.NewLogger(false)
 	transport := NewSubprocessCLITransport(
 		"/usr/local/bin/claude",
@@ -926,6 +943,7 @@ func TestBuildCommandArgs_NoOptions(t *testing.T) {
 
 // TestBuildCommandArgs_Plugins tests plugin CLI argument generation
 func TestBuildCommandArgs_Plugins(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		plugins   []types.PluginConfig
@@ -1013,6 +1031,7 @@ func TestBuildCommandArgs_Plugins(t *testing.T) {
 
 // TestBuildCommandArgs_PluginsWithOtherOptions tests plugins work with other options
 func TestBuildCommandArgs_PluginsWithOtherOptions(t *testing.T) {
+	t.Parallel()
 	opts := types.NewClaudeAgentOptions().
 		WithLocalPlugin("./my-plugin").
 		WithModel("claude-3-5-sonnet-20241022").
@@ -1059,6 +1078,7 @@ func TestBuildCommandArgs_PluginsWithOtherOptions(t *testing.T) {
 
 // TestBuildCommandArgs_Betas tests beta feature flag handling.
 func TestBuildCommandArgs_Betas(t *testing.T) {
+	t.Parallel()
 	t.Run("no betas", func(t *testing.T) {
 		opts := types.NewClaudeAgentOptions()
 
@@ -1227,6 +1247,7 @@ func TestBuildCommandArgs_Betas(t *testing.T) {
 
 // TestStderrFileLogging tests stderr file logging functionality
 func TestStderrFileLogging(t *testing.T) {
+	t.Parallel()
 	t.Run("disabled by default", func(t *testing.T) {
 		// Create options without stderr file logging
 		opts := types.NewClaudeAgentOptions()
@@ -1367,6 +1388,7 @@ func TestStderrFileLogging(t *testing.T) {
 
 // TestStderrFileLogging_DirectoryCreation tests that parent directories are created
 func TestStderrFileLogging_DirectoryCreation(t *testing.T) {
+	t.Parallel()
 	tempDir := t.TempDir()
 
 	// Create nested path that doesn't exist
@@ -1413,6 +1435,7 @@ func TestStderrFileLogging_DirectoryCreation(t *testing.T) {
 
 // TestBuildCommandArgs_Agents tests agent configuration JSON serialization
 func TestBuildCommandArgs_Agents(t *testing.T) {
+	t.Parallel()
 	t.Run("single agent with all fields", func(t *testing.T) {
 		mode := types.SubagentExecutionModeParallel
 		timeout := 30.5
@@ -1635,6 +1658,7 @@ func TestBuildCommandArgs_Agents(t *testing.T) {
 
 // TestBuildCommandArgs_SubagentExecution tests subagent execution config JSON serialization
 func TestBuildCommandArgs_SubagentExecution(t *testing.T) {
+	t.Parallel()
 	t.Run("subagent execution with all fields", func(t *testing.T) {
 		config := types.NewSubagentExecutionConfig()
 		config.MultiInvocation = types.MultiInvocationModeParallel
@@ -1761,6 +1785,7 @@ func TestBuildCommandArgs_SubagentExecution(t *testing.T) {
 
 // TestBuildCommandArgs_AgentsWithSubagentExecution tests agents and subagent config together
 func TestBuildCommandArgs_AgentsWithSubagentExecution(t *testing.T) {
+	t.Parallel()
 	mode := types.SubagentExecutionModeParallel
 	subagentConfig := types.NewSubagentExecutionConfig()
 	subagentConfig.MaxConcurrent = 4

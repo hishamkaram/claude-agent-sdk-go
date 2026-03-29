@@ -93,6 +93,7 @@ func (m *mockTransport) getWrittenData() []string {
 
 // TestNewQuery tests Query construction.
 func TestNewQuery(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	transport := newMockTransport()
 	opts := types.NewClaudeAgentOptions()
@@ -116,7 +117,9 @@ func TestNewQuery(t *testing.T) {
 
 // TestInitialize tests Query initialization with hooks.
 func TestInitialize(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	transport := newMockTransport()
 
 	// Create hook callback
@@ -220,7 +223,9 @@ func TestInitialize(t *testing.T) {
 
 // TestErrorResponse tests error response handling.
 func TestErrorResponse(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	transport := newMockTransport()
 	opts := types.NewClaudeAgentOptions()
 
@@ -293,7 +298,9 @@ func TestErrorResponse(t *testing.T) {
 
 // TestQueryStartStop tests lifecycle management.
 func TestQueryStartStop(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	transport := newMockTransport()
 	opts := types.NewClaudeAgentOptions()
 
@@ -331,6 +338,7 @@ func TestQueryStartStop(t *testing.T) {
 
 // TestHandlePermissionRequest tests permission callback handling.
 func TestHandlePermissionRequest(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		requestData    map[string]interface{}
@@ -412,7 +420,9 @@ func TestHandlePermissionRequest(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			transport := newMockTransport()
 
@@ -461,6 +471,7 @@ func TestHandlePermissionRequest(t *testing.T) {
 
 // TestHandleHookCallback tests hook callback handling.
 func TestHandleHookCallback(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	transport := newMockTransport()
 
@@ -508,6 +519,7 @@ func TestHandleHookCallback(t *testing.T) {
 
 // TestHandleMCPMessage tests MCP message routing.
 func TestHandleMCPMessage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	transport := newMockTransport()
 	opts := types.NewClaudeAgentOptions()
@@ -572,7 +584,9 @@ func TestHandleMCPMessage(t *testing.T) {
 
 // TestRequestResponseCorrelation tests request-response pairing.
 func TestRequestResponseCorrelation(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	transport := newMockTransport()
 	opts := types.NewClaudeAgentOptions()
 
@@ -654,7 +668,9 @@ func TestRequestResponseCorrelation(t *testing.T) {
 
 // TestMessageRouting tests that normal messages pass through to consumer.
 func TestMessageRouting(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	transport := newMockTransport()
 	opts := types.NewClaudeAgentOptions()
 
@@ -693,7 +709,9 @@ func TestMessageRouting(t *testing.T) {
 
 // TestControlMessageFiltering tests that control messages don't leak to consumer.
 func TestControlMessageFiltering(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	transport := newMockTransport()
 	opts := types.NewClaudeAgentOptions()
 
@@ -743,7 +761,9 @@ func TestControlMessageFiltering(t *testing.T) {
 
 // TestConcurrentRequests tests multiple simultaneous requests.
 func TestConcurrentRequests(t *testing.T) {
-	ctx := context.Background()
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	transport := newMockTransport()
 	opts := types.NewClaudeAgentOptions()
 
@@ -847,6 +867,7 @@ func TestConcurrentRequests(t *testing.T) {
 
 // TestContextCancellation tests cleanup on context cancellation.
 func TestContextCancellation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	transport := newMockTransport()
 	opts := types.NewClaudeAgentOptions()
@@ -877,6 +898,7 @@ func TestContextCancellation(t *testing.T) {
 
 // TestCallbackTimeouts tests timeout handling for callbacks.
 func TestCallbackTimeouts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	transport := newMockTransport()
 

@@ -7,6 +7,7 @@ import (
 
 // TestPermissionModeConstants tests that permission mode constants are defined correctly.
 func TestPermissionModeConstants(t *testing.T) {
+	t.Parallel()
 	modes := []PermissionMode{
 		PermissionModeDefault,
 		PermissionModeAcceptEdits,
@@ -23,6 +24,7 @@ func TestPermissionModeConstants(t *testing.T) {
 
 // TestPermissionUpdateMarshaling tests JSON marshaling of PermissionUpdate.
 func TestPermissionUpdateMarshaling(t *testing.T) {
+	t.Parallel()
 	behavior := PermissionBehaviorAllow
 	update := &PermissionUpdate{
 		Type: "addRules",
@@ -55,6 +57,7 @@ func TestPermissionUpdateMarshaling(t *testing.T) {
 
 // TestSDKControlPermissionRequest tests JSON marshaling of SDKControlPermissionRequest.
 func TestSDKControlPermissionRequest(t *testing.T) {
+	t.Parallel()
 	req := &SDKControlPermissionRequest{
 		Subtype:  "can_use_tool",
 		ToolName: "Bash",
@@ -80,6 +83,7 @@ func TestSDKControlPermissionRequest(t *testing.T) {
 
 // TestHookEventConstants tests that hook event constants are defined correctly.
 func TestHookEventConstants(t *testing.T) {
+	t.Parallel()
 	events := []HookEvent{
 		HookEventPreToolUse,
 		HookEventPostToolUse,
@@ -98,6 +102,7 @@ func TestHookEventConstants(t *testing.T) {
 
 // TestPreToolUseHookInput tests JSON marshaling of PreToolUseHookInput.
 func TestPreToolUseHookInput(t *testing.T) {
+	t.Parallel()
 	input := &PreToolUseHookInput{
 		BaseHookInput: BaseHookInput{
 			SessionID:      "session-123",

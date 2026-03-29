@@ -7,6 +7,7 @@ import (
 
 // TestCLINotFoundError tests CLINotFoundError creation and methods.
 func TestCLINotFoundError(t *testing.T) {
+	t.Parallel()
 	t.Run("basic error", func(t *testing.T) {
 		err := NewCLINotFoundError("CLI not found")
 		if err.Error() != "CLI not found" {
@@ -33,6 +34,7 @@ func TestCLINotFoundError(t *testing.T) {
 
 // TestProcessError tests ProcessError creation and methods.
 func TestProcessError(t *testing.T) {
+	t.Parallel()
 	t.Run("basic error", func(t *testing.T) {
 		err := NewProcessError("process failed")
 		if err.Error() != "process failed" {
@@ -51,6 +53,7 @@ func TestProcessError(t *testing.T) {
 
 // TestJSONDecodeError tests JSONDecodeError creation and methods.
 func TestJSONDecodeError(t *testing.T) {
+	t.Parallel()
 	t.Run("basic error", func(t *testing.T) {
 		err := NewJSONDecodeError("invalid JSON")
 		if err.Error() != "invalid JSON" {
@@ -71,6 +74,7 @@ func TestJSONDecodeError(t *testing.T) {
 
 // TestMessageParseError tests MessageParseError creation and methods.
 func TestMessageParseError(t *testing.T) {
+	t.Parallel()
 	t.Run("basic error", func(t *testing.T) {
 		err := NewMessageParseError("failed to parse")
 		if err.Error() != "failed to parse" {
@@ -88,6 +92,7 @@ func TestMessageParseError(t *testing.T) {
 
 // TestPermissionDeniedError tests PermissionDeniedError creation and methods.
 func TestPermissionDeniedError(t *testing.T) {
+	t.Parallel()
 	t.Run("basic error", func(t *testing.T) {
 		err := NewPermissionDeniedError("permission denied")
 		if err.Error() != "permission denied" {
@@ -112,6 +117,7 @@ func TestPermissionDeniedError(t *testing.T) {
 
 // TestSessionNotFoundError tests SessionNotFoundError creation and methods.
 func TestSessionNotFoundError(t *testing.T) {
+	t.Parallel()
 	t.Run("basic error", func(t *testing.T) {
 		err := NewSessionNotFoundError("", "session not found")
 		if err.Error() != "session not found" {

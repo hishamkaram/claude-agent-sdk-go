@@ -9,6 +9,7 @@ import (
 
 // TestWithMaxThinkingTokens tests the WithMaxThinkingTokens builder method.
 func TestWithMaxThinkingTokens(t *testing.T) {
+	t.Parallel()
 	opts := NewClaudeAgentOptions()
 
 	// Test setting max thinking tokens
@@ -31,6 +32,7 @@ func TestWithMaxThinkingTokens(t *testing.T) {
 
 // TestWithMaxBudgetUSD tests the WithMaxBudgetUSD builder method.
 func TestWithMaxBudgetUSD(t *testing.T) {
+	t.Parallel()
 	opts := NewClaudeAgentOptions()
 
 	// Test setting max budget
@@ -53,6 +55,7 @@ func TestWithMaxBudgetUSD(t *testing.T) {
 
 // TestOptionsChaining tests that the builder methods can be chained together.
 func TestOptionsChaining(t *testing.T) {
+	t.Parallel()
 	opts := NewClaudeAgentOptions().
 		WithMaxThinkingTokens(8000).
 		WithMaxBudgetUSD(25.00).
@@ -79,6 +82,7 @@ func TestOptionsChaining(t *testing.T) {
 
 // TestNewClaudeAgentOptions tests that the constructor creates a valid instance.
 func TestNewClaudeAgentOptions(t *testing.T) {
+	t.Parallel()
 	opts := NewClaudeAgentOptions()
 
 	// Check that optional fields are nil by default
@@ -102,6 +106,7 @@ func TestNewClaudeAgentOptions(t *testing.T) {
 
 // TestWithMaxThinkingTokensZeroValue tests that zero values can be set.
 func TestWithMaxThinkingTokensZeroValue(t *testing.T) {
+	t.Parallel()
 	opts := NewClaudeAgentOptions().WithMaxThinkingTokens(0)
 
 	if opts.MaxThinkingTokens == nil {
@@ -115,6 +120,7 @@ func TestWithMaxThinkingTokensZeroValue(t *testing.T) {
 
 // TestWithMaxBudgetUSDZeroValue tests that zero budget can be set.
 func TestWithMaxBudgetUSDZeroValue(t *testing.T) {
+	t.Parallel()
 	opts := NewClaudeAgentOptions().WithMaxBudgetUSD(0.0)
 
 	if opts.MaxBudgetUSD == nil {
@@ -128,6 +134,7 @@ func TestWithMaxBudgetUSDZeroValue(t *testing.T) {
 
 // TestPluginConfig tests PluginConfig type and validation.
 func TestPluginConfig(t *testing.T) {
+	t.Parallel()
 	t.Run("NewLocalPluginConfig", func(t *testing.T) {
 		plugin := NewLocalPluginConfig("/path/to/plugin")
 		if plugin.Type != "local" {
@@ -168,6 +175,7 @@ func TestPluginConfig(t *testing.T) {
 
 // TestClaudeAgentOptions_Plugins tests plugin builder methods.
 func TestClaudeAgentOptions_Plugins(t *testing.T) {
+	t.Parallel()
 	t.Run("WithPlugins", func(t *testing.T) {
 		opts := NewClaudeAgentOptions()
 		plugins := []PluginConfig{
@@ -252,6 +260,7 @@ func TestClaudeAgentOptions_Plugins(t *testing.T) {
 
 // TestWithBetas tests the WithBetas builder method.
 func TestWithBetas(t *testing.T) {
+	t.Parallel()
 	t.Run("WithBetas sets multiple beta flags", func(t *testing.T) {
 		opts := NewClaudeAgentOptions()
 		betas := []string{"context-1m-2025-08-07"}
@@ -299,6 +308,7 @@ func TestWithBetas(t *testing.T) {
 
 // TestWithBeta tests the WithBeta builder method.
 func TestWithBeta(t *testing.T) {
+	t.Parallel()
 	t.Run("WithBeta adds single beta flag", func(t *testing.T) {
 		opts := NewClaudeAgentOptions()
 
@@ -350,6 +360,7 @@ func TestWithBeta(t *testing.T) {
 
 // TestSubagentExecutionModeConstants tests the SubagentExecutionMode enum values.
 func TestSubagentExecutionModeConstants(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		mode     SubagentExecutionMode
 		expected string
@@ -368,6 +379,7 @@ func TestSubagentExecutionModeConstants(t *testing.T) {
 
 // TestMultiInvocationModeConstants tests the MultiInvocationMode enum values.
 func TestMultiInvocationModeConstants(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		mode     MultiInvocationMode
 		expected string
@@ -386,6 +398,7 @@ func TestMultiInvocationModeConstants(t *testing.T) {
 
 // TestSubagentErrorHandlingConstants tests the SubagentErrorHandling enum values.
 func TestSubagentErrorHandlingConstants(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		mode     SubagentErrorHandling
 		expected string
@@ -403,6 +416,7 @@ func TestSubagentErrorHandlingConstants(t *testing.T) {
 
 // TestNewSubagentExecutionConfig tests the NewSubagentExecutionConfig constructor.
 func TestNewSubagentExecutionConfig(t *testing.T) {
+	t.Parallel()
 	t.Run("creates config with sensible defaults", func(t *testing.T) {
 		config := NewSubagentExecutionConfig()
 
@@ -441,6 +455,7 @@ func TestNewSubagentExecutionConfig(t *testing.T) {
 
 // TestAgentDefinitionWithExecutionControl tests AgentDefinition with new execution control fields.
 func TestAgentDefinitionWithExecutionControl(t *testing.T) {
+	t.Parallel()
 	t.Run("agent with execution mode", func(t *testing.T) {
 		mode := SubagentExecutionModeParallel
 		agent := AgentDefinition{
@@ -521,6 +536,7 @@ func TestAgentDefinitionWithExecutionControl(t *testing.T) {
 
 // TestWithSubagentExecution tests the WithSubagentExecution builder method.
 func TestWithSubagentExecution(t *testing.T) {
+	t.Parallel()
 	t.Run("sets subagent execution config", func(t *testing.T) {
 		opts := NewClaudeAgentOptions()
 		config := NewSubagentExecutionConfig()

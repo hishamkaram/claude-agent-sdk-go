@@ -5,6 +5,7 @@ import (
 )
 
 func TestParseSemanticVersion(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		versionStr  string
@@ -77,6 +78,7 @@ func TestParseSemanticVersion(t *testing.T) {
 }
 
 func TestSemanticVersionIsAtLeast(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		version  SemanticVersion
@@ -145,6 +147,7 @@ func TestSemanticVersionIsAtLeast(t *testing.T) {
 }
 
 func TestSemanticVersionString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		version  SemanticVersion
 		expected string

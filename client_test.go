@@ -11,6 +11,7 @@ import (
 )
 
 func TestNewClient_NilOptions(t *testing.T) {
+	// Cannot use t.Parallel() because t.Setenv is used below.
 	// Disable version checking to speed up tests
 	t.Setenv("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK", "1")
 
@@ -32,6 +33,7 @@ func TestNewClient_NilOptions(t *testing.T) {
 }
 
 func TestNewClient_InvalidCLIPath(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts := types.NewClaudeAgentOptions().WithCLIPath("/nonexistent/path/to/claude")
 
@@ -47,6 +49,7 @@ func TestNewClient_InvalidCLIPath(t *testing.T) {
 }
 
 func TestNewClient_ConflictingPermissionOptions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	// Create a dummy callback
@@ -72,6 +75,7 @@ func TestNewClient_ConflictingPermissionOptions(t *testing.T) {
 }
 
 func TestClient_ConnectBeforeQuery(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
 
@@ -95,6 +99,7 @@ func TestClient_ConnectBeforeQuery(t *testing.T) {
 }
 
 func TestClient_EmptyPrompt(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
 
@@ -119,6 +124,7 @@ func TestClient_EmptyPrompt(t *testing.T) {
 }
 
 func TestClient_IsConnected(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
 
@@ -143,6 +149,7 @@ func TestClient_IsConnected(t *testing.T) {
 }
 
 func TestClient_DoubleConnect(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -177,6 +184,7 @@ func TestClient_DoubleConnect(t *testing.T) {
 }
 
 func TestClient_CloseIdempotent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
 
@@ -197,6 +205,7 @@ func TestClient_CloseIdempotent(t *testing.T) {
 }
 
 func TestClient_ContextCancellation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
 
@@ -219,6 +228,7 @@ func TestClient_ContextCancellation(t *testing.T) {
 
 // TestClient_Integration is an integration test that requires Claude CLI to be installed.
 func TestClient_Integration(t *testing.T) {
+	t.Parallel()
 	// This test requires actual Claude CLI and API key
 	if os.Getenv("RUN_INTEGRATION_TESTS") == "" {
 		t.Skip("Skipping integration test (set RUN_INTEGRATION_TESTS=1 to run)")
@@ -297,6 +307,7 @@ func TestClient_Integration(t *testing.T) {
 
 // TestClient_MultipleQueries tests multiple query/response cycles
 func TestClient_MultipleQueries(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
@@ -356,6 +367,7 @@ func TestClient_MultipleQueries(t *testing.T) {
 }
 
 func TestParseInitResult_Nil(t *testing.T) {
+	t.Parallel()
 	result := parseInitResult(nil)
 	if result != nil {
 		t.Fatal("expected nil for nil input")
@@ -363,6 +375,7 @@ func TestParseInitResult_Nil(t *testing.T) {
 }
 
 func TestParseInitResult_EmptyMap(t *testing.T) {
+	t.Parallel()
 	result := parseInitResult(map[string]interface{}{})
 	if result == nil {
 		t.Fatal("expected non-nil result for empty map")
@@ -373,6 +386,7 @@ func TestParseInitResult_EmptyMap(t *testing.T) {
 }
 
 func TestParseInitResult_WithCommands(t *testing.T) {
+	t.Parallel()
 	raw := map[string]interface{}{
 		"commands": []interface{}{
 			map[string]interface{}{
@@ -425,6 +439,7 @@ func TestParseInitResult_WithCommands(t *testing.T) {
 }
 
 func TestParseInitResult_SkipsEmptyNames(t *testing.T) {
+	t.Parallel()
 	raw := map[string]interface{}{
 		"commands": []interface{}{
 			map[string]interface{}{
@@ -454,6 +469,7 @@ func TestParseInitResult_SkipsEmptyNames(t *testing.T) {
 }
 
 func TestParseInitResult_InvalidCommandsType(t *testing.T) {
+	t.Parallel()
 	raw := map[string]interface{}{
 		"commands": "not an array",
 	}
@@ -468,6 +484,7 @@ func TestParseInitResult_InvalidCommandsType(t *testing.T) {
 }
 
 func TestClient_SlashCommands_BeforeConnect(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
 
@@ -486,6 +503,7 @@ func TestClient_SlashCommands_BeforeConnect(t *testing.T) {
 }
 
 func TestClient_InitResult_BeforeConnect(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
 
@@ -505,6 +523,7 @@ func TestClient_InitResult_BeforeConnect(t *testing.T) {
 
 // TestSetModel_BeforeConnect ensures SetModel returns CLIConnectionError when not connected.
 func TestSetModel_BeforeConnect(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
 
@@ -525,6 +544,7 @@ func TestSetModel_BeforeConnect(t *testing.T) {
 
 // TestSetPermissionMode_BeforeConnect ensures SetPermissionMode returns CLIConnectionError when not connected.
 func TestSetPermissionMode_BeforeConnect(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
 
@@ -545,6 +565,7 @@ func TestSetPermissionMode_BeforeConnect(t *testing.T) {
 
 // TestSupportedModels_BeforeConnect ensures SupportedModels returns nil when not connected.
 func TestSupportedModels_BeforeConnect(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
 
@@ -562,6 +583,7 @@ func TestSupportedModels_BeforeConnect(t *testing.T) {
 
 // TestParseInitResult_WithModels verifies that the models array is parsed correctly.
 func TestParseInitResult_WithModels(t *testing.T) {
+	t.Parallel()
 	raw := map[string]interface{}{
 		"models": []interface{}{
 			map[string]interface{}{
@@ -602,6 +624,7 @@ func TestParseInitResult_WithModels(t *testing.T) {
 
 // TestParseInitResult_ModelsEmptyArray verifies empty models array is handled.
 func TestParseInitResult_ModelsEmptyArray(t *testing.T) {
+	t.Parallel()
 	raw := map[string]interface{}{
 		"models": []interface{}{},
 	}
@@ -617,6 +640,7 @@ func TestParseInitResult_ModelsEmptyArray(t *testing.T) {
 
 // TestParseInitResult_ModelsInvalidType verifies graceful handling of unexpected type.
 func TestParseInitResult_ModelsInvalidType(t *testing.T) {
+	t.Parallel()
 	raw := map[string]interface{}{
 		"models": "not-an-array",
 	}
@@ -633,6 +657,7 @@ func TestParseInitResult_ModelsInvalidType(t *testing.T) {
 
 // TestParseInitResult_ModelsMissingFields verifies partial model entries are still parsed.
 func TestParseInitResult_ModelsMissingFields(t *testing.T) {
+	t.Parallel()
 	raw := map[string]interface{}{
 		"models": []interface{}{
 			map[string]interface{}{
@@ -659,6 +684,7 @@ func TestParseInitResult_ModelsMissingFields(t *testing.T) {
 
 // TestParseInitResult_ModelsAndCommandsTogether verifies both fields are parsed when present.
 func TestParseInitResult_ModelsAndCommandsTogether(t *testing.T) {
+	t.Parallel()
 	raw := map[string]interface{}{
 		"commands": []interface{}{
 			map[string]interface{}{
@@ -694,6 +720,7 @@ func TestParseInitResult_ModelsAndCommandsTogether(t *testing.T) {
 
 // TestParseInitResult_ModelsSkipsEmptyValue verifies models with no value are skipped.
 func TestParseInitResult_ModelsSkipsEmptyValue(t *testing.T) {
+	t.Parallel()
 	raw := map[string]interface{}{
 		"models": []interface{}{
 			map[string]interface{}{
@@ -721,6 +748,7 @@ func TestParseInitResult_ModelsSkipsEmptyValue(t *testing.T) {
 
 // TestSupportedModels_ReturnsFromInitResult verifies SupportedModels uses the stored init result.
 func TestSupportedModels_ReturnsFromInitResult(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
 

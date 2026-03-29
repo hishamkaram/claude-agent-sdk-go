@@ -936,7 +936,12 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadC
 		logPath := *t.options.StderrLogFile
 		if logPath == "" {
 			// Use default location
-			homeDir, _ := os.UserHomeDir()
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				t.logger.Warn("readStderr: could not determine home directory, stderr logging disabled",
+					zap.Error(err))
+				return
+			}
 			logPath = fmt.Sprintf("%s/.claude/agents_server/cli_stderr.log", homeDir)
 		}
 

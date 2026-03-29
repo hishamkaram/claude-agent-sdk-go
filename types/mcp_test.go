@@ -8,6 +8,7 @@ import (
 )
 
 func TestNewSDKMCPServer_Success(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		tools   []Tool
@@ -62,6 +63,7 @@ func TestNewSDKMCPServer_Success(t *testing.T) {
 }
 
 func TestNewSDKMCPServer_Errors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		serverName string
@@ -149,6 +151,7 @@ func TestNewSDKMCPServer_Errors(t *testing.T) {
 }
 
 func TestSDKMCPServer_Name(t *testing.T) {
+	t.Parallel()
 	server, _ := NewSDKMCPServer("my-server",
 		Tool{
 			Name:        "test",
@@ -163,6 +166,7 @@ func TestSDKMCPServer_Name(t *testing.T) {
 }
 
 func TestSDKMCPServer_Version(t *testing.T) {
+	t.Parallel()
 	server, _ := NewSDKMCPServer("test",
 		Tool{
 			Name:        "test",
@@ -177,6 +181,7 @@ func TestSDKMCPServer_Version(t *testing.T) {
 }
 
 func TestSDKMCPServer_HandleListTools(t *testing.T) {
+	t.Parallel()
 	server, _ := NewSDKMCPServer("test",
 		Tool{
 			Name:        "add",
@@ -263,6 +268,7 @@ func TestSDKMCPServer_HandleListTools(t *testing.T) {
 }
 
 func TestSDKMCPServer_HandleCallTool_Success(t *testing.T) {
+	t.Parallel()
 	server, _ := NewSDKMCPServer("calculator",
 		Tool{
 			Name:        "add",
@@ -329,6 +335,7 @@ func TestSDKMCPServer_HandleCallTool_Success(t *testing.T) {
 }
 
 func TestSDKMCPServer_HandleCallTool_StringResult(t *testing.T) {
+	t.Parallel()
 	server, _ := NewSDKMCPServer("greet",
 		Tool{
 			Name:        "greet",
@@ -365,6 +372,7 @@ func TestSDKMCPServer_HandleCallTool_StringResult(t *testing.T) {
 }
 
 func TestSDKMCPServer_HandleCallTool_ToolNotFound(t *testing.T) {
+	t.Parallel()
 	server, _ := NewSDKMCPServer("test",
 		Tool{
 			Name:        "exists",
@@ -408,6 +416,7 @@ func TestSDKMCPServer_HandleCallTool_ToolNotFound(t *testing.T) {
 }
 
 func TestSDKMCPServer_HandleCallTool_MissingParams(t *testing.T) {
+	t.Parallel()
 	server, _ := NewSDKMCPServer("test",
 		Tool{
 			Name:        "test",
@@ -445,6 +454,7 @@ func TestSDKMCPServer_HandleCallTool_MissingParams(t *testing.T) {
 }
 
 func TestSDKMCPServer_HandleUnknownMethod(t *testing.T) {
+	t.Parallel()
 	server, _ := NewSDKMCPServer("test",
 		Tool{
 			Name:        "test",
@@ -481,6 +491,7 @@ func TestSDKMCPServer_HandleUnknownMethod(t *testing.T) {
 }
 
 func TestSDKMCPServer_HandleCallTool_WithEmptyArgs(t *testing.T) {
+	t.Parallel()
 	server, _ := NewSDKMCPServer("test",
 		Tool{
 			Name:        "test",
@@ -516,6 +527,7 @@ func TestSDKMCPServer_HandleCallTool_WithEmptyArgs(t *testing.T) {
 }
 
 func TestToolValidate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		tool    Tool
@@ -561,6 +573,7 @@ func TestToolValidate(t *testing.T) {
 
 // Test for JSON encoding/decoding compatibility
 func TestSDKMCPServer_JSONCompatibility(t *testing.T) {
+	t.Parallel()
 	server, _ := NewSDKMCPServer("test",
 		Tool{
 			Name:        "test",
