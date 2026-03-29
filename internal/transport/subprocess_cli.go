@@ -114,11 +114,18 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) error {
 	envMap := t.buildEnvMap()
 
 	// Check if a custom process spawner is provided
+	var err error
 	if t.options != nil && t.options.SpawnProcess != nil {
-		return t.connectWithCustomSpawner(ctx, args, envMap)
+		err = t.connectWithCustomSpawner(ctx, args, envMap)
+	} else {
+		err = t.connectWithExecCommand(args, envMap)
 	}
-
-	return t.connectWithExecCommand(args, envMap)
+	if err != nil {
+		t.cancel()
+		t.cancel = nil
+		return err
+	}
+	return nil
 }
 
 // connectWithCustomSpawner uses the user-provided ProcessSpawner to create the process.
@@ -169,18 +176,23 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 		if waitErr != nil && t.err == nil {
 			t.err = types.NewProcessErrorWithCode("subprocess exited unexpectedly", t.customProcess.ExitCode())
 		}
+		cancelFn := t.cancel // capture under lock to avoid race with Close()
 		t.mu.Unlock()
 		if wasReady {
-			if t.cancel != nil {
-				t.cancel()
+			if cancelFn != nil {
+				cancelFn()
 			}
 		}
 	}()
 
-	// Launch message reader loop in goroutine.
+	// Launch message reader loop in goroutine (tracked by wg for clean shutdown).
 	// Capture stdout/stderr here (under caller's mutex) to avoid a race with
 	// a subsequent Connect() call overwriting the struct fields.
-	go t.messageReaderLoop(t.ctx, t.stdout)
+	t.wg.Add(1)
+	go func() {
+		defer t.wg.Done()
+		t.messageReaderLoop(t.ctx, t.stdout)
+	}()
 
 	// Launch stderr reader for debugging (tracked by wg for clean shutdown)
 	t.wg.Add(1)
@@ -219,16 +231,22 @@ func (t *SubprocessCLITransport) connectWithExecCommand(args []string, envMap ma
 
 	t.stdout, err = t.cmd.StdoutPipe()
 	if err != nil {
+		_ = t.stdin.Close()
+		t.stdin = nil
 		return types.NewCLIConnectionErrorWithCause("failed to create stdout pipe", err)
 	}
 
 	t.stderr, err = t.cmd.StderrPipe()
 	if err != nil {
+		_ = t.stdin.Close()
+		t.stdin = nil
 		return types.NewCLIConnectionErrorWithCause("failed to create stderr pipe", err)
 	}
 
 	// Start the process
 	if err := t.cmd.Start(); err != nil {
+		_ = t.stdin.Close()
+		t.stdin = nil
 		t.logger.Error("failed to start subprocess", zap.Error(err))
 		return types.NewCLIConnectionErrorWithCause("failed to start subprocess", err)
 	}
@@ -254,18 +272,23 @@ func (t *SubprocessCLITransport) connectWithExecCommand(args []string, envMap ma
 		if waitErr != nil && t.err == nil {
 			t.err = types.NewProcessErrorWithCode("subprocess exited unexpectedly", getExitCode(waitErr))
 		}
+		cancelFn := t.cancel // capture under lock to avoid race with Close()
 		t.mu.Unlock()
 		if wasReady {
-			if t.cancel != nil {
-				t.cancel()
+			if cancelFn != nil {
+				cancelFn()
 			}
 		}
 	}()
 
-	// Launch message reader loop in goroutine.
+	// Launch message reader loop in goroutine (tracked by wg for clean shutdown).
 	// Capture stdout/stderr here (under caller's mutex) to avoid a race with
 	// a subsequent Connect() call overwriting the struct fields.
-	go t.messageReaderLoop(t.ctx, t.stdout)
+	t.wg.Add(1)
+	go func() {
+		defer t.wg.Done()
+		t.messageReaderLoop(t.ctx, t.stdout)
+	}()
 
 	// Launch stderr reader for debugging (tracked by wg for clean shutdown)
 	t.wg.Add(1)

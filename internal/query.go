@@ -501,7 +501,10 @@ func (q *Query) handlePermissionRequest(requestData map[string]interface{}) (map
 func (q *Query) handleHookCallback(requestData map[string]interface{}) (map[string]interface{}, error) {
 	callbackID, _ := requestData["callback_id"].(string)
 	input := requestData["input"]
-	toolUseID, _ := requestData["tool_use_id"].(*string)
+	var toolUseID *string
+	if raw, ok := requestData["tool_use_id"].(string); ok && raw != "" {
+		toolUseID = &raw
+	}
 
 	if callbackID == "" {
 		return nil, types.NewControlProtocolError("missing callback_id in hook callback request")
