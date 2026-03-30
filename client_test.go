@@ -1260,6 +1260,212 @@ func TestParseInitResult_AllFieldsTogether(t *testing.T) {
 	}
 }
 
+// ===== Bug C19: Connect lock scope tests =====
+
+// TestClient_ConnectDoesNotBlockIsConnected verifies that IsConnected() is not
+// blocked by a concurrent Connect() call. With the old broad lock scope,
+// IsConnected() would block waiting for the lock while Connect() held it
+// during blocking transport operations.
+func TestClient_ConnectDoesNotBlockIsConnected(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+	}{
+		{name: "IsConnected returns immediately during Connect"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
+
+			client, err := NewClient(ctx, opts)
+			if err != nil {
+				t.Skip("Could not create client")
+			}
+			defer func() { _ = client.Close(ctx) }()
+
+			// Start Connect in background — it will block on initialization
+			connectDone := make(chan error, 1)
+			go func() { connectDone <- client.Connect(ctx) }()
+
+			// Give Connect a moment to start
+			time.Sleep(20 * time.Millisecond)
+
+			// IsConnected() should return immediately, not block on the lock.
+			// We test this with a tight deadline.
+			isConnectedDone := make(chan bool, 1)
+			go func() {
+				isConnectedDone <- client.IsConnected()
+			}()
+
+			select {
+			case connected := <-isConnectedDone:
+				// Good — IsConnected returned without blocking.
+				// It should be false since Connect hasn't completed.
+				if connected {
+					t.Error("expected IsConnected() = false during Connect()")
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("IsConnected() blocked for 2s — lock scope too broad during Connect()")
+			}
+
+			// Wait for Connect to finish (will fail because /bin/echo is not Claude CLI)
+			select {
+			case <-connectDone:
+			case <-time.After(10 * time.Second):
+				t.Fatal("Connect() hung for 10s")
+			}
+		})
+	}
+}
+
+// TestClient_ConnectRejectsDoubleConnecting verifies that concurrent Connect()
+// calls are rejected with a clear error rather than blocking or deadlocking.
+func TestClient_ConnectRejectsDoubleConnecting(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+	}{
+		{name: "second concurrent Connect returns error"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
+
+			client, err := NewClient(ctx, opts)
+			if err != nil {
+				t.Skip("Could not create client")
+			}
+			defer func() { _ = client.Close(ctx) }()
+
+			// Manually set the connecting flag to simulate an in-progress Connect
+			client.mu.Lock()
+			client.connecting = true
+			client.mu.Unlock()
+
+			// A second Connect call should return immediately with an error
+			err = client.Connect(ctx)
+			if err == nil {
+				t.Fatal("expected error for concurrent Connect()")
+			}
+			if !types.IsControlProtocolError(err) {
+				t.Errorf("expected ControlProtocolError, got: %T - %v", err, err)
+			}
+
+			// Reset the flag so Close() doesn't see stale state
+			client.mu.Lock()
+			client.connecting = false
+			client.mu.Unlock()
+		})
+	}
+}
+
+// TestClient_CloseDuringConnect verifies that calling Close() while Connect()
+// is in progress (Phase 2) sets closePending so Connect() cleans up instead
+// of completing the connection.
+func TestClient_CloseDuringConnect(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+	}{
+		{name: "Close during Connect sets closePending flag"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
+
+			client, err := NewClient(ctx, opts)
+			if err != nil {
+				t.Skip("Could not create client")
+			}
+
+			// Simulate in-progress Connect by setting the connecting flag.
+			client.mu.Lock()
+			client.connecting = true
+			client.mu.Unlock()
+
+			// Close() should not return an error — it sets closePending instead.
+			err = client.Close(ctx)
+			if err != nil {
+				t.Fatalf("Close() during connecting returned error: %v", err)
+			}
+
+			// Verify closePending was set.
+			client.mu.Lock()
+			pending := client.closePending
+			client.mu.Unlock()
+
+			if !pending {
+				t.Error("expected closePending=true after Close() during connecting")
+			}
+
+			// Verify connected is still false (Close didn't try to clean up
+			// a non-existent connection).
+			if client.IsConnected() {
+				t.Error("expected IsConnected()=false after Close() during connecting")
+			}
+
+			// Reset flags so cleanup doesn't see stale state.
+			client.mu.Lock()
+			client.connecting = false
+			client.closePending = false
+			client.mu.Unlock()
+		})
+	}
+}
+
+// TestClient_CloseNotConnectingNoop verifies that Close() on a client that is
+// neither connected nor connecting is a no-op.
+func TestClient_CloseNotConnectingNoop(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
+
+	client, err := NewClient(ctx, opts)
+	if err != nil {
+		t.Skip("Could not create client")
+	}
+
+	// Close on a fresh (not connected, not connecting) client should be a no-op.
+	err = client.Close(ctx)
+	if err != nil {
+		t.Fatalf("Close() on fresh client returned error: %v", err)
+	}
+
+	// closePending should NOT be set.
+	client.mu.Lock()
+	pending := client.closePending
+	client.mu.Unlock()
+
+	if pending {
+		t.Error("expected closePending=false when Close() called on idle client")
+	}
+}
+
 // BenchmarkClient benchmarks the Client type
 func BenchmarkClient_Create(b *testing.B) {
 	ctx := context.Background()

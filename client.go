@@ -74,11 +74,13 @@ type Client struct {
 	query     *internal.Query
 	logger    *log.Logger
 
-	mu         sync.Mutex
-	connected  bool
-	ctx        context.Context
-	cancel     context.CancelFunc
-	initResult *types.InitializeResult // Parsed initialization response.
+	mu           sync.Mutex
+	connected    bool
+	connecting   bool // true while Connect() is performing blocking operations without the lock
+	closePending bool // true when Close() was called during an in-progress Connect()
+	ctx          context.Context
+	cancel       context.CancelFunc
+	initResult   *types.InitializeResult // Parsed initialization response.
 }
 
 // NewClient creates a new interactive client with the given options.
@@ -180,14 +182,32 @@ func NewClient(ctx context.Context, options *types.ClaudeAgentOptions) (*Client,
 //	    log.Fatal(err)
 //	}
 func (c *Client) Connect(ctx context.Context) error {
+	// Phase 1: Acquire lock, check state, set connecting flag, release lock.
+	// This allows Close() and other methods to proceed without blocking on
+	// the long-running transport.Connect / query.Initialize calls.
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.connected {
+		c.mu.Unlock()
 		return types.NewControlProtocolError("client already connected")
 	}
+	if c.connecting {
+		c.mu.Unlock()
+		return types.NewControlProtocolError("client is already connecting")
+	}
+	c.connecting = true
+	c.mu.Unlock()
+
+	// Ensure the connecting and closePending flags are cleared on any exit path.
+	defer func() {
+		c.mu.Lock()
+		c.connecting = false
+		c.closePending = false
+		c.mu.Unlock()
+	}()
 
 	c.logger.Info("Connecting to Claude CLI...")
+
+	// Phase 2: Perform blocking operations WITHOUT holding the lock.
 
 	// Connect transport
 	if err := c.transport.Connect(ctx); err != nil {
@@ -196,14 +216,12 @@ func (c *Client) Connect(ctx context.Context) error {
 	}
 	c.logger.Debug("Transport connected successfully")
 
-	// Wait briefly and check for immediate errors (like session not found)
-	// This gives the stderr reader time to detect and report early errors
+	// Check for immediate errors (like session not found)
 	select {
 	case <-c.ctx.Done():
 		_ = c.transport.Close(ctx)
 		return ctx.Err()
 	default:
-		// Check if transport reported an error (e.g., session not found)
 		if err := c.transport.GetError(); err != nil {
 			c.logger.Error("transport error detected during connection", zap.Error(err))
 			_ = c.transport.Close(ctx)
@@ -212,11 +230,11 @@ func (c *Client) Connect(ctx context.Context) error {
 	}
 
 	// Create query handler in streaming mode
-	c.query = internal.NewQuery(ctx, c.transport, c.options, c.logger, true)
+	query := internal.NewQuery(ctx, c.transport, c.options, c.logger, true)
 	c.logger.Debug("Query handler created")
 
 	// Start message processing
-	if err := c.query.Start(ctx); err != nil {
+	if err := query.Start(ctx); err != nil {
 		c.logger.Error("failed to start message processing", zap.Error(err))
 		_ = c.transport.Close(ctx)
 		return err
@@ -224,19 +242,35 @@ func (c *Client) Connect(ctx context.Context) error {
 	c.logger.Debug("Message processing started")
 
 	// Initialize control protocol
-	initRaw, err := c.query.Initialize(ctx)
+	initRaw, err := query.Initialize(ctx)
 	if err != nil {
 		c.logger.Error("failed to initialize control protocol", zap.Error(err))
-		_ = c.query.Stop(ctx)
+		_ = query.Stop(ctx)
 		_ = c.transport.Close(ctx)
 		return types.NewControlProtocolErrorWithCause("failed to initialize control protocol", err)
 	}
 	c.logger.Debug("Control protocol initialized")
 
 	// Parse the init result into typed structure.
-	c.initResult = parseInitResult(initRaw)
+	initResult := parseInitResult(initRaw)
 
+	// Phase 3: Re-acquire lock and commit the connected state.
+	c.mu.Lock()
+	if c.closePending {
+		// Close() was called while we were connecting. Clean up instead of completing.
+		c.closePending = false
+		c.mu.Unlock()
+
+		c.logger.Info("Connect completed but Close was requested — cleaning up")
+		_ = query.Stop(ctx)
+		_ = c.transport.Close(ctx)
+		return types.NewControlProtocolError("client closed during connect")
+	}
+	c.query = query
+	c.initResult = initResult
 	c.connected = true
+	c.mu.Unlock()
+
 	c.logger.Info("Successfully connected to Claude")
 	return nil
 }
@@ -465,6 +499,17 @@ func (c *Client) Close(ctx context.Context) error {
 	defer c.mu.Unlock()
 
 	if !c.connected {
+		// If Connect() is in progress (Phase 2, lock released), set closePending
+		// so Connect() will clean up in Phase 3 instead of completing.
+		if c.connecting {
+			c.closePending = true
+			// Cancel the client context so blocking transport/init calls unblock.
+			if c.cancel != nil {
+				c.cancel()
+			}
+			c.logger.Info("Close requested during Connect — flagged for cleanup")
+			return nil
+		}
 		return nil
 	}
 
