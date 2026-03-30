@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -101,6 +102,10 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) error {
 
 	t.logger.Debug("starting Claude CLI subprocess", zap.String("cli_path", t.cliPath))
 
+	// Re-create the messages channel for this connection attempt.
+	// A previous Connect/Close cycle may have closed the old channel.
+	t.messages = make(chan types.Message, 10)
+
 	// Create cancellable context
 	t.ctx, t.cancel = context.WithCancel(ctx)
 
@@ -182,6 +187,21 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 			if cancelFn != nil {
 				cancelFn()
 			}
+		}
+	}()
+
+	// Launch context monitor goroutine for custom spawner (Bug C14).
+	// Unlike exec.CommandContext, custom processes don't auto-kill on context cancel.
+	// This goroutine kills the process when the transport context is cancelled,
+	// unblocking Wait() and the pipe readers.
+	capturedCtx := t.ctx
+	capturedProcess := t.customProcess
+	go func() {
+		select {
+		case <-capturedCtx.Done():
+			_ = capturedProcess.Kill()
+		case <-t.procDone:
+			// Process already exited — nothing to do
 		}
 	}()
 
@@ -330,15 +350,23 @@ func (t *SubprocessCLITransport) buildEnvMap() map[string]string {
 	return envMap
 }
 
+// maxParseErrorBackoff is the ceiling for exponential backoff on consecutive parse errors.
+const maxParseErrorBackoff = 30 * time.Second
+
 // messageReaderLoop reads JSON lines from stdout and parses them into messages.
 // It runs in a goroutine and sends messages to the messages channel.
 // It respects context cancellation and closes the messages channel when done.
 // stdout is passed as a parameter to avoid a data race with Connect() overwriting t.stdout.
+//
+// Parse errors trigger exponential backoff (1s, 2s, 4s, ... up to 30s) to prevent
+// CPU spin on repeated invalid JSON. The backoff counter resets on successful parse.
 func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout io.Reader) {
 	defer close(t.messages)
 
 	t.logger.Debug("Message reader loop started")
 	reader := NewJSONLineReader(stdout)
+
+	var consecutiveParseErrors uint
 
 	for {
 		// Check for context cancellation
@@ -385,11 +413,38 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 		// Parse JSON into message
 		msg, err := types.UnmarshalMessage(line)
 		if err != nil {
-			t.logger.Warn("failed to parse message from CLI", zap.Error(err))
-			// Store parse error but continue reading
+			consecutiveParseErrors++
+			t.logger.Warn("failed to parse message from CLI",
+				zap.Error(err),
+				zap.Uint("consecutive_errors", consecutiveParseErrors),
+			)
+			// Store parse error but continue reading after backoff
 			t.OnError(err)
+
+			// Exponential backoff: 1s, 2s, 4s, 8s, ..., capped at maxParseErrorBackoff.
+			// Use time.NewTimer with select on ctx.Done() to remain cancellable.
+			backoff := time.Duration(1<<(consecutiveParseErrors-1)) * time.Second
+			if backoff > maxParseErrorBackoff {
+				backoff = maxParseErrorBackoff
+			}
+			t.logger.Debug("parse error backoff",
+				zap.Duration("backoff", backoff),
+				zap.Uint("consecutive_errors", consecutiveParseErrors),
+			)
+			timer := time.NewTimer(backoff)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				t.logger.Debug("Message reader loop stopped during backoff: context cancelled")
+				return
+			case <-timer.C:
+				// Backoff complete, continue reading
+			}
 			continue
 		}
+
+		// Successful parse — reset backoff counter
+		consecutiveParseErrors = 0
 
 		t.logger.Debug("received message from CLI", zap.String("type", msg.GetMessageType()))
 
@@ -978,17 +1033,33 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadC
 		}()
 	}
 
+	// Launch a goroutine that closes stderr when ctx is cancelled.
+	// This unblocks ReadLine() if the subprocess hangs without closing stderr (Bug C16).
+	// The goroutine exits when either ctx is cancelled (close stderr) or the read loop
+	// finishes (readDone closed).
+	readDone := make(chan struct{})
+	defer close(readDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = stderr.Close()
+		case <-readDone:
+			// Read loop finished normally — nothing to do
+		}
+	}()
+
 	reader := NewJSONLineReader(stderr)
 	for {
+		line, err := reader.ReadLine()
+		if err != nil {
+			return
+		}
+
+		// Check for context cancellation between reads
 		select {
 		case <-ctx.Done():
 			return
 		default:
-		}
-
-		line, err := reader.ReadLine()
-		if err != nil {
-			return
 		}
 
 		// Process stderr output

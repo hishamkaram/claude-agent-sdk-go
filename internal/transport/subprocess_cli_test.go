@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -1715,6 +1716,336 @@ func TestSubprocessCrash_NoGoroutineLeak(t *testing.T) {
 
 			// goleak.VerifyTestMain catches any remaining goroutines for the whole suite.
 			// This test ensures the specific crash+close lifecycle runs cleanly.
+		})
+	}
+}
+
+// ===== Bug C15: Parse error backoff tests =====
+
+// TestMessageReaderLoop_ParseErrorBackoff verifies that repeated parse errors
+// trigger exponential backoff instead of spinning in a tight CPU loop.
+func TestMessageReaderLoop_ParseErrorBackoff(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name             string
+		invalidLines     int
+		minTotalDuration time.Duration
+	}{
+		{
+			name:             "3 consecutive parse errors have increasing delay",
+			invalidLines:     3,
+			minTotalDuration: 3 * time.Second, // 1s + 2s = 3s minimum for 3 errors (first error: 1s, second: 2s, third still pending)
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Create a pipe to feed lines to messageReaderLoop
+			stdoutR, stdoutW := io.Pipe()
+			stderrR, stderrW := io.Pipe()
+			mockProc := newMockSpawnedProcess()
+			// Override the mock's stdout/stderr with our pipes
+			mockProc.stdout = stdoutR
+			mockProc.stdoutW = stdoutW
+			mockProc.stderr = stderrR
+			mockProc.stderrW = stderrW
+
+			spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+				return mockProc, nil
+			})
+
+			opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
+			tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			if err := tr.Connect(ctx); err != nil {
+				t.Fatalf("Connect() failed: %v", err)
+			}
+
+			// Send invalid JSON lines rapidly
+			start := time.Now()
+			for i := 0; i < tt.invalidLines; i++ {
+				_, err := fmt.Fprintf(stdoutW, "not valid json %d\n", i)
+				if err != nil {
+					t.Fatalf("failed to write invalid line %d: %v", i, err)
+				}
+			}
+
+			// Wait for messages to be drained (they won't produce valid messages)
+			// Then send a valid message to verify the loop is still running
+			validMsg := `{"type":"system","subtype":"init","session_id":"test-123"}` + "\n"
+			_, err := stdoutW.Write([]byte(validMsg))
+			if err != nil {
+				t.Fatalf("failed to write valid message: %v", err)
+			}
+
+			// Read from messages channel — the valid message should eventually arrive
+			// but only after backoff delays
+			timer := time.NewTimer(30 * time.Second)
+			defer timer.Stop()
+			select {
+			case msg, ok := <-tr.messages:
+				elapsed := time.Since(start)
+				if !ok {
+					t.Fatal("messages channel closed unexpectedly")
+				}
+				if msg == nil {
+					t.Fatal("received nil message")
+				}
+				// The backoff for 3 parse errors should introduce at least some delay
+				// 1s (after 1st error) + 2s (after 2nd error) + 4s (after 3rd error) = 7s minimum
+				// But the valid message comes after the 3rd invalid line,
+				// so backoff from the 3rd error must complete before it's read
+				if elapsed < tt.minTotalDuration {
+					t.Errorf("messages arrived too quickly: %v < minimum %v (no backoff?)",
+						elapsed, tt.minTotalDuration)
+				}
+			case <-timer.C:
+				t.Fatal("timed out waiting for valid message after parse errors")
+			}
+
+			// Cleanup
+			cancel()
+			_ = mockProc.Kill()
+			closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer closeCancel()
+			_ = tr.Close(closeCtx)
+		})
+	}
+}
+
+// TestMessageReaderLoop_ParseErrorBackoffResets verifies that a successful parse
+// resets the backoff counter back to zero.
+func TestMessageReaderLoop_ParseErrorBackoffResets(t *testing.T) {
+	t.Parallel()
+
+	stdoutR, stdoutW := io.Pipe()
+	stderrR, stderrW := io.Pipe()
+	mockProc := newMockSpawnedProcess()
+	mockProc.stdout = stdoutR
+	mockProc.stdoutW = stdoutW
+	mockProc.stderr = stderrR
+	mockProc.stderrW = stderrW
+
+	spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+		return mockProc, nil
+	})
+
+	opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
+	tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := tr.Connect(ctx); err != nil {
+		t.Fatalf("Connect() failed: %v", err)
+	}
+
+	// Send one invalid line (will cause 1s backoff)
+	_, _ = stdoutW.Write([]byte("invalid json\n"))
+
+	// Then send a valid message (resets the counter)
+	validMsg := `{"type":"system","subtype":"init","session_id":"test-123"}` + "\n"
+	_, _ = stdoutW.Write([]byte(validMsg))
+
+	// Read the valid message
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+	select {
+	case msg, ok := <-tr.messages:
+		if !ok {
+			t.Fatal("messages channel closed unexpectedly")
+		}
+		if msg == nil {
+			t.Fatal("received nil message")
+		}
+		// Good — valid message received, counter should be reset
+	case <-timer.C:
+		t.Fatal("timed out waiting for valid message")
+	}
+
+	// Now send another invalid line — should only have 1s backoff (not 2s)
+	start := time.Now()
+	_, _ = stdoutW.Write([]byte("another invalid\n"))
+
+	// Then send another valid message
+	_, _ = stdoutW.Write([]byte(validMsg))
+
+	select {
+	case msg, ok := <-tr.messages:
+		elapsed := time.Since(start)
+		if !ok {
+			t.Fatal("messages channel closed unexpectedly")
+		}
+		if msg == nil {
+			t.Fatal("received nil message")
+		}
+		// After reset, the backoff for the single error should be ~1s (not 2s+)
+		// Allow some tolerance
+		if elapsed > 3*time.Second {
+			t.Errorf("backoff was not reset: took %v (expected ~1s after reset)", elapsed)
+		}
+	case <-timer.C:
+		t.Fatal("timed out waiting for second valid message")
+	}
+
+	// Cleanup
+	cancel()
+	_ = mockProc.Kill()
+	closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer closeCancel()
+	_ = tr.Close(closeCtx)
+}
+
+// ===== Bug C14: Context monitoring in spawned goroutines =====
+
+// TestContextCancellation_GoroutinesExit verifies that cancelling the parent
+// context causes all spawned goroutines to exit within 5 seconds.
+func TestContextCancellation_GoroutinesExit(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+	}{
+		{name: "goroutines exit after context cancel"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mockProc := newMockSpawnedProcess()
+			spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+				return mockProc, nil
+			})
+
+			opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
+			tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			if err := tr.Connect(ctx); err != nil {
+				t.Fatalf("Connect() failed: %v", err)
+			}
+
+			// Cancel the parent context — this should trigger goroutine shutdown
+			cancel()
+
+			// The watcher goroutine is waiting on mockProc.Wait() which blocks on waitCh.
+			// Killing the mock process unblocks it, simulating what would happen when
+			// context cancellation kills the subprocess.
+			_ = mockProc.Kill()
+
+			// Close should complete within 5 seconds, not hang
+			closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer closeCancel()
+			err := tr.Close(closeCtx)
+			if closeCtx.Err() != nil {
+				t.Fatal("Close() hung after context cancellation — goroutines did not exit within 5s")
+			}
+			_ = err
+		})
+	}
+}
+
+// ===== Bug C16: Stderr reader hang tests =====
+
+// TestReadStderr_ExitsOnPipeClose verifies that the readStderr goroutine
+// exits promptly when the stderr pipe is closed.
+func TestReadStderr_ExitsOnPipeClose(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+	}{
+		{name: "readStderr exits when pipe is closed"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mockProc := newMockSpawnedProcess()
+			spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+				return mockProc, nil
+			})
+
+			opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
+			tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			if err := tr.Connect(ctx); err != nil {
+				t.Fatalf("Connect() failed: %v", err)
+			}
+
+			// Close stderr pipe — this should unblock readStderr's ReadLine
+			_ = mockProc.stderrW.Close()
+
+			// Now kill the process and close — should complete quickly
+			_ = mockProc.Kill()
+
+			closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer closeCancel()
+			err := tr.Close(closeCtx)
+			if closeCtx.Err() != nil {
+				t.Fatal("Close() hung — readStderr goroutine did not exit within 5s after stderr pipe close")
+			}
+			_ = err
+		})
+	}
+}
+
+// TestReadStderr_ExitsOnContextCancel verifies that the readStderr goroutine
+// exits when the context is cancelled, even if the pipe is still open.
+func TestReadStderr_ExitsOnContextCancel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+	}{
+		{name: "readStderr exits on context cancel"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			mockProc := newMockSpawnedProcess()
+			spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+				return mockProc, nil
+			})
+
+			opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
+			tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			if err := tr.Connect(ctx); err != nil {
+				t.Fatalf("Connect() failed: %v", err)
+			}
+
+			// Cancel context — readStderr should detect this and exit
+			cancel()
+
+			// Kill the mock so the watcher goroutine unblocks too
+			_ = mockProc.Kill()
+
+			closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer closeCancel()
+			err := tr.Close(closeCtx)
+			if closeCtx.Err() != nil {
+				t.Fatal("Close() hung — readStderr did not exit within 5s after context cancel")
+			}
+			_ = err
 		})
 	}
 }
