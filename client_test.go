@@ -4,15 +4,92 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/hishamkaram/claude-agent-sdk-go/internal"
+	"github.com/hishamkaram/claude-agent-sdk-go/internal/log"
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
+// clientTestTransport implements transport.Transport for client_test.go.
+type clientTestTransport struct {
+	mu           sync.Mutex
+	messagesChan chan types.Message
+	writtenData  []string
+	closed       bool
+}
+
+func newClientTestTransport() *clientTestTransport {
+	return &clientTestTransport{
+		messagesChan: make(chan types.Message, 100),
+		writtenData:  make([]string, 0),
+	}
+}
+
+func (m *clientTestTransport) Connect(_ context.Context) error { return nil }
+func (m *clientTestTransport) Close(_ context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.closed {
+		close(m.messagesChan)
+		m.closed = true
+	}
+	return nil
+}
+func (m *clientTestTransport) Write(_ context.Context, data string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.writtenData = append(m.writtenData, data)
+	return nil
+}
+func (m *clientTestTransport) ReadMessages(_ context.Context) <-chan types.Message {
+	return m.messagesChan
+}
+func (m *clientTestTransport) OnError(_ error) {}
+func (m *clientTestTransport) IsReady() bool   { return true }
+func (m *clientTestTransport) GetError() error { return nil }
+
+func (m *clientTestTransport) sendMessage(msg types.Message) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.closed {
+		m.messagesChan <- msg
+	}
+}
+
+// makeConnectedClient creates a Client that is wired up as if Connect() succeeded,
+// using a mock transport and a real internal.Query. This is used for testing
+// ReceiveResponse goroutine tracking without a live CLI process.
+func makeConnectedClient(t *testing.T) (*Client, *clientTestTransport) {
+	t.Helper()
+	ctx := context.Background()
+	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
+
+	client, err := NewClient(ctx, opts)
+	if err != nil {
+		t.Fatalf("NewClient failed: %v", err)
+	}
+
+	mockTransport := newClientTestTransport()
+	logger := log.NewLogger(false)
+	query := internal.NewQuery(ctx, mockTransport, opts, logger, true)
+	if err := query.Start(ctx); err != nil {
+		t.Fatalf("query.Start failed: %v", err)
+	}
+
+	client.mu.Lock()
+	client.transport = mockTransport
+	client.query = query
+	client.connected = true
+	client.mu.Unlock()
+
+	return client, mockTransport
+}
+
 func TestNewClient_NilOptions(t *testing.T) {
-	// Cannot use t.Parallel() because t.Setenv is used below.
-	// Disable version checking to speed up tests
+	// Cannot use t.Parallel() because t.Setenv modifies process state.
 	t.Setenv("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK", "1")
 
 	ctx := context.Background()
@@ -1463,6 +1540,73 @@ func TestClient_CloseNotConnectingNoop(t *testing.T) {
 
 	if pending {
 		t.Error("expected closePending=false when Close() called on idle client")
+	}
+}
+
+// TestClient_ReceiveResponse_GoroutineTracked verifies that the recvWg field on
+// Client is incremented when ReceiveResponse spawns a goroutine and decremented
+// when the goroutine exits. This ensures Close() can wait for in-flight goroutines.
+func TestClient_ReceiveResponse_GoroutineTracked(t *testing.T) {
+	t.Parallel()
+
+	client, mockTransport := makeConnectedClient(t)
+	ctx := context.Background()
+
+	// Call ReceiveResponse — spawns a goroutine internally.
+	respCh := client.ReceiveResponse(ctx)
+
+	// The goroutine is now running. Send a result message so it finishes.
+	mockTransport.sendMessage(&types.ResultMessage{Type: "result"})
+
+	// Drain the output channel.
+	for range respCh {
+	}
+
+	// After the goroutine exits, recvWg should be at zero.
+	// We verify by calling recvWg.Wait() which should return immediately.
+	done := make(chan struct{})
+	go func() {
+		client.recvWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// recvWg is at zero — goroutine properly tracked.
+	case <-time.After(2 * time.Second):
+		t.Fatal("recvWg.Wait() blocked — goroutine was not tracked with recvWg.Add/Done")
+	}
+
+	// Close should complete quickly.
+	if err := client.Close(ctx); err != nil {
+		t.Logf("Close returned error (acceptable): %v", err)
+	}
+}
+
+// TestClient_Close_WaitsForReceiveGoroutines verifies that Close() waits for
+// all in-flight ReceiveResponse goroutines to finish before returning.
+func TestClient_Close_WaitsForReceiveGoroutines(t *testing.T) {
+	t.Parallel()
+
+	client, _ := makeConnectedClient(t)
+	ctx := context.Background()
+
+	// Start ReceiveResponse — goroutine blocks on messages channel.
+	_ = client.ReceiveResponse(ctx)
+
+	// Close cancels context and waits for goroutines via recvWg.
+	closeDone := make(chan error, 1)
+	go func() {
+		closeDone <- client.Close(ctx)
+	}()
+
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Logf("Close returned error (acceptable): %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close() deadlocked — ReceiveResponse goroutine not cancelled or not tracked")
 	}
 }
 

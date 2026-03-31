@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -398,9 +399,32 @@ func (q *Query) handlePermissionRequest(requestData map[string]interface{}) (map
 
 	q.logger.Debug("handlePermissionRequest: canUseTool callback is set")
 
-	toolName, _ := requestData["tool_name"].(string)
-	input, _ := requestData["input"].(map[string]interface{})
-	suggestions, _ := requestData["permission_suggestions"].([]interface{})
+	toolName, toolNameOk := requestData["tool_name"].(string)
+	if !toolNameOk {
+		if requestData["tool_name"] != nil {
+			q.logger.Warn("handlePermissionRequest: tool_name has unexpected type",
+				zap.Any("tool_name", requestData["tool_name"]))
+			return nil, types.NewControlProtocolError("tool_name must be a string in permission request")
+		}
+	}
+
+	input, inputOk := requestData["input"].(map[string]interface{})
+	if !inputOk && requestData["input"] != nil {
+		q.logger.Warn("handlePermissionRequest: input has unexpected type",
+			zap.Any("input_type", fmt.Sprintf("%T", requestData["input"])))
+		return nil, types.NewControlProtocolError("input must be a map in permission request")
+	}
+
+	var suggestions []interface{}
+	if raw, exists := requestData["permission_suggestions"]; exists && raw != nil {
+		var suggestionsOk bool
+		suggestions, suggestionsOk = raw.([]interface{})
+		if !suggestionsOk {
+			q.logger.Warn("handlePermissionRequest: permission_suggestions has unexpected type",
+				zap.Any("type", fmt.Sprintf("%T", raw)))
+			return nil, types.NewControlProtocolError("permission_suggestions must be an array in permission request")
+		}
+	}
 
 	q.logger.Debug("handlePermissionRequest: parsed fields", zap.String("tool_name", toolName), zap.Any("input", input))
 
@@ -437,9 +461,19 @@ func (q *Query) handlePermissionRequest(requestData map[string]interface{}) (map
 		Suggestions: permissionUpdates,
 	}
 
-	// Call permission callback
-	q.logger.Debug("handlePermissionRequest: calling canUseTool callback", zap.String("tool_name", toolName))
-	result, err := q.canUseTool(q.ctx, toolName, input, ctx)
+	// Call permission callback with a timeout.
+	callbackTimeout := 5 * time.Minute // default
+	if q.options != nil && q.options.ToolCallbackTimeout > 0 {
+		callbackTimeout = q.options.ToolCallbackTimeout
+	}
+	callbackCtx, callbackCancel := context.WithTimeout(q.ctx, callbackTimeout)
+	defer callbackCancel()
+
+	q.logger.Debug("handlePermissionRequest: calling canUseTool callback",
+		zap.String("tool_name", toolName),
+		zap.Duration("timeout", callbackTimeout),
+	)
+	result, err := q.canUseTool(callbackCtx, toolName, input, ctx)
 	q.logger.Debug("handlePermissionRequest: canUseTool callback returned", zap.Any("result", result), zap.Error(err))
 	if err != nil {
 		q.logger.Error("handlePermissionRequest: canUseTool callback returned error", zap.Error(err))
@@ -540,8 +574,19 @@ func (q *Query) handleHookCallback(requestData map[string]interface{}) (map[stri
 
 // handleMCPMessage handles an MCP message request.
 func (q *Query) handleMCPMessage(requestData map[string]interface{}) (map[string]interface{}, error) {
-	serverName, _ := requestData["server_name"].(string)
-	message, _ := requestData["message"].(map[string]interface{})
+	serverName, serverNameOk := requestData["server_name"].(string)
+	if !serverNameOk && requestData["server_name"] != nil {
+		q.logger.Warn("handleMCPMessage: server_name has unexpected type",
+			zap.Any("server_name", requestData["server_name"]))
+		return nil, types.NewControlProtocolError("server_name must be a string in MCP request")
+	}
+
+	message, messageOk := requestData["message"].(map[string]interface{})
+	if !messageOk && requestData["message"] != nil {
+		q.logger.Warn("handleMCPMessage: message has unexpected type",
+			zap.Any("message_type", fmt.Sprintf("%T", requestData["message"])))
+		return nil, types.NewControlProtocolError("message must be a map in MCP request")
+	}
 
 	if serverName == "" || message == nil {
 		return nil, types.NewControlProtocolError("missing server_name or message in MCP request")

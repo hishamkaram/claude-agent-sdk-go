@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -81,6 +82,8 @@ type Client struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	initResult   *types.InitializeResult // Parsed initialization response.
+
+	recvWg sync.WaitGroup // tracks in-flight ReceiveResponse goroutines
 }
 
 // NewClient creates a new interactive client with the given options.
@@ -443,7 +446,9 @@ func (c *Client) QueryWithContent(ctx context.Context, content interface{}) erro
 func (c *Client) ReceiveResponse(ctx context.Context) <-chan types.Message {
 	outputChan := make(chan types.Message, 10)
 
+	c.recvWg.Add(1)
 	go func() {
+		defer c.recvWg.Done()
 		defer close(outputChan)
 
 		c.mu.Lock()
@@ -457,6 +462,8 @@ func (c *Client) ReceiveResponse(ctx context.Context) <-chan types.Message {
 		for {
 			select {
 			case <-ctx.Done():
+				return
+			case <-c.ctx.Done():
 				return
 			case msg, ok := <-messagesChan:
 				if !ok {
@@ -472,6 +479,8 @@ func (c *Client) ReceiveResponse(ctx context.Context) <-chan types.Message {
 						return
 					}
 				case <-ctx.Done():
+					return
+				case <-c.ctx.Done():
 					return
 				}
 			}
@@ -534,10 +543,24 @@ func (c *Client) Close(ctx context.Context) error {
 		}
 	}
 
-	// Cancel context
+	// Cancel context so ReceiveResponse goroutines unblock
 	if c.cancel != nil {
 		c.cancel()
 		c.cancel = nil
+	}
+
+	// Wait for in-flight ReceiveResponse goroutines with a bounded timeout
+	// to prevent Close from blocking indefinitely.
+	recvDone := make(chan struct{})
+	go func() {
+		c.recvWg.Wait()
+		close(recvDone)
+	}()
+	select {
+	case <-recvDone:
+		// All ReceiveResponse goroutines have exited.
+	case <-time.After(5 * time.Second):
+		c.logger.Warn("timed out waiting for ReceiveResponse goroutines to exit")
 	}
 
 	c.connected = false

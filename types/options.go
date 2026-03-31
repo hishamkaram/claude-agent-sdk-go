@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 )
 
 // EffortLevel represents reasoning effort levels.
@@ -393,9 +394,10 @@ type ClaudeAgentOptions struct {
 	Verbose bool `json:"-"` // Enable verbose debug logging
 
 	// Callbacks (not marshaled to JSON)
-	CanUseTool CanUseToolFunc              `json:"-"`
-	Hooks      map[HookEvent][]HookMatcher `json:"-"`
-	Stderr     StderrCallbackFunc          `json:"-"`
+	CanUseTool          CanUseToolFunc              `json:"-"`
+	ToolCallbackTimeout time.Duration               `json:"-"` // Timeout for CanUseTool callback; defaults to 5m if zero
+	Hooks               map[HookEvent][]HookMatcher `json:"-"`
+	Stderr              StderrCallbackFunc          `json:"-"`
 
 	// Stderr file logging (SDK-managed, configuration-time only)
 	// - nil (default): No file logging
@@ -654,6 +656,13 @@ func (o *ClaudeAgentOptions) WithLocalPlugin(path string) *ClaudeAgentOptions {
 // WithCanUseTool sets the tool permission callback.
 func (o *ClaudeAgentOptions) WithCanUseTool(callback CanUseToolFunc) *ClaudeAgentOptions {
 	o.CanUseTool = callback
+	return o
+}
+
+// WithToolCallbackTimeout sets the timeout for the CanUseTool callback.
+// If zero, defaults to 5 minutes.
+func (o *ClaudeAgentOptions) WithToolCallbackTimeout(d time.Duration) *ClaudeAgentOptions {
+	o.ToolCallbackTimeout = d
 	return o
 }
 
