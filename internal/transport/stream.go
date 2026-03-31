@@ -58,7 +58,10 @@ func (r *JSONLineReader) ReadLine() ([]byte, error) {
 		return nil, io.EOF
 	}
 
-	return r.scanner.Bytes(), nil
+	b := r.scanner.Bytes()
+	result := make([]byte, len(b))
+	copy(result, b)
+	return result, nil
 }
 
 // JSONLineWriter writes JSON lines to an output stream with buffering.

@@ -172,7 +172,9 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 	// Launch watcher goroutine: mirrors the exec-command path.
 	// customProcess.Wait() is called exactly once here; closeCustomProcess drains procDone.
 	t.procDone = make(chan struct{})
+	t.wg.Add(1)
 	go func() {
+		defer t.wg.Done()
 		waitErr := t.customProcess.Wait()
 		close(t.procDone) // signal Close() that Wait() is done — BEFORE acquiring mutex
 		t.mu.Lock()
@@ -196,7 +198,9 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 	// unblocking Wait() and the pipe readers.
 	capturedCtx := t.ctx
 	capturedProcess := t.customProcess
+	t.wg.Add(1)
 	go func() {
+		defer t.wg.Done()
 		select {
 		case <-capturedCtx.Done():
 			_ = capturedProcess.Kill()
@@ -258,6 +262,8 @@ func (t *SubprocessCLITransport) connectWithExecCommand(args []string, envMap ma
 
 	t.stderr, err = t.cmd.StderrPipe()
 	if err != nil {
+		_ = t.stdout.Close()
+		t.stdout = nil
 		_ = t.stdin.Close()
 		t.stdin = nil
 		return types.NewCLIConnectionErrorWithCause("failed to create stderr pipe", err)
@@ -283,7 +289,9 @@ func (t *SubprocessCLITransport) connectWithExecCommand(args []string, envMap ma
 	// where Close() holds t.mu while waiting for procDone, and the watcher needs
 	// t.mu to close procDone.
 	t.procDone = make(chan struct{})
+	t.wg.Add(1)
 	go func() {
+		defer t.wg.Done()
 		waitErr := t.cmd.Wait()
 		close(t.procDone) // signal Close() that Wait() is done — BEFORE acquiring mutex
 		t.mu.Lock()

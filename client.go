@@ -556,10 +556,12 @@ func (c *Client) Close(ctx context.Context) error {
 		c.recvWg.Wait()
 		close(recvDone)
 	}()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
 	select {
 	case <-recvDone:
 		// All ReceiveResponse goroutines have exited.
-	case <-time.After(5 * time.Second):
+	case <-timer.C:
 		c.logger.Warn("timed out waiting for ReceiveResponse goroutines to exit")
 	}
 
