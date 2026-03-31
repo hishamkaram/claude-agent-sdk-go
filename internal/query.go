@@ -186,6 +186,16 @@ func (q *Query) Stop(ctx context.Context) error {
 	// Cancel context to stop all operations
 	q.cancel()
 
+	// If Start() was never called, readLoopDone will never be closed by
+	// messageLoop. Close channels directly and return.
+	q.mu.Lock()
+	wasStarted := q.started
+	q.mu.Unlock()
+	if !wasStarted {
+		q.closeMessagesOnce.Do(func() { close(q.messagesChan) })
+		return nil
+	}
+
 	// Wait for read loop to complete
 	select {
 	case <-q.readLoopDone:
@@ -735,7 +745,9 @@ func (q *Query) sendErrorResponse(requestID string, errorMsg string) {
 		return
 	}
 
-	_ = q.transport.Write(q.ctx, string(data))
+	if err := q.transport.Write(q.ctx, string(data)); err != nil {
+		q.logger.Error("sendErrorResponse: failed to write", zap.Error(err))
+	}
 }
 
 // generateRequestID generates a unique request ID.

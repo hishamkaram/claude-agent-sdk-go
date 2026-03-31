@@ -1382,3 +1382,30 @@ func TestInitialize_PromptSuggestionsAndJsonSchema(t *testing.T) {
 		})
 	}
 }
+
+// TestStopBeforeStart verifies that Stop() returns promptly when Start() was
+// never called, instead of blocking forever on readLoopDone.
+func TestStopBeforeStart(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	transport := newMockTransport()
+	opts := types.NewClaudeAgentOptions()
+	logger := log.NewLogger(false)
+	query := NewQuery(ctx, transport, opts, logger, true)
+
+	// Do NOT call Start(). Call Stop() directly.
+	done := make(chan error, 1)
+	go func() {
+		done <- query.Stop(ctx)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Stop() returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop() hung when Start() was never called")
+	}
+}
