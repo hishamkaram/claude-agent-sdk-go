@@ -200,6 +200,7 @@ func (q *Query) Stop(ctx context.Context) error {
 	select {
 	case <-q.readLoopDone:
 	case <-ctx.Done():
+		q.closeMessagesOnce.Do(func() { close(q.messagesChan) })
 		return ctx.Err()
 	}
 

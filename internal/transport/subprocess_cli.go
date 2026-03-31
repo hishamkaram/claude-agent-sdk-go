@@ -1056,7 +1056,9 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadC
 	// finishes (readDone closed).
 	readDone := make(chan struct{})
 	defer close(readDone)
+	t.wg.Add(1)
 	go func() {
+		defer t.wg.Done()
 		select {
 		case <-ctx.Done():
 			_ = stderr.Close()
