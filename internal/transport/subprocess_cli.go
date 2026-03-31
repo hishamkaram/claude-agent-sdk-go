@@ -432,7 +432,13 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 
 			// Exponential backoff: 1s, 2s, 4s, 8s, ..., capped at maxParseErrorBackoff.
 			// Use time.NewTimer with select on ctx.Done() to remain cancellable.
-			backoff := time.Duration(1<<(consecutiveParseErrors-1)) * time.Second
+			// Cap shift count to prevent integer overflow. 2^5 = 32s already
+			// exceeds maxParseErrorBackoff (30s), so clamping at 5 is sufficient.
+			shift := consecutiveParseErrors - 1
+			if shift > 5 {
+				shift = 5
+			}
+			backoff := time.Duration(1<<shift) * time.Second
 			if backoff > maxParseErrorBackoff {
 				backoff = maxParseErrorBackoff
 			}
