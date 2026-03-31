@@ -702,6 +702,11 @@ func (q *Query) sendControlRequest(ctx context.Context, request map[string]inter
 		delete(q.requestMap, requestID)
 		q.mu.Unlock()
 		return nil, ctx.Err()
+	case <-q.ctx.Done():
+		q.mu.Lock()
+		delete(q.requestMap, requestID)
+		q.mu.Unlock()
+		return nil, types.NewControlProtocolError("query stopped")
 	}
 }
 

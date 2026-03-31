@@ -505,7 +505,6 @@ func (c *Client) ReceiveResponse(ctx context.Context) <-chan types.Message {
 // Returns an error if cleanup fails, but the client is marked as disconnected regardless.
 func (c *Client) Close(ctx context.Context) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	if !c.connected {
 		// If Connect() is in progress (Phase 2, lock released), set closePending
@@ -517,8 +516,10 @@ func (c *Client) Close(ctx context.Context) error {
 				c.cancel()
 			}
 			c.logger.Info("Close requested during Connect — flagged for cleanup")
+			c.mu.Unlock()
 			return nil
 		}
+		c.mu.Unlock()
 		return nil
 	}
 
@@ -549,6 +550,13 @@ func (c *Client) Close(ctx context.Context) error {
 		c.cancel = nil
 	}
 
+	c.connected = false
+
+	// Unlock BEFORE waiting for ReceiveResponse goroutines. The goroutines
+	// need c.mu.Lock() to check c.connected and exit cleanly. Holding the
+	// lock here causes a deadlock that results in the 5-second forced timeout.
+	c.mu.Unlock()
+
 	// Wait for in-flight ReceiveResponse goroutines with a bounded timeout
 	// to prevent Close from blocking indefinitely.
 	recvDone := make(chan struct{})
@@ -565,7 +573,6 @@ func (c *Client) Close(ctx context.Context) error {
 		c.logger.Warn("timed out waiting for ReceiveResponse goroutines to exit")
 	}
 
-	c.connected = false
 	c.logger.Debug("Connection closed")
 
 	// Return first error if any
