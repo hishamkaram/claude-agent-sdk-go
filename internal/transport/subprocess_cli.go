@@ -369,7 +369,8 @@ const maxParseErrorBackoff = 30 * time.Second
 // Parse errors trigger exponential backoff (1s, 2s, 4s, ... up to 30s) to prevent
 // CPU spin on repeated invalid JSON. The backoff counter resets on successful parse.
 func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout io.Reader) {
-	defer close(t.messages)
+	ch := t.messages
+	defer close(ch)
 
 	t.logger.Debug("Message reader loop started")
 	reader := NewJSONLineReader(stdout)
@@ -456,12 +457,14 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 
 		t.logger.Debug("received message from CLI", zap.String("type", msg.GetMessageType()))
 
-		// Send message to channel (respect context cancellation)
+		// Send message to channel (respect context cancellation and process exit)
 		select {
 		case <-ctx.Done():
 			return
-		case t.messages <- msg:
+		case ch <- msg:
 			// Message sent successfully
+		case <-t.procDone:
+			return
 		}
 	}
 }

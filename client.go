@@ -629,13 +629,14 @@ func (c *Client) SetModel(ctx context.Context, model string) error {
 		c.mu.Unlock()
 		return types.NewCLIConnectionError("not connected - call Connect() first")
 	}
+	q := c.query
 	c.mu.Unlock()
 
 	req := map[string]interface{}{"subtype": "set_model"}
 	if model != "" {
 		req["model"] = model
 	}
-	_, err := c.query.SendControlMessage(ctx, req)
+	_, err := q.SendControlMessage(ctx, req)
 	if err != nil {
 		return fmt.Errorf("Client.SetModel: %w", err)
 	}
@@ -651,13 +652,14 @@ func (c *Client) SetPermissionMode(ctx context.Context, mode types.PermissionMod
 		c.mu.Unlock()
 		return types.NewCLIConnectionError("not connected - call Connect() first")
 	}
+	q := c.query
 	c.mu.Unlock()
 
 	req := map[string]interface{}{
 		"subtype": "set_permission_mode",
 		"mode":    string(mode),
 	}
-	_, err := c.query.SendControlMessage(ctx, req)
+	_, err := q.SendControlMessage(ctx, req)
 	if err != nil {
 		return fmt.Errorf("Client.SetPermissionMode: %w", err)
 	}
@@ -687,10 +689,11 @@ func (c *Client) Interrupt(ctx context.Context) error {
 		c.mu.Unlock()
 		return types.NewCLIConnectionError("Client.Interrupt: not connected - call Connect() first")
 	}
+	q := c.query
 	c.mu.Unlock()
 
 	req := map[string]interface{}{"subtype": "interrupt"}
-	_, err := c.query.SendControlMessage(ctx, req)
+	_, err := q.SendControlMessage(ctx, req)
 	if err != nil {
 		return fmt.Errorf("Client.Interrupt: %w", err)
 	}
@@ -745,13 +748,14 @@ func (c *Client) StopTask(ctx context.Context, taskID string) error {
 		c.mu.Unlock()
 		return types.NewCLIConnectionError("Client.StopTask: not connected - call Connect() first")
 	}
+	q := c.query
 	c.mu.Unlock()
 
 	req := map[string]interface{}{
 		"subtype": "stop_task",
 		"task_id": taskID,
 	}
-	_, err := c.query.SendControlMessage(ctx, req)
+	_, err := q.SendControlMessage(ctx, req)
 	if err != nil {
 		return fmt.Errorf("Client.StopTask: %w", err)
 	}
@@ -765,10 +769,11 @@ func (c *Client) MCPServerStatus(ctx context.Context) ([]types.McpServerStatusIn
 		c.mu.Unlock()
 		return nil, types.NewCLIConnectionError("Client.MCPServerStatus: not connected - call Connect() first")
 	}
+	q := c.query
 	c.mu.Unlock()
 
 	req := map[string]interface{}{"subtype": "mcp_status"}
-	resp, err := c.query.SendControlMessage(ctx, req)
+	resp, err := q.SendControlMessage(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("Client.MCPServerStatus: %w", err)
 	}
@@ -803,13 +808,14 @@ func (c *Client) ReconnectMCPServer(ctx context.Context, serverName string) erro
 		c.mu.Unlock()
 		return types.NewCLIConnectionError("Client.ReconnectMCPServer: not connected - call Connect() first")
 	}
+	q := c.query
 	c.mu.Unlock()
 
 	req := map[string]interface{}{
 		"subtype":    "mcp_reconnect",
 		"serverName": serverName,
 	}
-	_, err := c.query.SendControlMessage(ctx, req)
+	_, err := q.SendControlMessage(ctx, req)
 	if err != nil {
 		return fmt.Errorf("Client.ReconnectMCPServer: %w", err)
 	}
@@ -827,6 +833,7 @@ func (c *Client) ToggleMCPServer(ctx context.Context, serverName string, enabled
 		c.mu.Unlock()
 		return types.NewCLIConnectionError("Client.ToggleMCPServer: not connected - call Connect() first")
 	}
+	q := c.query
 	c.mu.Unlock()
 
 	req := map[string]interface{}{
@@ -834,7 +841,7 @@ func (c *Client) ToggleMCPServer(ctx context.Context, serverName string, enabled
 		"serverName": serverName,
 		"enabled":    enabled,
 	}
-	_, err := c.query.SendControlMessage(ctx, req)
+	_, err := q.SendControlMessage(ctx, req)
 	if err != nil {
 		return fmt.Errorf("Client.ToggleMCPServer: %w", err)
 	}
@@ -852,13 +859,14 @@ func (c *Client) SetMCPServers(ctx context.Context, servers map[string]interface
 		c.mu.Unlock()
 		return nil, types.NewCLIConnectionError("Client.SetMCPServers: not connected - call Connect() first")
 	}
+	q := c.query
 	c.mu.Unlock()
 
 	req := map[string]interface{}{
 		"subtype": "mcp_set_servers",
 		"servers": servers,
 	}
-	resp, err := c.query.SendControlMessage(ctx, req)
+	resp, err := q.SendControlMessage(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("Client.SetMCPServers: %w", err)
 	}
@@ -888,6 +896,7 @@ func (c *Client) RewindFiles(ctx context.Context, userMessageID string, dryRun b
 		c.mu.Unlock()
 		return nil, types.NewCLIConnectionError("Client.RewindFiles: not connected - call Connect() first")
 	}
+	q := c.query
 	c.mu.Unlock()
 
 	req := map[string]interface{}{
@@ -895,7 +904,7 @@ func (c *Client) RewindFiles(ctx context.Context, userMessageID string, dryRun b
 		"user_message_id": userMessageID,
 		"dry_run":         dryRun,
 	}
-	resp, err := c.query.SendControlMessage(ctx, req)
+	resp, err := q.SendControlMessage(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("Client.RewindFiles: %w", err)
 	}
