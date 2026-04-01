@@ -203,7 +203,10 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 		defer t.wg.Done()
 		select {
 		case <-capturedCtx.Done():
-			_ = capturedProcess.Kill()
+			if err := capturedProcess.Kill(); err != nil {
+				t.logger.Debug("context cancel: process kill returned error (process may have already exited)",
+					zap.Error(err))
+			}
 		case <-t.procDone:
 			// Process already exited — nothing to do
 		}
@@ -271,6 +274,10 @@ func (t *SubprocessCLITransport) connectWithExecCommand(args []string, envMap ma
 
 	// Start the process
 	if err := t.cmd.Start(); err != nil {
+		_ = t.stderr.Close()
+		t.stderr = nil
+		_ = t.stdout.Close()
+		t.stdout = nil
 		_ = t.stdin.Close()
 		t.stdin = nil
 		t.logger.Error("failed to start subprocess", zap.Error(err))
@@ -365,6 +372,11 @@ const maxParseErrorBackoff = 30 * time.Second
 // It runs in a goroutine and sends messages to the messages channel.
 // It respects context cancellation and closes the messages channel when done.
 // stdout is passed as a parameter to avoid a data race with Connect() overwriting t.stdout.
+//
+// Note on context cancellation: ReadLine() blocks on stdout, which cannot be interrupted
+// by context cancel directly. Instead, when the context is cancelled, the process is killed
+// (via the context monitor goroutine or exec.CommandContext), which closes the stdout pipe,
+// causing ReadLine() to return io.EOF and exit the loop.
 //
 // Parse errors trigger exponential backoff (1s, 2s, 4s, ... up to 30s) to prevent
 // CPU spin on repeated invalid JSON. The backoff counter resets on successful parse.
