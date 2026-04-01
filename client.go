@@ -240,7 +240,7 @@ func (c *Client) Connect(ctx context.Context) error {
 	if err := query.Start(ctx); err != nil {
 		c.logger.Error("failed to start message processing", zap.Error(err))
 		_ = c.transport.Close(ctx)
-		return err
+		return fmt.Errorf("client.Connect: start message processing: %w", err)
 	}
 	c.logger.Debug("Message processing started")
 
