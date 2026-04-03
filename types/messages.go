@@ -16,15 +16,17 @@ const (
 	SystemSubtypeSessionInfo = "session_info"
 
 	// Typed system subtypes (016-sdk-message-types)
-	SystemSubtypeCompactBoundary  = "compact_boundary"
-	SystemSubtypeStatus           = "status"
-	SystemSubtypeHookStarted      = "hook_started"
-	SystemSubtypeHookProgress     = "hook_progress"
-	SystemSubtypeHookResponse     = "hook_response"
-	SystemSubtypeTaskNotification = "task_notification"
-	SystemSubtypeTaskStarted      = "task_started"
-	SystemSubtypeTaskProgress     = "task_progress"
-	SystemSubtypeFilesPersisted   = "files_persisted"
+	SystemSubtypeCompactBoundary     = "compact_boundary"
+	SystemSubtypeStatus              = "status"
+	SystemSubtypeHookStarted         = "hook_started"
+	SystemSubtypeHookProgress        = "hook_progress"
+	SystemSubtypeHookResponse        = "hook_response"
+	SystemSubtypeTaskNotification    = "task_notification"
+	SystemSubtypeTaskStarted         = "task_started"
+	SystemSubtypeTaskProgress        = "task_progress"
+	SystemSubtypeFilesPersisted      = "files_persisted"
+	SystemSubtypeLocalCommandOutput  = "local_command_output"
+	SystemSubtypeElicitationComplete = "elicitation_complete"
 )
 
 // ResultMessage subtype constants

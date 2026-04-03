@@ -390,6 +390,15 @@ type ClaudeAgentOptions struct {
 	// Strict MCP config validation
 	StrictMcpConfig bool `json:"strict_mcp_config,omitempty"` // → --strict-mcp-config CLI flag
 
+	// Task budget in USD — limits spending for a single task invocation
+	TaskBudget *float64 `json:"taskBudget,omitempty"` // → --task-budget CLI flag
+
+	// Agent progress summaries — receive progress updates from subagents
+	AgentProgressSummaries bool `json:"agentProgressSummaries,omitempty"` // → --agent-progress-summaries CLI flag
+
+	// Include hook events — receive hook lifecycle events in the message stream
+	IncludeHookEvents bool `json:"includeHookEvents,omitempty"` // → settings JSON "includeHookEvents" key
+
 	// Debug and diagnostics
 	Verbose bool `json:"-"` // Enable verbose debug logging
 
@@ -826,5 +835,23 @@ func (o *ClaudeAgentOptions) WithDebugFile(path string) *ClaudeAgentOptions {
 // WithStrictMcpConfig enables or disables strict MCP configuration validation.
 func (o *ClaudeAgentOptions) WithStrictMcpConfig(strict bool) *ClaudeAgentOptions {
 	o.StrictMcpConfig = strict
+	return o
+}
+
+// WithTaskBudget sets the dollar budget for a single task invocation.
+func (o *ClaudeAgentOptions) WithTaskBudget(budget float64) *ClaudeAgentOptions {
+	o.TaskBudget = &budget
+	return o
+}
+
+// WithAgentProgressSummaries enables or disables agent progress summary messages.
+func (o *ClaudeAgentOptions) WithAgentProgressSummaries(enabled bool) *ClaudeAgentOptions {
+	o.AgentProgressSummaries = enabled
+	return o
+}
+
+// WithIncludeHookEvents enables or disables hook lifecycle events in the message stream.
+func (o *ClaudeAgentOptions) WithIncludeHookEvents(enabled bool) *ClaudeAgentOptions {
+	o.IncludeHookEvents = enabled
 	return o
 }
