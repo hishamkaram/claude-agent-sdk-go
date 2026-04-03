@@ -929,6 +929,108 @@ func (c *Client) RewindFiles(ctx context.Context, userMessageID string, dryRun b
 	return &result, nil
 }
 
+// GetContextUsage retrieves the current token usage breakdown for the session context.
+// Returns utilization percentage, total/max tokens, and per-category breakdown.
+// Requires an active connection — returns CLIConnectionError if not connected.
+func (c *Client) GetContextUsage(ctx context.Context) (*types.ContextUsage, error) {
+	c.mu.Lock()
+	if !c.connected {
+		c.mu.Unlock()
+		return nil, types.NewCLIConnectionError("Client.GetContextUsage: not connected - call Connect() first")
+	}
+	q := c.query
+	c.mu.Unlock()
+
+	req := map[string]interface{}{"subtype": "get_context_usage"}
+	resp, err := q.SendControlMessage(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("Client.GetContextUsage: %w", err)
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return nil, fmt.Errorf("Client.GetContextUsage: failed to marshal response: %w", err)
+	}
+
+	var usage types.ContextUsage
+	if err := json.Unmarshal(data, &usage); err != nil {
+		return nil, fmt.Errorf("Client.GetContextUsage: failed to parse response: %w", err)
+	}
+
+	return &usage, nil
+}
+
+// GetSettings retrieves the current applied settings for the session.
+// Returns the model, effort level, and raw settings map.
+// Requires an active connection — returns CLIConnectionError if not connected.
+func (c *Client) GetSettings(ctx context.Context) (*types.SettingsResult, error) {
+	c.mu.Lock()
+	if !c.connected {
+		c.mu.Unlock()
+		return nil, types.NewCLIConnectionError("Client.GetSettings: not connected - call Connect() first")
+	}
+	q := c.query
+	c.mu.Unlock()
+
+	req := map[string]interface{}{"subtype": "get_settings"}
+	resp, err := q.SendControlMessage(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("Client.GetSettings: %w", err)
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return nil, fmt.Errorf("Client.GetSettings: failed to marshal response: %w", err)
+	}
+
+	var settings types.SettingsResult
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, fmt.Errorf("Client.GetSettings: failed to parse response: %w", err)
+	}
+
+	return &settings, nil
+}
+
+// ReloadPlugins triggers a reload of all configured plugins in the current session.
+// Requires an active connection — returns CLIConnectionError if not connected.
+func (c *Client) ReloadPlugins(ctx context.Context) error {
+	c.mu.Lock()
+	if !c.connected {
+		c.mu.Unlock()
+		return types.NewCLIConnectionError("Client.ReloadPlugins: not connected - call Connect() first")
+	}
+	q := c.query
+	c.mu.Unlock()
+
+	req := map[string]interface{}{"subtype": "reload_plugins"}
+	_, err := q.SendControlMessage(ctx, req)
+	if err != nil {
+		return fmt.Errorf("Client.ReloadPlugins: %w", err)
+	}
+
+	return nil
+}
+
+// EnableChannel enables channel communication for the current session.
+// Requires an active connection — returns CLIConnectionError if not connected.
+func (c *Client) EnableChannel(ctx context.Context) error {
+	c.mu.Lock()
+	if !c.connected {
+		c.mu.Unlock()
+		return types.NewCLIConnectionError("Client.EnableChannel: not connected - call Connect() first")
+	}
+	q := c.query
+	c.mu.Unlock()
+
+	req := map[string]interface{}{"subtype": "enable_channel"}
+	_, err := q.SendControlMessage(ctx, req)
+	if err != nil {
+		return fmt.Errorf("Client.EnableChannel: %w", err)
+	}
+
+	return nil
+}
+
 // SupportedAgents returns the list of supported agent types from the init result.
 // Returns nil if Connect() has not been called or no agents were returned.
 func (c *Client) SupportedAgents() []types.AgentInfo {
