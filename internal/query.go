@@ -222,7 +222,17 @@ func (q *Query) GetMessages(ctx context.Context) <-chan types.Message {
 
 // messageLoop reads messages from transport and routes them.
 func (q *Query) messageLoop() {
-	defer close(q.readLoopDone)
+	defer close(q.readLoopDone) // Always close, even on panic (runs second — LIFO)
+	defer func() {              // Runs first (LIFO) — catches panic before readLoopDone closes
+		if r := recover(); r != nil {
+			q.logger.Error("panic in messageLoop recovered",
+				zap.Any("panic", r),
+				zap.Stack("stack"),
+			)
+			// Close messagesChan so ReceiveResponse goroutines don't block forever.
+			q.closeMessagesOnce.Do(func() { close(q.messagesChan) })
+		}
+	}()
 
 	messages := q.transport.ReadMessages(q.ctx)
 	q.logger.Debug("Message routing loop started")
@@ -327,6 +337,10 @@ func (q *Query) handleControlResponse(msg *types.SystemMessage) error {
 		select {
 		case responseChan <- responseResult{err: types.NewControlProtocolError(errMsg)}:
 		case <-q.ctx.Done():
+		default:
+			q.logger.Debug("dropping late control error response (receiver timed out)",
+				zap.String("request_id", requestID),
+			)
 		}
 		return nil
 	}
@@ -336,6 +350,10 @@ func (q *Query) handleControlResponse(msg *types.SystemMessage) error {
 	select {
 	case responseChan <- responseResult{response: response}:
 	case <-q.ctx.Done():
+	default:
+		q.logger.Debug("dropping late control success response (receiver timed out)",
+			zap.String("request_id", requestID),
+		)
 	}
 
 	return nil
@@ -343,7 +361,16 @@ func (q *Query) handleControlResponse(msg *types.SystemMessage) error {
 
 // handleControlRequest handles an incoming control request from CLI.
 func (q *Query) handleControlRequest(msg *types.SystemMessage) {
-	defer q.handlerWg.Done()
+	defer q.handlerWg.Done() // Runs second — ensures WaitGroup completes even on panic
+	defer func() {           // Runs first — catches panic before Done
+		if r := recover(); r != nil {
+			q.logger.Error("panic in handleControlRequest recovered",
+				zap.Any("panic", r),
+				zap.Stack("stack"),
+				zap.String("request_id", msg.RequestID),
+			)
+		}
+	}()
 
 	q.logger.Debug("handleControlRequest: entered", zap.String("request_id", msg.RequestID), zap.Any("request", msg.Request))
 
