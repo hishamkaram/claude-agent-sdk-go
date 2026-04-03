@@ -109,6 +109,17 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) error {
 	// Create cancellable context
 	t.ctx, t.cancel = context.WithCancel(ctx)
 
+	// Try warm pool first — if a pre-warmed process is available, use it
+	if warm := ConsumeWarmProcess(); warm != nil && warm.IsAlive() {
+		t.logger.Debug("using pre-warmed subprocess from Startup()")
+		err := t.connectWithWarmProcess(warm)
+		if err == nil {
+			return nil
+		}
+		// Warm process failed — fall through to normal spawn
+		t.logger.Debug("warm process unusable, falling through to normal spawn", zap.Error(err))
+	}
+
 	// Build command arguments
 	args := t.buildCommandArgs()
 
@@ -518,6 +529,64 @@ func (t *SubprocessCLITransport) Write(ctx context.Context, data string) error {
 // The channel is closed when the subprocess exits or an error occurs.
 func (t *SubprocessCLITransport) ReadMessages(ctx context.Context) <-chan types.Message {
 	return t.messages
+}
+
+// connectWithWarmProcess uses a pre-warmed subprocess from the warm pool.
+// The warm process was spawned by Startup() and has stdin/stdout/stderr pipes ready.
+func (t *SubprocessCLITransport) connectWithWarmProcess(warm *WarmProcess) error {
+	t.cmd = warm.Cmd
+	t.stdin = warm.Stdin
+	t.stdout = warm.Stdout
+	t.stderr = warm.Stderr
+
+	// Create JSON line writer for stdin
+	t.writer = NewJSONLineWriter(t.stdin)
+
+	// Use the warm process's done channel as procDone
+	t.procDone = warm.Done
+
+	// Launch watcher goroutine: mirrors connectWithExecCommand.
+	// The warm process background goroutine already called cmd.Wait() and closed Done.
+	// This goroutine watches for procDone to set ready=false and cancel context.
+	t.wg.Add(1)
+	go func() {
+		defer t.wg.Done()
+		<-t.procDone
+		t.mu.Lock()
+		wasReady := t.ready
+		t.ready = false
+		if t.err == nil {
+			exitCode := 0
+			if t.cmd.ProcessState != nil {
+				exitCode = t.cmd.ProcessState.ExitCode()
+			}
+			t.err = types.NewProcessErrorWithCode("subprocess exited unexpectedly", exitCode)
+		}
+		cancelFn := t.cancel
+		t.mu.Unlock()
+		if wasReady {
+			if cancelFn != nil {
+				cancelFn()
+			}
+		}
+	}()
+
+	// Launch message reader loop
+	t.wg.Add(1)
+	go func() {
+		defer t.wg.Done()
+		t.messageReaderLoop(t.ctx, t.stdout)
+	}()
+
+	// Launch stderr reader
+	t.wg.Add(1)
+	go t.readStderr(t.ctx, t.stderr)
+
+	// Mark as ready
+	t.ready = true
+	t.logger.Debug("Transport ready via warm process")
+
+	return nil
 }
 
 // buildCommandArgs builds the command line arguments for the CLI subprocess.
