@@ -85,7 +85,7 @@ client, _ := claude.NewClient(ctx, opts)
 claude-agent-sdk-go/
 ├── query.go                # Query() — one-shot prompt → channel of messages
 ├── client.go               # Client — multi-turn interactive sessions
-├── sessions.go             # Session management
+├── sessions.go             # Session management (list, info, rename, tag, fork, subagents)
 ├── types/                  # Public types (all exported)
 │   ├── messages.go         # Message types, content blocks (text, tool_use, thinking, etc.)
 │   ├── control.go          # 23 hook event types, hook callbacks, permission results

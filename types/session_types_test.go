@@ -418,11 +418,234 @@ func TestGetSessionMessagesOptions_OmitEmpty(t *testing.T) {
 		t.Fatalf("failed to unmarshal to map: %v", err)
 	}
 
-	for _, key := range []string{"dir", "limit", "offset"} {
+	for _, key := range []string{"dir", "limit", "offset", "includeSystemMessages"} {
 		if _, ok := raw[key]; ok {
 			t.Errorf("expected JSON key %q to be omitted when zero value", key)
 		}
 	}
+}
+
+func TestForkSessionResult_JSONRoundtrip(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		result ForkSessionResult
+	}{
+		{
+			name: "all fields populated",
+			result: ForkSessionResult{
+				SessionID: "sess-fork-abc",
+				Summary:   "Forked from original session",
+			},
+		},
+		{
+			name: "only session ID",
+			result: ForkSessionResult{
+				SessionID: "sess-fork-minimal",
+			},
+		},
+		{
+			name:   "empty",
+			result: ForkSessionResult{},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			data, err := json.Marshal(tt.result)
+			if err != nil {
+				t.Fatalf("failed to marshal: %v", err)
+			}
+
+			var decoded ForkSessionResult
+			if err := json.Unmarshal(data, &decoded); err != nil {
+				t.Fatalf("failed to unmarshal: %v", err)
+			}
+
+			if decoded.SessionID != tt.result.SessionID {
+				t.Errorf("SessionID = %q, want %q", decoded.SessionID, tt.result.SessionID)
+			}
+			if decoded.Summary != tt.result.Summary {
+				t.Errorf("Summary = %q, want %q", decoded.Summary, tt.result.Summary)
+			}
+		})
+	}
+}
+
+func TestForkSessionResult_WireFormatKeys(t *testing.T) {
+	t.Parallel()
+	result := ForkSessionResult{
+		SessionID: "sess-001",
+		Summary:   "Test fork",
+	}
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("failed to unmarshal to map: %v", err)
+	}
+
+	expectedKeys := []string{"sessionId"}
+	for _, key := range expectedKeys {
+		if _, ok := raw[key]; !ok {
+			t.Errorf("expected camelCase JSON key %q", key)
+		}
+	}
+}
+
+func TestSubagentInfo_JSONRoundtrip(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		agent SubagentInfo
+	}{
+		{
+			name: "all fields populated",
+			agent: SubagentInfo{
+				ID:              "agent-abc-123",
+				Name:            "code-reviewer",
+				ParentSessionID: "sess-parent-001",
+				Model:           "claude-sonnet-4-6",
+			},
+		},
+		{
+			name: "required fields only",
+			agent: SubagentInfo{
+				ID:              "agent-minimal",
+				Name:            "helper",
+				ParentSessionID: "sess-001",
+			},
+		},
+		{
+			name:  "empty",
+			agent: SubagentInfo{},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			data, err := json.Marshal(tt.agent)
+			if err != nil {
+				t.Fatalf("failed to marshal: %v", err)
+			}
+
+			var decoded SubagentInfo
+			if err := json.Unmarshal(data, &decoded); err != nil {
+				t.Fatalf("failed to unmarshal: %v", err)
+			}
+
+			if decoded.ID != tt.agent.ID {
+				t.Errorf("ID = %q, want %q", decoded.ID, tt.agent.ID)
+			}
+			if decoded.Name != tt.agent.Name {
+				t.Errorf("Name = %q, want %q", decoded.Name, tt.agent.Name)
+			}
+			if decoded.ParentSessionID != tt.agent.ParentSessionID {
+				t.Errorf("ParentSessionID = %q, want %q", decoded.ParentSessionID, tt.agent.ParentSessionID)
+			}
+			if decoded.Model != tt.agent.Model {
+				t.Errorf("Model = %q, want %q", decoded.Model, tt.agent.Model)
+			}
+		})
+	}
+}
+
+func TestSubagentInfo_WireFormatKeys(t *testing.T) {
+	t.Parallel()
+	agent := SubagentInfo{
+		ID:              "agent-001",
+		Name:            "reviewer",
+		ParentSessionID: "sess-001",
+		Model:           "claude-opus-4-6",
+	}
+
+	data, err := json.Marshal(agent)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("failed to unmarshal to map: %v", err)
+	}
+
+	expectedKeys := []string{"id", "name", "parentSessionId"}
+	for _, key := range expectedKeys {
+		if _, ok := raw[key]; !ok {
+			t.Errorf("expected camelCase JSON key %q", key)
+		}
+	}
+}
+
+func TestGetSessionMessagesOptions_IncludeSystemMessages(t *testing.T) {
+	t.Parallel()
+
+	// Test that IncludeSystemMessages is included in JSON when true
+	opts := GetSessionMessagesOptions{
+		Dir:                   "/tmp/test",
+		Limit:                 50,
+		IncludeSystemMessages: true,
+	}
+
+	data, err := json.Marshal(opts)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("failed to unmarshal to map: %v", err)
+	}
+
+	if _, ok := raw["includeSystemMessages"]; !ok {
+		t.Error("expected 'includeSystemMessages' key when set to true")
+	}
+
+	// Test omitted when false (default)
+	optsDefault := GetSessionMessagesOptions{Dir: "/tmp"}
+	data2, err := json.Marshal(optsDefault)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	var raw2 map[string]interface{}
+	if err := json.Unmarshal(data2, &raw2); err != nil {
+		t.Fatalf("failed to unmarshal to map: %v", err)
+	}
+
+	if _, ok := raw2["includeSystemMessages"]; ok {
+		t.Error("expected 'includeSystemMessages' to be omitted when false")
+	}
+}
+
+func FuzzForkSessionResult_Unmarshal(f *testing.F) {
+	f.Add([]byte(`{"sessionId":"s1","summary":"test"}`))
+	f.Add([]byte(`{"sessionId":"","summary":""}`))
+	f.Add([]byte(`{}`))
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var result ForkSessionResult
+		_ = json.Unmarshal(data, &result)
+	})
+}
+
+func FuzzSubagentInfo_Unmarshal(f *testing.F) {
+	f.Add([]byte(`{"id":"a1","name":"agent","parentSessionId":"s1","model":"claude"}`))
+	f.Add([]byte(`{"id":"","name":"","parentSessionId":"","model":""}`))
+	f.Add([]byte(`{}`))
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var info SubagentInfo
+		_ = json.Unmarshal(data, &info)
+	})
 }
 
 func FuzzSessionMessage_Unmarshal(f *testing.F) {
