@@ -1610,6 +1610,90 @@ func TestClient_Close_WaitsForReceiveGoroutines(t *testing.T) {
 	}
 }
 
+// TestGetContextUsage_BeforeConnect ensures GetContextUsage returns CLIConnectionError when not connected.
+func TestGetContextUsage_BeforeConnect(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
+
+	client, err := NewClient(ctx, opts)
+	if err != nil {
+		t.Skip("Could not create client")
+	}
+	defer func() { _ = client.Close(ctx) }()
+
+	_, err = client.GetContextUsage(ctx)
+	if err == nil {
+		t.Fatal("expected error when calling GetContextUsage before Connect()")
+	}
+	if !types.IsCLIConnectionError(err) {
+		t.Errorf("expected CLIConnectionError, got: %v", err)
+	}
+}
+
+// TestGetSettings_BeforeConnect ensures GetSettings returns CLIConnectionError when not connected.
+func TestGetSettings_BeforeConnect(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
+
+	client, err := NewClient(ctx, opts)
+	if err != nil {
+		t.Skip("Could not create client")
+	}
+	defer func() { _ = client.Close(ctx) }()
+
+	_, err = client.GetSettings(ctx)
+	if err == nil {
+		t.Fatal("expected error when calling GetSettings before Connect()")
+	}
+	if !types.IsCLIConnectionError(err) {
+		t.Errorf("expected CLIConnectionError, got: %v", err)
+	}
+}
+
+// TestReloadPlugins_BeforeConnect ensures ReloadPlugins returns CLIConnectionError when not connected.
+func TestReloadPlugins_BeforeConnect(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
+
+	client, err := NewClient(ctx, opts)
+	if err != nil {
+		t.Skip("Could not create client")
+	}
+	defer func() { _ = client.Close(ctx) }()
+
+	err = client.ReloadPlugins(ctx)
+	if err == nil {
+		t.Fatal("expected error when calling ReloadPlugins before Connect()")
+	}
+	if !types.IsCLIConnectionError(err) {
+		t.Errorf("expected CLIConnectionError, got: %v", err)
+	}
+}
+
+// TestEnableChannel_BeforeConnect ensures EnableChannel returns CLIConnectionError when not connected.
+func TestEnableChannel_BeforeConnect(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
+
+	client, err := NewClient(ctx, opts)
+	if err != nil {
+		t.Skip("Could not create client")
+	}
+	defer func() { _ = client.Close(ctx) }()
+
+	err = client.EnableChannel(ctx)
+	if err == nil {
+		t.Fatal("expected error when calling EnableChannel before Connect()")
+	}
+	if !types.IsCLIConnectionError(err) {
+		t.Errorf("expected CLIConnectionError, got: %v", err)
+	}
+}
+
 // BenchmarkClient benchmarks the Client type
 func BenchmarkClient_Create(b *testing.B) {
 	ctx := context.Background()
