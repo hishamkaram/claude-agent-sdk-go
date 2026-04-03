@@ -379,6 +379,11 @@ func (t *SubprocessCLITransport) buildEnvMap() map[string]string {
 // maxParseErrorBackoff is the ceiling for exponential backoff on consecutive parse errors.
 const maxParseErrorBackoff = 30 * time.Second
 
+// maxConsecutiveParseErrors is the number of consecutive JSON parse errors
+// before messageReaderLoop gives up and exits. This prevents the SDK from
+// stalling forever when the subprocess sends garbage.
+const maxConsecutiveParseErrors uint = 6
+
 // messageReaderLoop reads JSON lines from stdout and parses them into messages.
 // It runs in a goroutine and sends messages to the messages channel.
 // It respects context cancellation and closes the messages channel when done.
@@ -450,6 +455,16 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 				zap.Error(err),
 				zap.Uint("consecutive_errors", consecutiveParseErrors),
 			)
+
+			// Exit after too many consecutive parse failures — subprocess is broken.
+			if consecutiveParseErrors >= maxConsecutiveParseErrors {
+				t.logger.Error("too many consecutive parse errors, closing message reader",
+					zap.Uint("consecutive_errors", consecutiveParseErrors),
+				)
+				t.OnError(fmt.Errorf("transport.messageReaderLoop: %d consecutive parse errors, giving up", consecutiveParseErrors))
+				return
+			}
+
 			// Store parse error but continue reading after backoff
 			t.OnError(err)
 
