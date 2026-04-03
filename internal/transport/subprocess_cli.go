@@ -798,6 +798,18 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		t.logger.Debug("Enabling strict MCP config")
 	}
 
+	// Add --task-budget flag if specified
+	if t.options != nil && t.options.TaskBudget != nil {
+		args = append(args, "--task-budget", fmt.Sprintf("%.2f", *t.options.TaskBudget))
+		t.logger.Debug("setting task budget", zap.Float64("task_budget", *t.options.TaskBudget))
+	}
+
+	// Add --agent-progress-summaries flag if enabled
+	if t.options != nil && t.options.AgentProgressSummaries {
+		args = append(args, "--agent-progress-summaries")
+		t.logger.Debug("Enabling agent progress summaries")
+	}
+
 	return args
 }
 
@@ -821,8 +833,9 @@ func (t *SubprocessCLITransport) buildSettingsJSON() string {
 	hasSandbox := t.options.Sandbox != nil
 	hasCheckpointing := t.options.EnableFileCheckpointing
 	hasToolConfig := t.options.ToolConfig != nil
+	hasIncludeHookEvents := t.options.IncludeHookEvents
 
-	if !hasThinking && !hasSandbox && !hasCheckpointing && !hasToolConfig && t.options.Settings == nil {
+	if !hasThinking && !hasSandbox && !hasCheckpointing && !hasToolConfig && !hasIncludeHookEvents && t.options.Settings == nil {
 		return ""
 	}
 
@@ -835,7 +848,7 @@ func (t *SubprocessCLITransport) buildSettingsJSON() string {
 	}
 
 	// If no typed fields are set, just return the original settings string
-	if !hasThinking && !hasSandbox && !hasCheckpointing && !hasToolConfig {
+	if !hasThinking && !hasSandbox && !hasCheckpointing && !hasToolConfig && !hasIncludeHookEvents {
 		if t.options.Settings != nil {
 			return *t.options.Settings
 		}
@@ -854,6 +867,9 @@ func (t *SubprocessCLITransport) buildSettingsJSON() string {
 	}
 	if hasToolConfig {
 		settings["toolConfig"] = t.options.ToolConfig
+	}
+	if hasIncludeHookEvents {
+		settings["includeHookEvents"] = true
 	}
 
 	result, err := json.Marshal(settings)
