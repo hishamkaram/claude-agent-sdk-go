@@ -70,12 +70,6 @@ Use `%w` (not `%v`). Define sentinel errors with `errors.New()`. Check with `err
 
 New events: `PostToolUseFailure`, `Notification`, `SessionStart`, `SessionEnd`, `StopFailure`, `SubagentStart`, `PostCompact`, `PermissionRequest`, `Setup`, `TeammateIdle`, `TaskCompleted`, `Elicitation`, `ElicitationResult`, `ConfigChange`, `WorktreeCreate`, `WorktreeRemove`, `InstructionsLoaded`
 
-## Recent Changes (048-fix-broken-pipe)
-- Added `procDone chan struct{}` field to `SubprocessCLITransport`; a watcher goroutine in `connectWithExecCommand()` and `connectWithCustomSpawner()` calls `cmd.Wait()`/`customProcess.Wait()` exactly once, sets `t.ready = false` on subprocess exit, then closes `procDone` before acquiring `t.mu` (prevents deadlock where `Close()` holds the mutex while draining `procDone`)
-- Refactored `closeExecCommand()` and `closeCustomProcess()` to drain `procDone` via `select` instead of calling `Wait()` a second time
-- Changed `messageReaderLoop(ctx)` → `messageReaderLoop(ctx, stdout io.Reader)` and `readStderr(ctx)` → `readStderr(ctx, stderr io.ReadCloser)` to eliminate data races on the stdout/stderr fields
-- Added `getExitCode(err error) int` package-level helper to extract the numeric exit code from `*exec.ExitError`
-
 ## Full Specification
 
 See `.claude/rules/go-source.md`, `go-tests.md`, `error-handling.md`, `logging.md` for full coding standard rules.
