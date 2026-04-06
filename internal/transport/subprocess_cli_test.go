@@ -483,8 +483,8 @@ func TestBuildCommandArgs_SettingsFileCheckpointing(t *testing.T) {
 	}
 }
 
-// TestBuildCommandArgs_ReplayUserMessages tests --replay-user-messages flag generation
-// when EnableFileCheckpointing is true.
+// TestBuildCommandArgs_ReplayUserMessages tests --replay-user-messages is always present
+// (needed for branch-at-message regardless of file checkpointing).
 func TestBuildCommandArgs_ReplayUserMessages(t *testing.T) {
 	t.Parallel()
 
@@ -499,9 +499,9 @@ func TestBuildCommandArgs_ReplayUserMessages(t *testing.T) {
 			wantFlag:            true,
 		},
 		{
-			name:                "absent when file checkpointing disabled",
+			name:                "present even when file checkpointing disabled",
 			enableCheckpointing: false,
-			wantFlag:            false,
+			wantFlag:            true,
 		},
 	}
 
