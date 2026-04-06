@@ -1,4 +1,4 @@
-.PHONY: help build test test-all test-integration bench fmt lint clean coverage hooks
+.PHONY: help build test test-all test-integration bench fmt lint clean coverage govulncheck hooks
 
 help:
 	@echo "Claude Agent SDK for Go - Development Tasks"
@@ -24,12 +24,12 @@ build:
 test:
 	@echo "Running unit tests (short mode)..."
 	@echo "Note: Integration tests skipped. Use 'make test-all' to run all tests."
-	go test -short -v ./...
+	go test -race -short -count=1 -p 4 ./...
 
 test-all:
 	@echo "Running ALL tests (including integration tests)..."
 	@echo "WARNING: This will spawn Claude CLI processes if CLAUDE_API_KEY is set"
-	go test -v ./...
+	go test -race -count=1 -p 4 ./...
 
 test-integration:
 	@echo "Running integration tests..."
@@ -51,10 +51,13 @@ lint:
 
 coverage:
 	@echo "Running tests with coverage (short mode)..."
-	go test -short -v -coverprofile=coverage.out ./...
-	go tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report: coverage.html"
-	@echo "Note: Integration tests skipped. Use 'go test -coverprofile=coverage.out ./...' for full coverage."
+	go test -race -short -count=1 -p 4 -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out
+	@echo "HTML report: go tool cover -html=coverage.out -o coverage.html"
+
+govulncheck:
+	@echo "Scanning for known vulnerabilities..."
+	govulncheck ./...
 
 clean:
 	@echo "Cleaning build artifacts..."
