@@ -819,6 +819,13 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		}
 	}
 
+	// When file checkpointing is enabled, also request user message UUIDs
+	// for checkpoint targeting (rewind, branch-at-message).
+	if t.options != nil && t.options.EnableFileCheckpointing {
+		args = append(args, "--replay-user-messages")
+		t.logger.Debug("Enabling replay user messages (file checkpointing requires UUIDs)")
+	}
+
 	// Add subagent execution configuration if specified
 	if t.options != nil && t.options.SubagentExecution != nil {
 		subagentJSON := make(map[string]interface{})

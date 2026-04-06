@@ -193,6 +193,97 @@ func TestUserMessageMarshaling(t *testing.T) {
 	})
 }
 
+// TestUserMessageUUID tests JSON marshaling/unmarshaling of the UserMessage UUID field.
+func TestUserMessageUUID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		json     string
+		wantUUID string
+	}{
+		{
+			name:     "uuid present",
+			json:     `{"type":"user","content":"hello","uuid":"msg-uuid-123"}`,
+			wantUUID: "msg-uuid-123",
+		},
+		{
+			name:     "uuid absent",
+			json:     `{"type":"user","content":"hello"}`,
+			wantUUID: "",
+		},
+		{
+			name:     "uuid empty string",
+			json:     `{"type":"user","content":"hello","uuid":""}`,
+			wantUUID: "",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var msg UserMessage
+			if err := json.Unmarshal([]byte(tt.json), &msg); err != nil {
+				t.Fatalf("Unmarshal failed: %v", err)
+			}
+			if msg.UUID != tt.wantUUID {
+				t.Errorf("UUID = %q, want %q", msg.UUID, tt.wantUUID)
+			}
+		})
+	}
+
+	// Round-trip: marshal then unmarshal preserves UUID.
+	t.Run("round-trip preserves UUID", func(t *testing.T) {
+		t.Parallel()
+
+		original := &UserMessage{
+			Type:    "user",
+			Content: "test message",
+			UUID:    "roundtrip-uuid-456",
+		}
+
+		data, err := json.Marshal(original)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+
+		var decoded UserMessage
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			t.Fatalf("Unmarshal failed: %v", err)
+		}
+
+		if decoded.UUID != original.UUID {
+			t.Errorf("UUID after round-trip = %q, want %q", decoded.UUID, original.UUID)
+		}
+	})
+
+	// Verify omitempty: empty UUID is not included in marshaled JSON.
+	t.Run("omitempty excludes empty UUID from JSON", func(t *testing.T) {
+		t.Parallel()
+
+		msg := &UserMessage{
+			Type:    "user",
+			Content: "no uuid",
+		}
+
+		data, err := json.Marshal(msg)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+
+		var raw map[string]interface{}
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatalf("Unmarshal to map failed: %v", err)
+		}
+
+		if _, exists := raw["uuid"]; exists {
+			t.Error("expected 'uuid' to be omitted from JSON when empty")
+		}
+	})
+}
+
 // TestResultMessageMarshaling tests JSON marshaling/unmarshaling of ResultMessage.
 func TestResultMessageMarshaling(t *testing.T) {
 	t.Parallel()

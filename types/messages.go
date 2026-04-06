@@ -159,6 +159,7 @@ type UserMessage struct {
 	Content         interface{} `json:"content"` // Can be string or []ContentBlock
 	ParentToolUseID *string     `json:"parent_tool_use_id,omitempty"`
 	IsReplay        bool        `json:"isReplay,omitempty"`
+	UUID            string      `json:"uuid,omitempty"` // User message identifier for checkpoint targeting
 }
 
 // GetMessageType returns the type of the message.

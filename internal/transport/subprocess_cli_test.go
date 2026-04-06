@@ -483,6 +483,49 @@ func TestBuildCommandArgs_SettingsFileCheckpointing(t *testing.T) {
 	}
 }
 
+// TestBuildCommandArgs_ReplayUserMessages tests --replay-user-messages flag generation
+// when EnableFileCheckpointing is true.
+func TestBuildCommandArgs_ReplayUserMessages(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                string
+		enableCheckpointing bool
+		wantFlag            bool
+	}{
+		{
+			name:                "present when file checkpointing enabled",
+			enableCheckpointing: true,
+			wantFlag:            true,
+		},
+		{
+			name:                "absent when file checkpointing disabled",
+			enableCheckpointing: false,
+			wantFlag:            false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := types.NewClaudeAgentOptions()
+			if tt.enableCheckpointing {
+				opts = opts.WithEnableFileCheckpointing(true)
+			}
+
+			transport := newTestTransport(t, opts)
+			args := transport.buildCommandArgs()
+
+			got := hasFlag(args, "--replay-user-messages")
+			if got != tt.wantFlag {
+				t.Errorf("hasFlag(--replay-user-messages) = %v, want %v", got, tt.wantFlag)
+			}
+		})
+	}
+}
+
 // TestBuildCommandArgs_SettingsMerge tests that typed settings fields override
 // user-provided Settings string on conflict.
 func TestBuildCommandArgs_SettingsMerge(t *testing.T) {
