@@ -499,9 +499,9 @@ func TestBuildCommandArgs_ReplayUserMessages(t *testing.T) {
 			wantFlag:            true,
 		},
 		{
-			name:                "present even when file checkpointing disabled",
+			name:                "absent when file checkpointing disabled",
 			enableCheckpointing: false,
-			wantFlag:            true,
+			wantFlag:            false,
 		},
 	}
 
