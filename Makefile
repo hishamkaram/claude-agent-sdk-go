@@ -1,3 +1,6 @@
+LEFTHOOK_MODULE  ?= github.com/evilmartians/lefthook/v2
+LEFTHOOK_VERSION ?= v2.1.5
+
 .PHONY: help build test test-all test-integration bench fmt lint clean coverage govulncheck hooks
 
 help:
@@ -76,7 +79,8 @@ examples:
 	@echo "Examples built"
 
 hooks:
-	@which lefthook > /dev/null 2>&1 || go install github.com/evilmartians/lefthook@latest
-	lefthook install
+	@mkdir -p .bin
+	@GOBIN=$(CURDIR)/.bin go install $(LEFTHOOK_MODULE)@$(LEFTHOOK_VERSION)
+	@PATH="$(CURDIR)/.bin:$$PATH" $(CURDIR)/.bin/lefthook install
 
 .DEFAULT_GOAL := help

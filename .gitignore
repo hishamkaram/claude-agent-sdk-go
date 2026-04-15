@@ -43,3 +43,6 @@ claude_docs/
 
 # Git worktrees
 .worktrees/
+
+# Repo-local dev tools (lefthook, etc.) — installed by `make hooks`
+/.bin/
