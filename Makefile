@@ -1,16 +1,17 @@
 LEFTHOOK_MODULE  ?= github.com/evilmartians/lefthook/v2
 LEFTHOOK_VERSION ?= v2.1.5
 
-.PHONY: help build test test-all test-integration bench fmt lint clean coverage govulncheck hooks
+.PHONY: help build test test-all test-integration test-integration-quota bench fmt lint clean coverage govulncheck hooks
 
 help:
 	@echo "Claude Agent SDK for Go - Development Tasks"
 	@echo ""
 	@echo "Available targets:"
 	@echo "  make build           - Build the SDK"
-	@echo "  make test            - Run unit tests (default, fast)"
-	@echo "  make test-all        - Run ALL tests including integration (spawns Claude processes)"
-	@echo "  make test-integration - Run integration tests only (requires CLAUDE_API_KEY)"
+	@echo "  make test                   - Run unit tests (default, fast)"
+	@echo "  make test-all               - Run ALL tests including integration (spawns Claude processes)"
+	@echo "  make test-integration       - Run real-CLI integration tests (no-quota subset)"
+	@echo "  make test-integration-quota - Run full integration suite including model turns (burns tokens)"
 	@echo "  make bench           - Run benchmarks"
 	@echo "  make fmt             - Format code with gofmt"
 	@echo "  make lint            - Run go vet and golangci-lint"
@@ -31,12 +32,18 @@ test:
 
 test-all:
 	@echo "Running ALL tests (including integration tests)..."
-	@echo "WARNING: This will spawn Claude CLI processes if CLAUDE_API_KEY is set"
+	@echo "WARNING: This will spawn Claude CLI processes if an API key / credentials are available"
 	go test -race -count=1 -p 4 ./...
+	go test -tags=integration -race -count=1 -p 1 -timeout=300s ./tests/...
 
 test-integration:
-	@echo "Running integration tests..."
-	go test -v ./tests/...
+	@echo "Running real-CLI integration tests (no-quota subset)..."
+	@echo "Quota-gated tests skip unless CLAUDE_SDK_RUN_TURNS=1"
+	go test -v -tags=integration -race -count=1 -p 1 -timeout=300s ./tests/...
+
+test-integration-quota:
+	@echo "Running full real-CLI integration suite (burns model tokens)..."
+	CLAUDE_SDK_RUN_TURNS=1 go test -v -tags=integration -race -count=1 -p 1 -timeout=900s ./tests/...
 
 bench:
 	@echo "Running benchmarks..."

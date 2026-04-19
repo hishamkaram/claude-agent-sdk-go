@@ -3,8 +3,10 @@ package tests
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -258,6 +260,7 @@ func FindRealCLI(t *testing.T) string {
 
 	// Try common installation paths
 	commonPaths := []string{
+		filepath.Join(os.Getenv("HOME"), ".claude", "local", "claude"),
 		filepath.Join(os.Getenv("HOME"), ".npm-global", "bin", "claude"),
 		"/usr/local/bin/claude",
 		"/opt/homebrew/bin/claude",
@@ -274,12 +277,105 @@ func FindRealCLI(t *testing.T) string {
 }
 
 // RequireAPIKey checks if CLAUDE_API_KEY is set, skips test if not.
+//
+// Deprecated: use requireAuth, which additionally accepts ANTHROPIC_API_KEY and
+// a logged-in claude CLI credentials file (~/.claude/.credentials.json).
 func RequireAPIKey(t *testing.T) {
 	t.Helper()
 
 	if os.Getenv("CLAUDE_API_KEY") == "" {
 		t.Skip("CLAUDE_API_KEY not set - skipping integration test")
 	}
+}
+
+// requireClaude locates the real `claude` CLI binary or skips the test.
+// Preferred entry point for real-CLI integration tests in this package.
+func requireClaude(t *testing.T) string {
+	t.Helper()
+	return FindRealCLI(t)
+}
+
+// requireAuth skips the test unless at least one of:
+//   - ANTHROPIC_API_KEY env var is set (API auth)
+//   - CLAUDE_API_KEY env var is set (legacy alias)
+//   - ~/.claude/.credentials.json exists (Claude Pro/Max subscription, `claude login`)
+func requireAuth(t *testing.T) {
+	t.Helper()
+
+	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+		return
+	}
+	if os.Getenv("CLAUDE_API_KEY") != "" {
+		return
+	}
+
+	home, err := os.UserHomeDir()
+	if err == nil {
+		credPath := filepath.Join(home, ".claude", ".credentials.json")
+		if _, statErr := os.Stat(credPath); statErr == nil {
+			return
+		}
+	}
+
+	t.Skip("no auth: set ANTHROPIC_API_KEY or log in via `claude login` (~/.claude/.credentials.json)")
+}
+
+// requireRunTurns gates a test on CLAUDE_SDK_RUN_TURNS=1. Use for tests that
+// drive the model through at least one full turn and therefore spend tokens.
+// Default CI run (nightly) sets this only on scheduled events, not on manual
+// workflow_dispatch, so token cost stays bounded.
+func requireRunTurns(t *testing.T) {
+	t.Helper()
+	if os.Getenv("CLAUDE_SDK_RUN_TURNS") != "1" {
+		t.Skip("quota-gated test: set CLAUDE_SDK_RUN_TURNS=1 to enable (burns tokens)")
+	}
+}
+
+// safetyNetSettings snapshots ~/.claude/settings.json before the test and
+// restores it on t.Cleanup (even if the test panics). Use in any test that
+// may mutate user-global settings, e.g. hook registration.
+func safetyNetSettings(t *testing.T) {
+	t.Helper()
+	stashUserFile(t, ".claude", "settings.json")
+}
+
+// safetyNetHooks snapshots ~/.claude/hooks.json before the test and restores
+// it on t.Cleanup. Mirrors codex's safetyNetHooksJSON pattern — survives SDK
+// and CLI crashes because the stash happens synchronously at test entry.
+func safetyNetHooks(t *testing.T) {
+	t.Helper()
+	stashUserFile(t, ".claude", "hooks.json")
+}
+
+// stashUserFile snapshots a file under $HOME and restores it on t.Cleanup.
+// If the file did not exist, cleanup removes any file the test created at
+// that path — leaving the user's state exactly as it was found.
+func stashUserFile(t *testing.T, relParts ...string) {
+	t.Helper()
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("stashUserFile: cannot resolve HOME: %v", err)
+	}
+
+	path := filepath.Join(append([]string{home}, relParts...)...)
+	original, readErr := os.ReadFile(path)
+	existed := readErr == nil
+	if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+		t.Fatalf("stashUserFile: cannot read %s: %v", path, readErr)
+	}
+
+	t.Cleanup(func() {
+		if existed {
+			if err := os.WriteFile(path, original, 0o600); err != nil {
+				t.Errorf("stashUserFile: failed to restore %s: %v", path, err)
+			}
+			return
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("stashUserFile: failed to remove %s: %v", path, err)
+		}
+	})
 }
 
 // CreateTestContext creates a context with timeout for tests.
