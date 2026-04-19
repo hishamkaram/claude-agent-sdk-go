@@ -125,17 +125,69 @@ claude-agent-sdk-go/
 | `make build` | Build all packages |
 | `make test` | Run unit tests (skips integration — no Claude CLI needed) |
 | `make test-all` | Run all tests including integration (requires Claude CLI) |
-| `make test-integration` | Run integration tests only |
+| `make test-integration` | Run real-CLI integration tests, no-quota subset (skips turn-driving tests) |
+| `make test-integration-quota` | Run the full real-CLI integration suite including model turns (burns tokens) |
 | `make coverage` | Unit tests with coverage report |
 | `make lint` | Run `go vet` + golangci-lint |
 | `make fmt` | Format all Go files |
+
+## Integration testing
+
+The SDK ships a real-CLI integration suite under `tests/integration_*_test.go`,
+gated by the `integration` Go build tag. These tests spawn the actual
+`claude` subprocess against real network endpoints — they catch wire-shape
+drift between the SDK and the CLI that mock-based tests cannot see.
+
+### Install the CLI
+
+```bash
+npm install -g @anthropic-ai/claude-code
+claude --version
+```
+
+### Environment gates
+
+Each integration test is guarded by helpers in `tests/test_helpers.go`:
+
+- `requireClaude(t)` — skips if the `claude` binary is not on PATH or in a
+  common install location (`~/.claude/local/claude`, `~/.npm-global/bin/...`,
+  `/usr/local/bin/...`, `/opt/homebrew/bin/...`). Override with
+  `CLAUDE_CLI_PATH=/path/to/claude`.
+- `requireAuth(t)` — skips unless one of: `ANTHROPIC_API_KEY`,
+  `CLAUDE_API_KEY`, or `~/.claude/.credentials.json` (via `claude login`).
+- `requireRunTurns(t)` — skips unless `CLAUDE_SDK_RUN_TURNS=1`. Use for
+  tests that drive a full model turn and therefore spend tokens.
+
+### Running locally
+
+```bash
+# Cheap no-quota subset — exercises init/transport/control-protocol paths:
+make test-integration
+
+# Full suite including turn-driving tests (~$1-3 in tokens):
+CLAUDE_SDK_RUN_TURNS=1 make test-integration-quota
+
+# 5-count stability check (recommended before shipping a new test):
+go test -tags=integration -race -count=5 -p 1 ./tests/... -timeout=1800s
+```
+
+### CI
+
+`.github/workflows/integration.yml` runs the suite nightly against
+`secrets.ANTHROPIC_API_KEY`. Manual `workflow_dispatch` triggers default to
+the no-quota subset; flip `run_turns=true` to include quota-gated tests.
+
+See `tests/coverage_matrix.md` for the per-method coverage table.
 
 ## Environment variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `CLAUDE_API_KEY` | One of these | Anthropic API key (pay-as-you-go) |
-| `CLAUDE_CODE_OAUTH_TOKEN` | required | OAuth token (Max subscription) |
+| `ANTHROPIC_API_KEY` | One of these | Anthropic API key (preferred; what CI uses) |
+| `CLAUDE_API_KEY` | One of these | Legacy alias for `ANTHROPIC_API_KEY` |
+| `CLAUDE_CODE_OAUTH_TOKEN` | One of these | OAuth token (Max subscription) |
+| `CLAUDE_CLI_PATH` | Optional | Absolute path to the `claude` binary (override PATH lookup) |
+| `CLAUDE_SDK_RUN_TURNS` | Optional | Set to `1` to enable quota-gated integration tests |
 | `CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK` | Optional | Skip Claude CLI version validation |
 
 ## Known limitations

@@ -1,0 +1,95 @@
+name: Integration (real CLI)
+
+# Nightly live-CLI integration suite. Spawns the real `claude` CLI against
+# a real Anthropic endpoint to catch wire-shape drift between the SDK and
+# the CLI — the failure class that `go test -short` cannot surface because
+# it uses mock transports.
+#
+# Trigger model:
+#   - schedule: 06:00 UTC nightly (a single nightly run is cheap insurance)
+#   - workflow_dispatch: manual trigger (defaults to no-quota subset)
+#
+# Cost profile:
+#   - No-quota subset (~30 tests): zero token spend. Runs on every trigger.
+#   - Quota subset (~6 tests):     spends ~$1-3 per run. Only runs on
+#                                   scheduled triggers OR when the
+#                                   `run_turns` workflow input is "true".
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      run_turns:
+        description: 'Run quota-gated tests that spend model tokens'
+        required: false
+        default: 'false'
+      stress:
+        description: 'Run 5-count stability stress loop'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: Integration suite
+    runs-on: ubuntu-latest
+    # Concurrency: only one integration run at a time. Newer runs cancel
+    # in-flight older runs so nightly + manual don't race.
+    concurrency:
+      group: integration-${{ github.ref }}
+      cancel-in-progress: true
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.2.0
+        with:
+          go-version: '1.25'
+
+      - uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
+        with:
+          node-version: '20'
+
+      # Install Claude Code CLI. Pin the version so a surprise upstream
+      # release does not silently change what our CI tests against —
+      # integration.yml's whole purpose is to catch CLI drift, which only
+      # works if the CLI version is stable between our runs.
+      - name: Install Claude CLI
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+
+      - name: Go vet (integration tag)
+        run: go vet -tags=integration ./...
+
+      - name: No-quota integration suite
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          go test -tags=integration -race -count=1 -p 1 \
+              -timeout=300s ./tests/...
+
+      - name: Quota-gated integration suite
+        # Run on scheduled nightly OR when operator explicitly opts in
+        # via workflow_dispatch.
+        if: |
+          github.event_name == 'schedule' ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.run_turns == 'true')
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_SDK_RUN_TURNS: '1'
+        run: |
+          go test -tags=integration -race -count=1 -p 1 \
+              -timeout=900s ./tests/...
+
+      - name: Stress loop (5-count)
+        if: github.event.inputs.stress == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          go test -tags=integration -race -count=5 -p 1 \
+              -timeout=1800s ./tests/...
