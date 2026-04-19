@@ -2,6 +2,35 @@
 
 All notable changes to the Claude Agent SDK for Go are documented in this file.
 
+## [Unreleased]
+
+### Added
+- Real-CLI integration test suite under `tests/integration_*_test.go`,
+  gated by the `integration` Go build tag. Covers every public `Client`
+  method, the `sessions` package API, all 23 `HookEvent` constants, the
+  MCP lifecycle, cross-cutting concurrency, and a CLI-flag drift detector.
+  38 passing, 0 failing against a live CLI.
+- `tests/coverage_matrix.md` documenting per-method status.
+- `tests/fixtures/` placeholder directory for wire-shape probe baselines.
+- `.github/workflows/integration.yml` — nightly workflow that runs the
+  integration suite against `secrets.ANTHROPIC_API_KEY`. Manual dispatch
+  supports `run_turns` and `stress` inputs.
+- `make test-integration-quota` Makefile target for the full suite
+  including turn-driving tests (requires `CLAUDE_SDK_RUN_TURNS=1`).
+- README "Integration testing" section documenting install, env gates,
+  and local run recipes.
+
+### Fixed
+- `make test-integration` now correctly passes `-tags=integration` —
+  previously the tagged suite compiled but never ran anywhere (latent).
+
+### Known issues (surfaced by the new flag drift test)
+- `WithAgentProgressSummaries` and `WithSubagentExecution` emit CLI flags
+  (`--agent-progress-summaries`, `--subagent-execution`) that are not
+  present in the CLI binary as of `claude-code-linux-x64` 0.5.1. Setting
+  either option today causes `Connect()` to fail with an unknown-flag
+  error. Tracked by `TestFlags_UnsupportedFlagsAreDocumented`.
+
 ## [0.2.9] - 2025-12-07
 
 ### Added

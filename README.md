@@ -196,6 +196,11 @@ See `tests/coverage_matrix.md` for the per-method coverage table.
 - Requires Claude Code CLI v2.0.0+ (checked at connect time, skip with `CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK=1`)
 - `make test` runs in `-short` mode (no Claude CLI needed); `make test-all` spawns real Claude processes and requires authentication
 - `v0.2.0` is retracted in go.mod — do not use that version
+- Two option fields emit CLI flags that the current `claude` CLI (0.5.1) does
+  not recognize — setting either will cause Connect() to fail with an
+  unknown-flag error. Surfaced by `TestFlags_UnsupportedFlagsAreDocumented`:
+  - `WithAgentProgressSummaries` → `--agent-progress-summaries`
+  - `WithSubagentExecution` → `--subagent-execution`
 
 ## Contributing
 
