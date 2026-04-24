@@ -2,11 +2,25 @@ package claude
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/hishamkaram/claude-agent-sdk-go/internal/transport"
 )
+
+func blockingCLIPath(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fake-claude")
+	script := "#!/bin/sh\nwhile :; do sleep 3600; done\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to create fake CLI: %v", err)
+	}
+	return path
+}
 
 // TestStartup runs all startup tests sequentially since they share the global warmPool.
 // The subtests are NOT parallel — warm pool is a singleton resource.
@@ -41,7 +55,7 @@ func TestStartup(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		err := Startup(ctx, WithStartupCLIPath("/bin/cat"))
+		err := Startup(ctx, WithStartupCLIPath(blockingCLIPath(t)))
 		if err != nil {
 			t.Fatalf("Startup failed: %v", err)
 		}
@@ -66,7 +80,7 @@ func TestStartup(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 
-		err := Startup(ctx, WithStartupCLIPath("/bin/cat"))
+		err := Startup(ctx, WithStartupCLIPath(blockingCLIPath(t)))
 		if err != nil {
 			t.Fatalf("Startup failed: %v", err)
 		}
@@ -93,13 +107,14 @@ func TestStartup(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		err := Startup(ctx, WithStartupCLIPath("/bin/cat"))
+		cliPath := blockingCLIPath(t)
+		err := Startup(ctx, WithStartupCLIPath(cliPath))
 		if err != nil {
 			t.Fatalf("first Startup failed: %v", err)
 		}
 
 		// Second call should be no-op (pool already has a process)
-		err = Startup(ctx, WithStartupCLIPath("/bin/cat"))
+		err = Startup(ctx, WithStartupCLIPath(cliPath))
 		if err != nil {
 			t.Fatalf("second Startup should be no-op, got error: %v", err)
 		}
@@ -125,7 +140,7 @@ func TestStartup(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		err := Startup(ctx, WithStartupCLIPath("/bin/cat"), WithStartupCWD("/tmp"))
+		err := Startup(ctx, WithStartupCLIPath(blockingCLIPath(t)), WithStartupCWD("/tmp"))
 		if err != nil {
 			t.Fatalf("Startup with CWD failed: %v", err)
 		}
@@ -143,7 +158,10 @@ func TestStartup(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		err := Startup(ctx, WithStartupCLIPath("/bin/cat"), WithStartupEnv(map[string]string{"FOO": "bar"}))
+		err := Startup(ctx,
+			WithStartupCLIPath(blockingCLIPath(t)),
+			WithStartupEnv(map[string]string{"FOO": "bar"}),
+		)
 		if err != nil {
 			t.Fatalf("Startup with Env failed: %v", err)
 		}
@@ -161,8 +179,9 @@ func TestStartup(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
+		cliPath := blockingCLIPath(t)
 		err := Startup(ctx,
-			WithStartupCLIPath("/bin/cat"),
+			WithStartupCLIPath(cliPath),
 			WithStartupCWD("/tmp"),
 			WithStartupEnv(map[string]string{"FOO": "bar"}),
 		)
