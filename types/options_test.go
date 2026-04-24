@@ -622,6 +622,7 @@ func TestEffortLevelConstants(t *testing.T) {
 		{name: "low", level: EffortLow, want: "low"},
 		{name: "medium", level: EffortMedium, want: "medium"},
 		{name: "high", level: EffortHigh, want: "high"},
+		{name: "xhigh", level: EffortXHigh, want: "xhigh"},
 		{name: "max", level: EffortMax, want: "max"},
 	}
 
@@ -1023,6 +1024,7 @@ func TestWithEffort(t *testing.T) {
 		{name: "low", level: EffortLow},
 		{name: "medium", level: EffortMedium},
 		{name: "high", level: EffortHigh},
+		{name: "xhigh", level: EffortXHigh},
 		{name: "max", level: EffortMax},
 	}
 

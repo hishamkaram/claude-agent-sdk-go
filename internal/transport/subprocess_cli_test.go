@@ -74,6 +74,12 @@ func TestBuildCommandArgs_Effort(t *testing.T) {
 			wantValue: "high",
 		},
 		{
+			name:      "effort xhigh",
+			effort:    effortPtr(types.EffortXHigh),
+			wantFlag:  true,
+			wantValue: "xhigh",
+		},
+		{
 			name:      "effort low",
 			effort:    effortPtr(types.EffortLow),
 			wantFlag:  true,

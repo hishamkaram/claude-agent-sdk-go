@@ -14,6 +14,7 @@ const (
 	EffortLow    EffortLevel = "low"
 	EffortMedium EffortLevel = "medium"
 	EffortHigh   EffortLevel = "high"
+	EffortXHigh  EffortLevel = "xhigh"
 	EffortMax    EffortLevel = "max"
 )
 
@@ -345,7 +346,7 @@ type ClaudeAgentOptions struct {
 	Plugins []PluginConfig `json:"plugins,omitempty"`
 
 	// Reasoning effort control
-	Effort *EffortLevel `json:"effort,omitempty"` // "low", "medium", "high", "max" → --effort flag
+	Effort *EffortLevel `json:"effort,omitempty"` // "low", "medium", "high", "xhigh", "max" → --effort flag
 
 	// Thinking configuration
 	Thinking *ThinkingConfig `json:"thinking,omitempty"` // adaptive/enabled/disabled → --settings JSON
@@ -743,7 +744,7 @@ func (o *ClaudeAgentOptions) WithAllowDangerouslySkipPermissions(allow bool) *Cl
 	return o
 }
 
-// WithEffort sets the reasoning effort level (low/medium/high/max).
+// WithEffort sets the reasoning effort level (low/medium/high/xhigh/max).
 func (o *ClaudeAgentOptions) WithEffort(level EffortLevel) *ClaudeAgentOptions {
 	o.Effort = &level
 	return o
