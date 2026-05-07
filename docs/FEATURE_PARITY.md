@@ -4,11 +4,11 @@
 
 | Metric | Value |
 |--------|-------|
-| **Go SDK Version** | v0.2.9 |
+| **Go SDK Version** | v0.5.1 |
 | **Python SDK Version** | v0.1.18+ |
 | **Feature Parity** | ~95% |
 | **Status** | Production-Ready |
-| **Last Updated** | 2025-12-31 |
+| **Last Updated** | 2026-05-07 |
 
 ## Overview
 
@@ -71,7 +71,7 @@ This document provides a comprehensive comparison of features between the Go Age
 | Feature | Python | Go | Notes |
 |---------|--------|-----|-------|
 | **Tool permissions** | ✅ | ✅ | Permission callbacks for tool use |
-| **Permission modes** | ✅ | ✅ | default, acceptEdits, plan, bypassPermissions |
+| **Permission modes** | ✅ | ✅ | default, acceptEdits, auto, dontAsk, plan, bypassPermissions |
 | **Tool filtering** | ✅ | ✅ | AllowedTools, DisallowedTools |
 | **Tool use callbacks** | ✅ | ✅ | React to tool execution |
 | **Permission storage** | ✅ | ✅ | Save permissions to user/project/local settings |
@@ -147,7 +147,9 @@ This document provides a comprehensive comparison of features between the Go Age
 
 | Feature | Python | Go | Notes |
 |---------|--------|-----|-------|
-| **Subagent execution** | ⚠️ | ⚠️ | Multi-invocation control (Python branch) |
+| **Dynamic agent definitions** | ✅ | ✅ | `--agents` payloads use documented camelCase subagent fields |
+| **Session agent selection** | ✅ | ✅ | `WithSessionAgent` emits `--agent <name>` |
+| **Subagent execution** | ⚠️ | ⚠️ | SDK option retained, but Claude Code CLI 2.1.132 rejects `--subagent-execution` |
 | **Concurrent execution** | ⚠️ | ⚠️ | Run multiple agents in parallel |
 | **Error handling** | ⚠️ | ⚠️ | Strategy for subagent failures |
 

@@ -2,6 +2,7 @@ package types
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"time"
@@ -179,19 +180,107 @@ type SystemPromptPreset struct {
 	Append *string `json:"append,omitempty"`
 }
 
+// AgentIsolation controls whether a subagent runs in the current worktree or
+// an isolated temporary worktree.
+type AgentIsolation string
+
+const (
+	AgentIsolationWorktree AgentIsolation = "worktree"
+)
+
+// AgentColor controls the display color for a subagent in Claude Code UI.
+type AgentColor string
+
+const (
+	AgentColorRed    AgentColor = "red"
+	AgentColorBlue   AgentColor = "blue"
+	AgentColorGreen  AgentColor = "green"
+	AgentColorYellow AgentColor = "yellow"
+	AgentColorPurple AgentColor = "purple"
+	AgentColorOrange AgentColor = "orange"
+	AgentColorPink   AgentColor = "pink"
+	AgentColorCyan   AgentColor = "cyan"
+)
+
+// AgentHookHandler is a raw Claude Code hook handler entry for subagent
+// frontmatter hooks. It supports command, HTTP, MCP tool, prompt, and agent
+// hook handler fields.
+type AgentHookHandler map[string]interface{}
+
+// AgentHookMatcher represents a subagent-scoped hook matcher group.
+type AgentHookMatcher struct {
+	Matcher *string            `json:"matcher,omitempty"`
+	Hooks   []AgentHookHandler `json:"hooks,omitempty"`
+}
+
 // AgentDefinition represents a custom agent definition.
 type AgentDefinition struct {
-	Description            string                 `json:"description"`
-	Prompt                 string                 `json:"prompt"`
-	Tools                  []string               `json:"tools,omitempty"`
-	DisallowedTools        []string               `json:"disallowed_tools,omitempty"`                    // Tools explicitly disallowed for this agent
-	Model                  *string                `json:"model,omitempty"`                               // "sonnet", "opus", "haiku", "inherit"
-	ExecutionMode          *SubagentExecutionMode `json:"execution_mode,omitempty"`                      // How this agent executes relative to others
-	Timeout                *float64               `json:"timeout,omitempty"`                             // Maximum seconds to wait for agent response
-	MaxTurns               *int                   `json:"max_turns,omitempty"`                           // Maximum conversation turns for this agent
-	McpServers             []interface{}          `json:"mcp_servers,omitempty"`                         // MCP server specs (string refs or inline configs)
-	Skills                 []string               `json:"skills,omitempty"`                              // Skill names to preload
-	CriticalSystemReminder *string                `json:"criticalSystemReminder_EXPERIMENTAL,omitempty"` // Experimental critical system reminder
+	Description            string                           `json:"description"`
+	Prompt                 string                           `json:"prompt"`
+	Tools                  []string                         `json:"tools,omitempty"`
+	DisallowedTools        []string                         `json:"disallowedTools,omitempty"`                     // Tools explicitly disallowed for this agent
+	Model                  *string                          `json:"model,omitempty"`                               // "sonnet", "opus", "haiku", "inherit", or full model ID
+	MaxTurns               *int                             `json:"maxTurns,omitempty"`                            // Maximum conversation turns for this agent
+	McpServers             []interface{}                    `json:"mcpServers,omitempty"`                          // MCP server specs (string refs or inline configs)
+	Hooks                  map[HookEvent][]AgentHookMatcher `json:"hooks,omitempty"`                               // Subagent-scoped lifecycle hooks
+	Skills                 []string                         `json:"skills,omitempty"`                              // Skill names to preload
+	InitialPrompt          *string                          `json:"initialPrompt,omitempty"`                       // First user turn when the agent runs as the main session agent
+	Memory                 *SettingSource                   `json:"memory,omitempty"`                              // Memory source: user, project, or local
+	Background             *bool                            `json:"background,omitempty"`                          // Run as a non-blocking background task when invoked
+	Effort                 *EffortLevel                     `json:"effort,omitempty"`                              // Per-agent reasoning effort; numeric effort is not modeled by the Go enum
+	PermissionMode         *PermissionMode                  `json:"permissionMode,omitempty"`                      // Permission mode for tool execution in this agent
+	Isolation              *AgentIsolation                  `json:"isolation,omitempty"`                           // Set to worktree for an isolated temporary worktree
+	Color                  *AgentColor                      `json:"color,omitempty"`                               // Display color in Claude Code UI
+	CriticalSystemReminder *string                          `json:"criticalSystemReminder_EXPERIMENTAL,omitempty"` // Experimental critical system reminder
+
+	// Deprecated: ExecutionMode is retained for source compatibility with older
+	// SDK releases. Current Claude Code AgentDefinition JSON does not document
+	// execution_mode, so the SDK no longer emits this field in --agents payloads.
+	ExecutionMode *SubagentExecutionMode `json:"-"`
+
+	// Deprecated: Timeout is retained for source compatibility with older SDK
+	// releases. Current Claude Code AgentDefinition JSON does not document
+	// timeout, so the SDK no longer emits this field in --agents payloads.
+	Timeout *float64 `json:"-"`
+}
+
+// UnmarshalJSON accepts both the current documented camelCase AgentDefinition
+// keys and the older snake_case keys emitted by previous Go SDK releases.
+func (a *AgentDefinition) UnmarshalJSON(data []byte) error {
+	type agentDefinitionAlias AgentDefinition
+	aux := struct {
+		*agentDefinitionAlias
+
+		DisallowedToolsSnake []string               `json:"disallowed_tools"`
+		MaxTurnsSnake        *int                   `json:"max_turns"`
+		McpServersSnake      []interface{}          `json:"mcp_servers"`
+		ExecutionModeSnake   *SubagentExecutionMode `json:"execution_mode"`
+		TimeoutValue         *float64               `json:"timeout"`
+	}{
+		agentDefinitionAlias: (*agentDefinitionAlias)(a),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	if len(a.DisallowedTools) == 0 && len(aux.DisallowedToolsSnake) > 0 {
+		a.DisallowedTools = aux.DisallowedToolsSnake
+	}
+	if a.MaxTurns == nil && aux.MaxTurnsSnake != nil {
+		a.MaxTurns = aux.MaxTurnsSnake
+	}
+	if len(a.McpServers) == 0 && len(aux.McpServersSnake) > 0 {
+		a.McpServers = aux.McpServersSnake
+	}
+	if aux.ExecutionModeSnake != nil {
+		a.ExecutionMode = aux.ExecutionModeSnake
+	}
+	if aux.TimeoutValue != nil {
+		a.Timeout = aux.TimeoutValue
+	}
+
+	return nil
 }
 
 // PluginConfig represents a Claude Code plugin configuration.
@@ -305,7 +394,7 @@ type ClaudeAgentOptions struct {
 	// Model and execution limits
 	Model             *string  `json:"model,omitempty"`
 	MaxTurns          *int     `json:"max_turns,omitempty"`
-	MaxThinkingTokens *int     `json:"max_thinking_tokens,omitempty"` // Maximum tokens for extended thinking
+	MaxThinkingTokens *int     `json:"max_thinking_tokens,omitempty"` // Deprecated: use Thinking with BudgetTokens instead.
 	MaxBudgetUSD      *float64 `json:"max_budget_usd,omitempty"`      // Maximum budget in USD for this query
 
 	// Beta features
@@ -338,6 +427,9 @@ type ClaudeAgentOptions struct {
 
 	// Agent definitions
 	Agents map[string]AgentDefinition `json:"agents,omitempty"`
+
+	// Session agent name — run the whole session as this configured subagent.
+	Agent *string `json:"agent,omitempty"`
 
 	// Subagent execution configuration
 	SubagentExecution *SubagentExecutionConfig `json:"subagent_execution,omitempty"`
@@ -394,7 +486,8 @@ type ClaudeAgentOptions struct {
 	// Task budget in USD — limits spending for a single task invocation
 	TaskBudget *float64 `json:"taskBudget,omitempty"` // → --task-budget CLI flag
 
-	// Agent progress summaries — receive progress updates from subagents
+	// Agent progress summaries — experimental flag retained for forward-compatible callers.
+	// Current Claude Code CLI releases may reject this option with an unknown-flag error.
 	AgentProgressSummaries bool `json:"agentProgressSummaries,omitempty"` // → --agent-progress-summaries CLI flag
 
 	// Include hook events — receive hook lifecycle events in the message stream
@@ -511,7 +604,7 @@ func (o *ClaudeAgentOptions) WithMaxTurns(maxTurns int) *ClaudeAgentOptions {
 }
 
 // WithMaxThinkingTokens sets the maximum tokens for extended thinking.
-// This limits how many tokens Claude can use for internal reasoning before responding.
+// Deprecated: prefer WithThinking(ThinkingConfig{Type: "enabled", BudgetTokens: &n}).
 func (o *ClaudeAgentOptions) WithMaxThinkingTokens(maxTokens int) *ClaudeAgentOptions {
 	o.MaxThinkingTokens = &maxTokens
 	return o
@@ -637,8 +730,15 @@ func (o *ClaudeAgentOptions) WithAgent(name string, agent AgentDefinition) *Clau
 	return o
 }
 
+// WithSessionAgent sets the configured subagent to use as the main session agent.
+func (o *ClaudeAgentOptions) WithSessionAgent(name string) *ClaudeAgentOptions {
+	o.Agent = &name
+	return o
+}
+
 // WithSubagentExecution sets the subagent execution configuration.
-// This controls how multiple subagents execute concurrently.
+// This emits an experimental CLI flag retained for forward-compatible callers.
+// Current Claude Code CLI releases may reject it with an unknown-flag error.
 func (o *ClaudeAgentOptions) WithSubagentExecution(config *SubagentExecutionConfig) *ClaudeAgentOptions {
 	o.SubagentExecution = config
 	return o
@@ -846,6 +946,8 @@ func (o *ClaudeAgentOptions) WithTaskBudget(budget float64) *ClaudeAgentOptions 
 }
 
 // WithAgentProgressSummaries enables or disables agent progress summary messages.
+// This emits an experimental CLI flag retained for forward-compatible callers.
+// Current Claude Code CLI releases may reject it with an unknown-flag error.
 func (o *ClaudeAgentOptions) WithAgentProgressSummaries(enabled bool) *ClaudeAgentOptions {
 	o.AgentProgressSummaries = enabled
 	return o

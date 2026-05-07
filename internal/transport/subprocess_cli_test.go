@@ -798,6 +798,23 @@ func TestBuildCommandArgs_NoSettingsWhenNothingSet(t *testing.T) {
 	}
 }
 
+// TestBuildCommandArgs_SessionAgent verifies --agent flag generation.
+func TestBuildCommandArgs_SessionAgent(t *testing.T) {
+	t.Parallel()
+
+	opts := types.NewClaudeAgentOptions().WithSessionAgent("reviewer")
+	transport := newTestTransport(t, opts)
+	args := transport.buildCommandArgs()
+
+	val, found := flagValue(args, "--agent")
+	if !found {
+		t.Fatal("expected --agent flag")
+	}
+	if val != "reviewer" {
+		t.Errorf("--agent = %q, want reviewer", val)
+	}
+}
+
 // TestBuildCommandArgs_CombinedNewFlags verifies that multiple new flags can coexist.
 func TestBuildCommandArgs_CombinedNewFlags(t *testing.T) {
 	t.Parallel()
@@ -1198,15 +1215,40 @@ func TestBuildCommandArgs_AgentDefinitionNewFields(t *testing.T) {
 	t.Parallel()
 
 	reminder := "critical reminder text"
+	background := true
+	effort := types.EffortXHigh
+	permissionMode := types.PermissionModePlan
+	memory := types.SettingSourceProject
+	initialPrompt := "start here"
+	isolation := types.AgentIsolationWorktree
+	color := types.AgentColorCyan
+	matcher := "Edit|Write"
 	opts := types.NewClaudeAgentOptions()
 	opts.Agents = map[string]types.AgentDefinition{
 		"test-agent": {
-			Description:            "test agent",
-			Prompt:                 "do stuff",
-			DisallowedTools:        []string{"Bash", "Write"},
-			McpServers:             []interface{}{"server1", map[string]interface{}{"name": "server2"}},
+			Description:     "test agent",
+			Prompt:          "do stuff",
+			DisallowedTools: []string{"Bash", "Write"},
+			McpServers:      []interface{}{"server1", map[string]interface{}{"name": "server2"}},
+			Hooks: map[types.HookEvent][]types.AgentHookMatcher{
+				types.HookEventPostToolUse: {
+					{
+						Matcher: &matcher,
+						Hooks: []types.AgentHookHandler{
+							{"type": "command", "command": "./scripts/lint.sh"},
+						},
+					},
+				},
+			},
 			Skills:                 []string{"skill-a", "skill-b"},
+			InitialPrompt:          &initialPrompt,
 			CriticalSystemReminder: &reminder,
+			Background:             &background,
+			Effort:                 &effort,
+			PermissionMode:         &permissionMode,
+			Memory:                 &memory,
+			Isolation:              &isolation,
+			Color:                  &color,
 		},
 	}
 	tr := newTestTransport(t, opts)
@@ -1228,14 +1270,38 @@ func TestBuildCommandArgs_AgentDefinitionNewFields(t *testing.T) {
 	}
 
 	// Verify new fields are present
-	if _, ok := agent["disallowed_tools"]; !ok {
-		t.Error("disallowed_tools missing from agent JSON")
+	if _, ok := agent["disallowedTools"]; !ok {
+		t.Error("disallowedTools missing from agent JSON")
 	}
-	if _, ok := agent["mcp_servers"]; !ok {
-		t.Error("mcp_servers missing from agent JSON")
+	if _, ok := agent["mcpServers"]; !ok {
+		t.Error("mcpServers missing from agent JSON")
+	}
+	if _, ok := agent["hooks"]; !ok {
+		t.Error("hooks missing from agent JSON")
 	}
 	if _, ok := agent["skills"]; !ok {
 		t.Error("skills missing from agent JSON")
+	}
+	if val := agent["initialPrompt"]; val != "start here" {
+		t.Errorf("initialPrompt = %v, want start here", val)
+	}
+	if val := agent["background"]; val != true {
+		t.Errorf("background = %v, want true", val)
+	}
+	if val := agent["effort"]; val != "xhigh" {
+		t.Errorf("effort = %v, want xhigh", val)
+	}
+	if val := agent["permissionMode"]; val != "plan" {
+		t.Errorf("permissionMode = %v, want plan", val)
+	}
+	if val := agent["memory"]; val != "project" {
+		t.Errorf("memory = %v, want project", val)
+	}
+	if val := agent["isolation"]; val != "worktree" {
+		t.Errorf("isolation = %v, want worktree", val)
+	}
+	if val := agent["color"]; val != "cyan" {
+		t.Errorf("color = %v, want cyan", val)
 	}
 	if val, ok := agent["criticalSystemReminder_EXPERIMENTAL"]; !ok {
 		t.Error("criticalSystemReminder_EXPERIMENTAL missing from agent JSON")

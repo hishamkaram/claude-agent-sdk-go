@@ -1452,20 +1452,44 @@ func TestStderrFileLogging_DirectoryCreation(t *testing.T) {
 func TestBuildCommandArgs_Agents(t *testing.T) {
 	t.Parallel()
 	t.Run("single agent with all fields", func(t *testing.T) {
-		mode := types.SubagentExecutionModeParallel
-		timeout := 30.5
 		maxTurns := 5
 		modelStr := "claude-opus-4-5-latest"
+		background := true
+		effort := types.EffortHigh
+		permissionMode := types.PermissionModePlan
+		memory := types.SettingSourceProject
+		initialPrompt := "Start by reading README.md"
+		isolation := types.AgentIsolationWorktree
+		color := types.AgentColorGreen
+		matcher := "Bash"
 
 		opts := types.NewClaudeAgentOptions().
 			WithAgent("search", types.AgentDefinition{
-				Description:   "Search agent",
-				Prompt:        "Search for information",
-				Tools:         []string{"Read", "Glob"},
-				Model:         &modelStr,
-				ExecutionMode: &mode,
-				Timeout:       &timeout,
-				MaxTurns:      &maxTurns,
+				Description:     "Search agent",
+				Prompt:          "Search for information",
+				Tools:           []string{"Read", "Glob"},
+				DisallowedTools: []string{"Bash"},
+				Model:           &modelStr,
+				MaxTurns:        &maxTurns,
+				McpServers:      []interface{}{"scanner"},
+				Hooks: map[types.HookEvent][]types.AgentHookMatcher{
+					types.HookEventPreToolUse: {
+						{
+							Matcher: &matcher,
+							Hooks: []types.AgentHookHandler{
+								{"type": "command", "command": "./scripts/validate-bash.sh"},
+							},
+						},
+					},
+				},
+				Skills:         []string{"search-skill"},
+				InitialPrompt:  &initialPrompt,
+				Background:     &background,
+				Effort:         &effort,
+				PermissionMode: &permissionMode,
+				Memory:         &memory,
+				Isolation:      &isolation,
+				Color:          &color,
 			})
 
 		transport := NewSubprocessCLITransport(
@@ -1519,33 +1543,75 @@ func TestBuildCommandArgs_Agents(t *testing.T) {
 			t.Errorf("Expected prompt 'Search for information', got %v", searchAgent["prompt"])
 		}
 
-		if searchAgent["execution_mode"] != "parallel" {
-			t.Errorf("Expected execution_mode 'parallel', got %v", searchAgent["execution_mode"])
+		if disallowed, ok := searchAgent["disallowedTools"].([]interface{}); !ok || len(disallowed) != 1 || disallowed[0] != "Bash" {
+			t.Errorf("Expected disallowedTools [Bash], got %v", searchAgent["disallowedTools"])
 		}
 
-		if searchAgent["timeout"] != 30.5 {
-			t.Errorf("Expected timeout 30.5, got %v", searchAgent["timeout"])
+		if servers, ok := searchAgent["mcpServers"].([]interface{}); !ok || len(servers) != 1 || servers[0] != "scanner" {
+			t.Errorf("Expected mcpServers [scanner], got %v", searchAgent["mcpServers"])
 		}
 
-		if maxTurnsVal, ok := searchAgent["max_turns"].(float64); !ok || maxTurnsVal != 5 {
-			t.Errorf("Expected max_turns 5, got %v", searchAgent["max_turns"])
+		if hooks, ok := searchAgent["hooks"].(map[string]interface{}); !ok || len(hooks) != 1 {
+			t.Errorf("Expected hooks with one event, got %v", searchAgent["hooks"])
+		}
+
+		if maxTurnsVal, ok := searchAgent["maxTurns"].(float64); !ok || maxTurnsVal != 5 {
+			t.Errorf("Expected maxTurns 5, got %v", searchAgent["maxTurns"])
+		}
+
+		if searchAgent["initialPrompt"] != initialPrompt {
+			t.Errorf("Expected initialPrompt %q, got %v", initialPrompt, searchAgent["initialPrompt"])
+		}
+
+		if searchAgent["background"] != true {
+			t.Errorf("Expected background true, got %v", searchAgent["background"])
+		}
+
+		if searchAgent["effort"] != "high" {
+			t.Errorf("Expected effort high, got %v", searchAgent["effort"])
+		}
+
+		if searchAgent["permissionMode"] != "plan" {
+			t.Errorf("Expected permissionMode plan, got %v", searchAgent["permissionMode"])
+		}
+
+		if searchAgent["memory"] != "project" {
+			t.Errorf("Expected memory project, got %v", searchAgent["memory"])
+		}
+
+		if searchAgent["isolation"] != "worktree" {
+			t.Errorf("Expected isolation worktree, got %v", searchAgent["isolation"])
+		}
+
+		if searchAgent["color"] != "green" {
+			t.Errorf("Expected color green, got %v", searchAgent["color"])
+		}
+
+		if _, ok := searchAgent["execution_mode"]; ok {
+			t.Error("legacy execution_mode should not be emitted")
+		}
+		if _, ok := searchAgent["timeout"]; ok {
+			t.Error("legacy timeout should not be emitted")
+		}
+		if _, ok := searchAgent["max_turns"]; ok {
+			t.Error("legacy max_turns should not be emitted")
 		}
 	})
 
 	t.Run("multiple agents with different configs", func(t *testing.T) {
-		mode1 := types.SubagentExecutionModeSequential
-		mode2 := types.SubagentExecutionModeParallel
+		background := true
+		effort := types.EffortMedium
 
 		opts := types.NewClaudeAgentOptions().
 			WithAgent("agent1", types.AgentDefinition{
-				Description:   "First agent",
-				Prompt:        "First prompt",
-				ExecutionMode: &mode1,
+				Description: "First agent",
+				Prompt:      "First prompt",
+				Background:  &background,
 			}).
 			WithAgent("agent2", types.AgentDefinition{
-				Description:   "Second agent",
-				Prompt:        "Second prompt",
-				ExecutionMode: &mode2,
+				Description: "Second agent",
+				Prompt:      "Second prompt",
+				Effort:      &effort,
 			})
 
 		transport := NewSubprocessCLITransport(
@@ -1581,12 +1647,12 @@ func TestBuildCommandArgs_Agents(t *testing.T) {
 			t.Errorf("Expected 2 agents, got %d", len(agentsData))
 		}
 
-		if agentsData["agent1"]["execution_mode"] != "sequential" {
-			t.Error("agent1 should have sequential execution mode")
+		if agentsData["agent1"]["background"] != true {
+			t.Error("agent1 should have background true")
 		}
 
-		if agentsData["agent2"]["execution_mode"] != "parallel" {
-			t.Error("agent2 should have parallel execution mode")
+		if agentsData["agent2"]["effort"] != "medium" {
+			t.Error("agent2 should have medium effort")
 		}
 	})
 
@@ -1643,8 +1709,8 @@ func TestBuildCommandArgs_Agents(t *testing.T) {
 		if _, ok := simpleAgent["timeout"]; ok {
 			t.Error("timeout should not be in JSON when not set")
 		}
-		if _, ok := simpleAgent["max_turns"]; ok {
-			t.Error("max_turns should not be in JSON when not set")
+		if _, ok := simpleAgent["maxTurns"]; ok {
+			t.Error("maxTurns should not be in JSON when not set")
 		}
 	})
 
@@ -1801,15 +1867,15 @@ func TestBuildCommandArgs_SubagentExecution(t *testing.T) {
 // TestBuildCommandArgs_AgentsWithSubagentExecution tests agents and subagent config together
 func TestBuildCommandArgs_AgentsWithSubagentExecution(t *testing.T) {
 	t.Parallel()
-	mode := types.SubagentExecutionModeParallel
 	subagentConfig := types.NewSubagentExecutionConfig()
 	subagentConfig.MaxConcurrent = 4
+	background := true
 
 	opts := types.NewClaudeAgentOptions().
 		WithAgent("agent1", types.AgentDefinition{
-			Description:   "Agent 1",
-			Prompt:        "Prompt 1",
-			ExecutionMode: &mode,
+			Description: "Agent 1",
+			Prompt:      "Prompt 1",
+			Background:  &background,
 		}).
 		WithSubagentExecution(subagentConfig)
 

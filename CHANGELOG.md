@@ -23,13 +23,21 @@ All notable changes to the Claude Agent SDK for Go are documented in this file.
 ### Fixed
 - `make test-integration` now correctly passes `-tags=integration` —
   previously the tagged suite compiled but never ran anywhere (latent).
+- `AgentDefinition` now serializes documented camelCase fields in `--agents`
+  payloads (`disallowedTools`, `maxTurns`, `mcpServers`, `hooks`,
+  `initialPrompt`, `permissionMode`, `isolation`, `color`) and exposes current
+  definition fields (`memory`, `background`, `effort`) while preserving legacy
+  snake_case unmarshal compatibility.
+- Added `PermissionModeAuto` and `WithSessionAgent`, emitting the supported
+  `--agent <name>` CLI flag for sessions that should run as a configured agent.
 
 ### Known issues (surfaced by the new flag drift test)
 - `WithAgentProgressSummaries` and `WithSubagentExecution` emit CLI flags
   (`--agent-progress-summaries`, `--subagent-execution`) that are not
-  present in the CLI binary as of `claude-code-linux-x64` 0.5.1. Setting
-  either option today causes `Connect()` to fail with an unknown-flag
-  error. Tracked by `TestFlags_UnsupportedFlagsAreDocumented`.
+  accepted by Claude Code CLI 2.1.132. They are intentionally retained for
+  forward-compatible callers, but setting either option today causes
+  `Connect()` to fail with an unknown-flag error. Tracked by
+  `TestFlags_UnsupportedFlagsAreDocumented`.
 
 ## [0.2.9] - 2025-12-07
 
