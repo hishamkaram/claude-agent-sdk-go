@@ -100,8 +100,11 @@ floor — any event-name drift surfaces at Connect() time.
 
 | Category | Status | Test | Notes |
 |---|---|---|---|
-| All 28 visible flags cross-checked against `claude --help` | ✅ | `TestFlags_AllEmittedFlagsAcceptedByCLI` | Drift detector |
-| Hidden flag documentation (`--resume-session-at`) | ✅ | `TestFlags_HiddenFlagsDocumented` | Feature 142 lineage |
+| Dynamic agent definition advertised by real CLI init | ✅ | `TestCLI_AgentDefinitionsAdvertisedInInit` | Starts real CLI with `--agents`, no model turn |
+| Session agent selection accepted by real CLI init | ✅ | `TestCLI_SessionAgentFlagConnects` | Starts real CLI with `--agent <name>`, no model turn |
+| Non-hidden supported flags cross-checked against `claude --help` | ✅ | `TestFlags_AllEmittedFlagsAcceptedByCLI` | Drift detector |
+| Hidden flag documentation (`--resume-session-at`, `--max-thinking-tokens`, `--permission-prompt-tool`, `--task-budget`) | ✅ | `TestFlags_HiddenFlagsDocumented` | Ensures hidden flags remain in SDK-emitted list |
+| Unsupported experimental flags (`--agent-progress-summaries`, `--subagent-execution`) | ✅ | `TestFlags_UnsupportedFlagsAreDocumented` | Retained intentionally; Claude Code CLI 2.1.132 rejects them |
 
 SDK-side argv unit tests already live in
 `internal/transport/subprocess_cli_test.go:60+` (20+ tests) — they cover the

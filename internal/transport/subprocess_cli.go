@@ -727,52 +727,19 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 
 	// Add agents if specified
 	if t.options != nil && len(t.options.Agents) > 0 {
-		agentsJSON := make(map[string]map[string]interface{})
-
-		for name, agent := range t.options.Agents {
-			agentMap := make(map[string]interface{})
-			agentMap["description"] = agent.Description
-			agentMap["prompt"] = agent.Prompt
-
-			// Add optional fields only if set
-			if len(agent.Tools) > 0 {
-				agentMap["tools"] = agent.Tools
-			}
-			if agent.Model != nil {
-				agentMap["model"] = *agent.Model
-			}
-			if agent.ExecutionMode != nil {
-				agentMap["execution_mode"] = string(*agent.ExecutionMode)
-			}
-			if agent.Timeout != nil {
-				agentMap["timeout"] = *agent.Timeout
-			}
-			if agent.MaxTurns != nil {
-				agentMap["max_turns"] = *agent.MaxTurns
-			}
-			if len(agent.DisallowedTools) > 0 {
-				agentMap["disallowed_tools"] = agent.DisallowedTools
-			}
-			if len(agent.McpServers) > 0 {
-				agentMap["mcp_servers"] = agent.McpServers
-			}
-			if len(agent.Skills) > 0 {
-				agentMap["skills"] = agent.Skills
-			}
-			if agent.CriticalSystemReminder != nil {
-				agentMap["criticalSystemReminder_EXPERIMENTAL"] = *agent.CriticalSystemReminder
-			}
-
-			agentsJSON[name] = agentMap
-		}
-
-		agentsJSONBytes, err := json.Marshal(agentsJSON)
+		agentsJSONBytes, err := json.Marshal(t.options.Agents)
 		if err != nil {
 			t.logger.Warn("failed to marshal agents to JSON", zap.Error(err))
 		} else {
 			args = append(args, "--agents", string(agentsJSONBytes))
 			t.logger.Debug("agents configuration", zap.String("agents_json", string(agentsJSONBytes)))
 		}
+	}
+
+	// Add session agent if specified
+	if t.options != nil && t.options.Agent != nil {
+		args = append(args, "--agent", *t.options.Agent)
+		t.logger.Debug("setting session agent", zap.String("agent", *t.options.Agent))
 	}
 
 	// Add effort level if specified

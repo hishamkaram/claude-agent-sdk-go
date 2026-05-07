@@ -10,8 +10,7 @@
 //
 // Implementation: spawns `claude --help`, greps the output for each
 // flag name, and reports any missing flag as a likely upstream rename.
-// Hidden flags (currently just --resume-session-at per feature 142) are
-// documented separately and excluded from the help check.
+// Hidden flags are documented separately and excluded from the help check.
 //
 // No auth is required — `claude --help` runs without a credential.
 
@@ -37,6 +36,7 @@ var sdkEmittedFlags = []string{
 	"--append-system-prompt",
 	"--model",
 	"--resume",
+	"--resume-session-at",
 	"--fork-session",
 	"--allow-dangerously-skip-permissions",
 	"--dangerously-skip-permissions",
@@ -46,6 +46,7 @@ var sdkEmittedFlags = []string{
 	"--plugin-dir",
 	"--setting-sources",
 	"--agents",
+	"--agent",
 	"--effort",
 	"--fallback-model",
 	"--session-id",
@@ -62,17 +63,12 @@ var sdkEmittedFlags = []string{
 }
 
 // hiddenFlags are SDK-emitted flags that are intentionally absent from
-// the CLI's `--help` output but DO exist in the CLI binary (registered
-// with .hideHelp() upstream, or accepted but not advertised).
+// the CLI's `--help` output and therefore cannot be classified by the
+// help-output check alone.
 //
-// Verified 2026-04-19 against claude-code-linux-x64 0.5.1 by running
-// `strings` over the CLI binary and counting substring matches. Each
-// entry below has a matching string literal in the CLI's bundled JS:
-//
-//	--resume-session-at       6 matches (feature 142 lineage)
-//	--max-thinking-tokens     3 matches
-//	--permission-prompt-tool  9 matches
-//	--task-budget             15 matches
+// Verified 2026-05-07 against Claude Code CLI 2.1.132 with `claude --help`
+// plus targeted SDK transport tests. If a hidden flag starts failing at
+// runtime, re-run a targeted CLI invocation or binary substring check.
 //
 // Re-run the substring check whenever the CLI is upgraded:
 //
@@ -86,20 +82,21 @@ var hiddenFlags = []string{
 	"--task-budget",
 }
 
-// unsupportedFlags are SDK-emitted flags that are GENUINELY ABSENT from
-// the CLI binary — zero substring matches in the bundled JS. They are
-// currently dead code in the SDK: buildCommandArgs() emits them when
-// specific options are set (SubagentExecution, AgentProgressSummaries),
-// but the CLI would reject them at Connect time as unknown flags.
+// unsupportedFlags are SDK-emitted flags that the current CLI parser rejects.
+// The SDK still emits them when specific options are set (SubagentExecution,
+// AgentProgressSummaries), but the CLI rejects them at Connect time as unknown
+// flags.
 //
-// Verified 2026-04-19 against claude-code-linux-x64 0.5.1.
+// Verified 2026-05-07 against Claude Code CLI 2.1.132.
 //
 // Resolution options (maintainer decision — out of scope for this file):
-//  1. Drop the emitting branch in internal/transport/subprocess_cli.go
-//     and the corresponding option field in types/options.go.
-//  2. If the feature is coming back under a new name, update the emit
+//  1. Keep the emitting branch for forward-compatible callers until the CLI
+//     accepts or permanently removes the feature.
+//  2. If the feature comes back under a new name, update the emit
 //     branch to the new flag and move the entry to hiddenFlags.
-//  3. If the feature should be re-added to the CLI, file upstream.
+//  3. If the feature is permanently removed upstream, drop the emitting branch
+//     in internal/transport/subprocess_cli.go and the corresponding option
+//     field in types/options.go.
 //
 // The test below tolerates these (skips them from the help check) but
 // TestFlags_UnsupportedFlagsAreDocumented surfaces them so a future
@@ -165,10 +162,10 @@ func TestFlags_AllEmittedFlagsAcceptedByCLI(t *testing.T) {
 }
 
 // TestFlags_UnsupportedFlagsAreDocumented is a running reminder that the
-// SDK still emits flags the CLI no longer accepts. Every entry in
-// unsupportedFlags needs a maintainer decision (see the rationale block
-// above the variable). The test always passes — its purpose is to surface
-// the count in CI output so the gap stays visible.
+// SDK still emits flags the CLI does not accept in the currently verified CLI
+// release. Every entry in unsupportedFlags needs a maintainer decision (see
+// the rationale block above the variable). The test always passes — its
+// purpose is to surface the count in CI output so the gap stays visible.
 func TestFlags_UnsupportedFlagsAreDocumented(t *testing.T) {
 	if len(unsupportedFlags) == 0 {
 		t.Log("unsupportedFlags is empty — the SDK no longer emits any flag the CLI rejects")
@@ -182,14 +179,15 @@ func TestFlags_UnsupportedFlagsAreDocumented(t *testing.T) {
 // actually emitted by the SDK. A hidden flag that the SDK no longer
 // emits is dead documentation — clean it up here.
 func TestFlags_HiddenFlagsDocumented(t *testing.T) {
-	emittedSet := make(map[string]bool, len(sdkEmittedFlags)+len(hiddenFlags))
+	emittedSet := make(map[string]bool, len(sdkEmittedFlags))
 	for _, f := range sdkEmittedFlags {
 		emittedSet[f] = true
 	}
-	// Hidden flags are additional to the visible set — they're still
-	// emitted, just not documented in --help.
+
 	for _, f := range hiddenFlags {
-		emittedSet[f] = true
+		if !emittedSet[f] {
+			t.Errorf("hidden flag %q is not listed in sdkEmittedFlags", f)
+		}
 	}
 
 	// Sanity: hiddenFlags must have at least one entry or the

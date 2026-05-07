@@ -283,6 +283,14 @@ func TestWithBuilders_AllMethods(t *testing.T) {
 		}
 	})
 
+	t.Run("WithSessionAgent", func(t *testing.T) {
+		t.Parallel()
+		opts := NewClaudeAgentOptions().WithSessionAgent("reviewer")
+		if opts.Agent == nil || *opts.Agent != "reviewer" {
+			t.Error("Session agent not set correctly")
+		}
+	})
+
 	t.Run("WithSubagentExecution", func(t *testing.T) {
 		t.Parallel()
 		cfg := NewSubagentExecutionConfig()

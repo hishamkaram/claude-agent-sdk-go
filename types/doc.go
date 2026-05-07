@@ -105,8 +105,10 @@
 //
 //   - PermissionModeDefault: Ask user for each tool use
 //   - PermissionModeAcceptEdits: Auto-allow file edits
+//   - PermissionModeAuto: Auto mode classifier
 //   - PermissionModePlan: Plan mode (review before execution)
 //   - PermissionModeBypassPermissions: Allow all tools (use with caution)
+//   - PermissionModeDontAsk: Auto-deny permission prompts
 //
 // # MCP Server Configuration
 //

@@ -11,8 +11,10 @@ func TestPermissionModeConstants(t *testing.T) {
 	modes := []PermissionMode{
 		PermissionModeDefault,
 		PermissionModeAcceptEdits,
+		PermissionModeAuto,
 		PermissionModePlan,
 		PermissionModeBypassPermissions,
+		PermissionModeDontAsk,
 	}
 
 	for _, mode := range modes {
