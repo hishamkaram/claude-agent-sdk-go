@@ -481,8 +481,19 @@ func FindMockCLI(t *testing.T) (string, error) {
 		return "", types.NewCLINotFoundError("sh not found")
 	}
 	scriptPath := filepath.Join(t.TempDir(), "mock-claude")
-	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nexec cat\n"), 0755); err != nil {
+	f, err := os.OpenFile(scriptPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	if err != nil {
 		return "", types.NewCLINotFoundError("failed to create mock CLI: " + err.Error())
+	}
+	if _, err := f.WriteString("#!/bin/sh\nexec cat\n"); err != nil {
+		_ = f.Close()
+		return "", types.NewCLINotFoundError("failed to write mock CLI: " + err.Error())
+	}
+	if err := f.Close(); err != nil {
+		return "", types.NewCLINotFoundError("failed to close mock CLI: " + err.Error())
+	}
+	if err := os.Chmod(scriptPath, 0755); err != nil {
+		return "", types.NewCLINotFoundError("failed to chmod mock CLI: " + err.Error())
 	}
 	return scriptPath, nil
 }
