@@ -172,6 +172,31 @@ func TestUnmarshalMessage_AllTypes(t *testing.T) {
 	}
 }
 
+func TestUnmarshalMessage_CurrentClaudeTaskSubtypesWithoutPinnedSchema(t *testing.T) {
+	t.Parallel()
+
+	// Claude Code CLI 2.1.132 contains these stream-json system subtypes, but
+	// this SDK has no pinned fixture for their full payload shape yet. Keep
+	// them generic until a real stream capture establishes the typed contract.
+	for _, subtype := range []string{"task_updated", "task_summary"} {
+		subtype := subtype
+		t.Run(subtype, func(t *testing.T) {
+			t.Parallel()
+			msg, err := UnmarshalMessage([]byte(`{"type":"system","subtype":"` + subtype + `","detail":{"sample":true}}`))
+			if err != nil {
+				t.Fatalf("UnmarshalMessage() error = %v", err)
+			}
+			systemMsg, ok := msg.(*SystemMessage)
+			if !ok {
+				t.Fatalf("UnmarshalMessage() = %T, want *SystemMessage until schema is pinned", msg)
+			}
+			if systemMsg.Subtype != subtype {
+				t.Fatalf("Subtype = %q, want %q", systemMsg.Subtype, subtype)
+			}
+		})
+	}
+}
+
 // TestUnmarshalSystemMessage_Subtypes tests system message subtype routing.
 func TestUnmarshalSystemMessage_Subtypes(t *testing.T) {
 	t.Parallel()
