@@ -32,12 +32,7 @@ type contextUsageDecode struct {
 }
 
 func (u ContextUsage) MarshalJSON() ([]byte, error) {
-	return json.Marshal(contextUsageWire{
-		TotalTokens:    u.TotalTokens,
-		MaxTokens:      u.MaxTokens,
-		UtilizationPct: u.UtilizationPct,
-		ByCategory:     u.ByCategory,
-	})
+	return json.Marshal(contextUsageWire(u))
 }
 
 func (u *ContextUsage) UnmarshalJSON(data []byte) error {
