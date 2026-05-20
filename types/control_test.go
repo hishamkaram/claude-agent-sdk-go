@@ -551,11 +551,7 @@ func TestHookEventConstants_PhaseC_NoDuplicates(t *testing.T) {
 			t.Errorf("hook event constant should not be empty")
 		}
 		if seen[ev] {
-			// PostCompact intentionally duplicates PreCompact's companion; allow it
-			// Actually PostCompact is its own event distinct from PreCompact.
-			// A true duplicate (same string, different constant) would be fine for
-			// PostCompact since HookEventPostCompact == "PostCompact".
-			// We just verify each string value maps uniquely here by noting it.
+			t.Errorf("duplicate hook event constant %q", ev)
 		}
 		seen[ev] = true
 	}
