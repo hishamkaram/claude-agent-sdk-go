@@ -149,6 +149,52 @@ func assertPermissionPanicErrorResponse(t *testing.T, transport *mockTransport, 
 	}
 }
 
+func hookCallbackCount(q *Query) int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.hookCallbacks)
+}
+
+func waitForWrittenControlRequest(t *testing.T, transport *mockTransport, subtype string) string {
+	t.Helper()
+
+	deadline := time.After(2 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		for _, data := range transport.getWrittenData() {
+			var sentRequest map[string]interface{}
+			if err := json.Unmarshal([]byte(data), &sentRequest); err != nil {
+				continue
+			}
+
+			reqType, _ := sentRequest["type"].(string)
+			if reqType != "control_request" {
+				continue
+			}
+
+			request, _ := sentRequest["request"].(map[string]interface{})
+			gotSubtype, _ := request["subtype"].(string)
+			if gotSubtype != subtype {
+				continue
+			}
+
+			requestID, _ := sentRequest["request_id"].(string)
+			if requestID == "" {
+				t.Fatal("request_id missing from sent request")
+			}
+			return requestID
+		}
+
+		select {
+		case <-ticker.C:
+		case <-deadline:
+			t.Fatalf("timed out waiting for %s control request, written: %v", subtype, transport.getWrittenData())
+		}
+	}
+}
+
 // TestNewQuery tests Query construction.
 func TestNewQuery(t *testing.T) {
 	t.Parallel()
@@ -276,6 +322,126 @@ func TestInitialize(t *testing.T) {
 	}
 	if result != nil {
 		t.Error("expected nil result for non-streaming mode")
+	}
+}
+
+func TestQueryStop_ClearsHookCallbacks(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+
+	transport := newMockTransport()
+	hookCallback := func(ctx context.Context, input interface{}, toolUseID *string, hookCtx types.HookContext) (interface{}, error) {
+		return map[string]interface{}{"continue": true}, nil
+	}
+
+	opts := types.NewClaudeAgentOptions().WithHook(
+		types.HookEventPreToolUse,
+		types.HookMatcher{
+			Hooks: []types.HookCallbackFunc{hookCallback, hookCallback},
+		},
+	)
+	logger := log.NewLogger(false)
+	query := NewQuery(ctx, transport, opts, logger, true)
+
+	if err := query.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	initDone := make(chan error, 1)
+	go func() {
+		_, err := query.Initialize(ctx)
+		initDone <- err
+	}()
+
+	requestID := waitForWrittenControlRequest(t, transport, "initialize")
+	transport.sendMessage(&types.SystemMessage{
+		Type:    "control_response",
+		Subtype: "control_response",
+		Response: map[string]interface{}{
+			"subtype":    "success",
+			"request_id": requestID,
+			"response": map[string]interface{}{
+				"capabilities": []interface{}{"hooks"},
+			},
+		},
+	})
+
+	if err := <-initDone; err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+
+	if got := hookCallbackCount(query); got != 2 {
+		t.Fatalf("expected 2 hook callbacks before Stop, got %d", got)
+	}
+
+	if err := query.Stop(ctx); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+	if got := hookCallbackCount(query); got != 0 {
+		t.Fatalf("expected hook callbacks to be cleared after Stop, got %d", got)
+	}
+
+	if err := query.Stop(ctx); err != nil {
+		t.Fatalf("second Stop failed: %v", err)
+	}
+	if got := hookCallbackCount(query); got != 0 {
+		t.Fatalf("expected hook callbacks to stay cleared after second Stop, got %d", got)
+	}
+}
+
+func TestQueryStopBeforeStart_ClearsHookCallbacks(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	transport := newMockTransport()
+	opts := types.NewClaudeAgentOptions()
+	logger := log.NewLogger(false)
+	query := NewQuery(ctx, transport, opts, logger, true)
+
+	query.registerHookCallback(func(ctx context.Context, input interface{}, toolUseID *string, hookCtx types.HookContext) (interface{}, error) {
+		return map[string]interface{}{"continue": true}, nil
+	})
+
+	if got := hookCallbackCount(query); got != 1 {
+		t.Fatalf("expected 1 hook callback before Stop, got %d", got)
+	}
+
+	if err := query.Stop(ctx); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+	if got := hookCallbackCount(query); got != 0 {
+		t.Fatalf("expected hook callbacks to be cleared after Stop before Start, got %d", got)
+	}
+}
+
+func TestInitializeFailure_ClearsRegisteredHookCallbacks(t *testing.T) {
+	t.Parallel()
+
+	parentCtx := context.Background()
+	transport := newMockTransport()
+	hookCallback := func(ctx context.Context, input interface{}, toolUseID *string, hookCtx types.HookContext) (interface{}, error) {
+		return map[string]interface{}{"continue": true}, nil
+	}
+
+	opts := types.NewClaudeAgentOptions().WithHook(
+		types.HookEventPreToolUse,
+		types.HookMatcher{
+			Hooks: []types.HookCallbackFunc{hookCallback},
+		},
+	)
+	logger := log.NewLogger(false)
+	query := NewQuery(parentCtx, transport, opts, logger, true)
+
+	initCtx, cancel := context.WithTimeout(parentCtx, 50*time.Millisecond)
+	t.Cleanup(cancel)
+
+	if _, err := query.Initialize(initCtx); err == nil {
+		t.Fatal("expected Initialize to fail")
+	}
+	if got := hookCallbackCount(query); got != 0 {
+		t.Fatalf("expected hook callbacks to be cleared after Initialize failure, got %d", got)
 	}
 }
 

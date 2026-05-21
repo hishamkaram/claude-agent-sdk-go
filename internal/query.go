@@ -146,6 +146,7 @@ func (q *Query) Initialize(ctx context.Context) (map[string]interface{}, error) 
 
 	result, err := q.sendControlRequest(ctx, request)
 	if err != nil {
+		q.clearHookCallbacks()
 		q.logger.Error("control protocol initialization failed", zap.Error(err))
 		return nil, types.NewControlProtocolErrorWithCause("initialization failed", err)
 	}
@@ -174,6 +175,8 @@ func (q *Query) Start(ctx context.Context) error {
 
 // Stop gracefully stops the query handler.
 func (q *Query) Stop(ctx context.Context) error {
+	defer q.clearHookCallbacks()
+
 	// Signal stop
 	select {
 	case <-q.stopChan:
@@ -817,6 +820,12 @@ func (q *Query) registerHookCallback(callback types.HookCallbackFunc) string {
 	callbackID := fmt.Sprintf("hook_%d", id)
 	q.hookCallbacks[callbackID] = callback
 	return callbackID
+}
+
+func (q *Query) clearHookCallbacks() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.hookCallbacks = make(map[string]types.HookCallbackFunc)
 }
 
 // AddMCPServer adds an MCP server for handling MCP messages.
