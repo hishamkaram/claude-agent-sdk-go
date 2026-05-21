@@ -1427,6 +1427,15 @@ func (m *mockSpawnedProcess) signalExit() {
 	}
 }
 
+func (m *mockSpawnedProcess) signalExitWithStdoutOpen() {
+	_ = m.stderrW.Close()
+	select {
+	case <-m.waitCh:
+	default:
+		close(m.waitCh)
+	}
+}
+
 func waitForCondition(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -2031,6 +2040,103 @@ func TestSubprocessCrash_CloseDoesNotHang(t *testing.T) {
 				t.Errorf("Close() hung: context expired before Close() returned (err=%v)", err)
 			}
 		})
+	}
+}
+
+// TestSubprocessCrash_PartialStdoutWithoutNewlineClosesMessages verifies that
+// an exited process cannot leave the reader goroutine blocked forever on an
+// incomplete stdout JSON line.
+func TestSubprocessCrash_PartialStdoutWithoutNewlineClosesMessages(t *testing.T) {
+	t.Parallel()
+
+	mockProc := newMockSpawnedProcess()
+	tr := newMockTransportWithProcess(t, mockProc, nil)
+
+	t.Cleanup(func() {
+		_ = mockProc.stdoutW.Close()
+		_ = mockProc.stderrW.Close()
+		closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = tr.Close(closeCtx)
+	})
+
+	if _, err := mockProc.stdoutW.Write([]byte(`{"type":"system","subtype":"init"`)); err != nil {
+		t.Fatalf("failed to write partial stdout JSON: %v", err)
+	}
+
+	mockProc.signalExitWithStdoutOpen()
+
+	select {
+	case _, ok := <-tr.messages:
+		if ok {
+			t.Fatal("received an unexpected message from partial stdout JSON")
+		}
+	case <-time.After(2 * time.Second):
+		_ = mockProc.stdoutW.Close()
+		t.Fatal("messages channel stayed open after process exit with partial stdout JSON")
+	}
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := tr.Close(closeCtx); closeCtx.Err() != nil {
+		t.Fatalf("Close() hung after process exit with partial stdout JSON: %v", err)
+	}
+}
+
+func TestMessageReaderLoop_ProcDoneClosesPartialStdout(t *testing.T) {
+	t.Parallel()
+
+	stdoutR, stdoutW := io.Pipe()
+	procDone := make(chan struct{})
+	tr := &SubprocessCLITransport{
+		messages: make(chan types.Message, 1),
+		logger:   log.NewLogger(false),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		cancel()
+		_ = stdoutW.Close()
+		_ = stdoutR.Close()
+	})
+
+	loopDone := make(chan struct{})
+	go func() {
+		tr.messageReaderLoop(ctx, stdoutR, procDone)
+		close(loopDone)
+	}()
+
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := stdoutW.Write([]byte(`{"type":"system","subtype":"init"`))
+		writeDone <- err
+	}()
+
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("failed to write partial stdout JSON: %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		close(procDone)
+		t.Fatal("timed out writing partial stdout JSON")
+	}
+
+	close(procDone)
+
+	select {
+	case <-loopDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("messageReaderLoop stayed blocked after procDone closed")
+	}
+
+	select {
+	case _, ok := <-tr.messages:
+		if ok {
+			t.Fatal("received an unexpected message from partial stdout JSON")
+		}
+	default:
+		t.Fatal("messages channel was not closed after messageReaderLoop returned")
 	}
 }
 
