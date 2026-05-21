@@ -20,6 +20,8 @@ import (
 // TestFindCLI tests CLI discovery in various scenarios
 func TestFindCLI(t *testing.T) {
 	// Cannot use t.Parallel() because t.Setenv is used below.
+	resetFindCLICacheForTest(t)
+
 	// Disable version checking for these tests since we're using mock binaries
 	t.Setenv("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK", "1")
 
@@ -543,6 +545,7 @@ func BenchmarkJSONLineWriter(b *testing.B) {
 // TestIntegrationSubprocessCLI tests end-to-end subprocess communication
 // This test requires the actual Claude CLI to be installed
 func TestIntegrationSubprocessCLI(t *testing.T) {
+	resetFindCLICacheForTest(t)
 	t.Parallel()
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")

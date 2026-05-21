@@ -6,9 +6,31 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
+
+var findCLIState struct {
+	mu         sync.Mutex
+	cachedPath string
+	inFlight   *findCLIFlight
+}
+
+type findCLIFlight struct {
+	done chan struct{}
+	path string
+	err  error
+}
+
+var commonCLIInstallLocations = []string{
+	"~/.claude/local/claude", // Default location (CLI 2.0+)
+	"~/.npm-global/bin/claude",
+	"/usr/local/bin/claude",
+	"~/.local/bin/claude",
+	"~/node_modules/.bin/claude",
+	"~/.yarn/bin/claude",
+}
 
 // FindCLI searches for Claude Code CLI binary in standard locations.
 // It checks in this order:
@@ -27,6 +49,38 @@ import (
 //
 // Returns the path to the CLI binary or a CLINotFoundError if not found.
 func FindCLI() (string, error) {
+	findCLIState.mu.Lock()
+	if findCLIState.cachedPath != "" {
+		path := findCLIState.cachedPath
+		findCLIState.mu.Unlock()
+		return path, nil
+	}
+	if flight := findCLIState.inFlight; flight != nil {
+		findCLIState.mu.Unlock()
+		<-flight.done
+		return flight.path, flight.err
+	}
+
+	flight := &findCLIFlight{done: make(chan struct{})}
+	findCLIState.inFlight = flight
+	findCLIState.mu.Unlock()
+
+	path, err := findCLIUncached()
+
+	findCLIState.mu.Lock()
+	flight.path = path
+	flight.err = err
+	if err == nil {
+		findCLIState.cachedPath = path
+	}
+	findCLIState.inFlight = nil
+	close(flight.done)
+	findCLIState.mu.Unlock()
+
+	return path, err
+}
+
+func findCLIUncached() (string, error) {
 	// First, try to find in PATH
 	if cliPath, err := exec.LookPath("claude"); err == nil {
 		// Check version before returning
@@ -37,16 +91,7 @@ func FindCLI() (string, error) {
 	}
 
 	// Try common install locations
-	locations := []string{
-		"~/.claude/local/claude", // Default location (CLI 2.0+)
-		"~/.npm-global/bin/claude",
-		"/usr/local/bin/claude",
-		"~/.local/bin/claude",
-		"~/node_modules/.bin/claude",
-		"~/.yarn/bin/claude",
-	}
-
-	for _, location := range locations {
+	for _, location := range commonCLIInstallLocations {
 		expandedPath := expandHome(location)
 		if _, err := os.Stat(expandedPath); err == nil {
 			// Check version before returning
