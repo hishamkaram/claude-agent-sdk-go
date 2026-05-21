@@ -2,6 +2,7 @@ package types
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 )
 
@@ -49,6 +50,24 @@ func TestProcessError(t *testing.T) {
 			t.Errorf("expected '%s', got '%s'", expected, err.Error())
 		}
 	})
+}
+
+func TestProcessErrorExportedFieldShape(t *testing.T) {
+	t.Parallel()
+
+	errType := reflect.TypeOf(ProcessError{})
+	got := make([]string, 0, errType.NumField())
+	for i := 0; i < errType.NumField(); i++ {
+		field := errType.Field(i)
+		if field.IsExported() {
+			got = append(got, field.Name)
+		}
+	}
+
+	want := []string{"Message", "ExitCode", "Cause"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ProcessError exported fields = %v, want %v", got, want)
+	}
 }
 
 // TestJSONDecodeError tests JSONDecodeError creation and methods.
