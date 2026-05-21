@@ -11,6 +11,9 @@ import (
 
 	"github.com/hishamkaram/claude-agent-sdk-go/internal/log"
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // mockTransport implements a mock transport for testing.
@@ -146,6 +149,91 @@ func assertPermissionPanicErrorResponse(t *testing.T, transport *mockTransport, 
 	errMsg, _ := response["error"].(string)
 	if !strings.Contains(errMsg, "permission callback panicked") {
 		t.Fatalf("response.error = %q, want permission callback panicked", errMsg)
+	}
+}
+
+func TestRouteMessage_LogsBackpressureWhenMessagesChannelFull(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	core, logs := observer.New(zapcore.DebugLevel)
+	logger := log.NewLoggerFromZap(zap.New(core))
+	query := NewQuery(ctx, newMockTransport(), types.NewClaudeAgentOptions(), logger, true)
+
+	capacity := cap(query.messagesChan)
+	for i := 0; i < capacity; i++ {
+		query.messagesChan <- &types.UserMessage{Type: "user", Content: "queued"}
+	}
+
+	overflow := &types.AssistantMessage{Type: "assistant"}
+	routeErr := make(chan error, 1)
+	go func() {
+		routeErr <- query.routeMessage(overflow)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	var entries []observer.LoggedEntry
+	for len(entries) == 0 {
+		entries = logs.FilterMessage("message queue backpressure detected").All()
+		if len(entries) > 0 {
+			break
+		}
+
+		select {
+		case err := <-routeErr:
+			t.Fatalf("routeMessage completed before logging backpressure: %v", err)
+		case <-ticker.C:
+		case <-deadline:
+			t.Fatal("timed out waiting for backpressure warning log")
+		}
+	}
+
+	fields := entries[0].ContextMap()
+	if got := fields["queued"]; got != int64(capacity) {
+		t.Fatalf("queued field = %v, want %d", got, capacity)
+	}
+	if got := fields["capacity"]; got != int64(capacity) {
+		t.Fatalf("capacity field = %v, want %d", got, capacity)
+	}
+	if got, _ := fields["message_type"].(string); got != "assistant" {
+		t.Fatalf("message_type field = %v, want assistant", fields["message_type"])
+	}
+
+	select {
+	case err := <-routeErr:
+		t.Fatalf("routeMessage completed before the queue was drained: %v", err)
+	default:
+	}
+
+	<-query.messagesChan
+
+	select {
+	case err := <-routeErr:
+		if err != nil {
+			t.Fatalf("routeMessage returned error after drain: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("routeMessage did not unblock after draining one queued message")
+	}
+
+	deliveredOverflow := false
+	for i := 0; i < capacity; i++ {
+		select {
+		case got := <-query.messagesChan:
+			if got == overflow {
+				deliveredOverflow = true
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out draining delivered message %d", i)
+		}
+	}
+	if !deliveredOverflow {
+		t.Fatal("overflow message was not delivered after backpressure cleared")
 	}
 }
 

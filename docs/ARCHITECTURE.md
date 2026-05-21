@@ -269,7 +269,7 @@ for message := range messages {
 - `for ... range` over channels
 - Runs in separate goroutine
 - Push model (goroutine pushes to channel)
-- Implicit backpressure
+- Implicit backpressure; when the internal message queue reaches capacity, the SDK logs a warning and then blocks to preserve message delivery
 - Memory buffering (buffer size matters)
 
 ### Comparison
