@@ -1455,6 +1455,19 @@ func waitForStderr(t *testing.T, tr *SubprocessCLITransport, want string) {
 	})
 }
 
+func waitForStderrContains(t *testing.T, tr *SubprocessCLITransport, wants ...string) {
+	t.Helper()
+	waitForCondition(t, 2*time.Second, func() bool {
+		got := tr.Stderr()
+		for _, want := range wants {
+			if !strings.Contains(got, want) {
+				return false
+			}
+		}
+		return true
+	})
+}
+
 func newMockTransportWithProcess(t *testing.T, mockProc *mockSpawnedProcess, opts *types.ClaudeAgentOptions) *SubprocessCLITransport {
 	t.Helper()
 	spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
@@ -1469,6 +1482,53 @@ func newMockTransportWithProcess(t *testing.T, mockProc *mockSpawnedProcess, opt
 		t.Fatalf("Connect() failed: %v", err)
 	}
 	return tr
+}
+
+func TestSubprocessCLITransportStderrNoNewlineDrainsBeyondScannerLimit(t *testing.T) {
+	t.Parallel()
+
+	mockProc := newMockSpawnedProcess()
+	tr := newMockTransportWithProcess(t, mockProc, nil)
+	t.Cleanup(func() {
+		_ = mockProc.stderr.Close()
+		_ = mockProc.Kill()
+		closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = tr.Close(closeCtx)
+	})
+
+	payload := strings.Repeat("N", DefaultMaxBufferSize+StderrRingSize+1024)
+	want := payload[len(payload)-StderrRingSize:]
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := mockProc.stderrW.Write([]byte(payload))
+		writeDone <- err
+	}()
+
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("write stderr: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		_ = mockProc.stderr.Close()
+		t.Fatal("stderr write without newline blocked; readStderr stopped draining")
+	}
+
+	waitForStderr(t, tr, want)
+	mockProc.signalExit()
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := tr.Close(closeCtx); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+	if closeCtx.Err() != nil {
+		t.Fatal("Close() timed out after draining large stderr without newline")
+	}
+	if got := tr.Stderr(); got != want {
+		t.Fatalf("Stderr() after close = len %d, want len %d", len(got), len(want))
+	}
 }
 
 func TestSubprocessCLITransportStderrTailRetainsLast64KiB(t *testing.T) {
@@ -1494,6 +1554,60 @@ func TestSubprocessCLITransportStderrTailRetainsLast64KiB(t *testing.T) {
 	}
 	if got := tr.Stderr(); got != want {
 		t.Fatalf("Stderr() after close changed: len=%d want len=%d", len(got), len(want))
+	}
+}
+
+func TestSubprocessCLITransportStderrLinesPreserveCallbackLogDiagnosticsAndParsing(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	logPath := tempDir + "/stderr.log"
+	var (
+		mu       sync.Mutex
+		callback []string
+	)
+	opts := types.NewClaudeAgentOptions().
+		WithCustomStderrLogFile(logPath).
+		WithStderr(func(line string) {
+			mu.Lock()
+			defer mu.Unlock()
+			callback = append(callback, line)
+		})
+	mockProc := newMockSpawnedProcess()
+	tr := newMockTransportWithProcess(t, mockProc, opts)
+
+	lines := []string{
+		"first diagnostic line",
+		"No conversation found with session ID: session-123",
+	}
+	if _, err := mockProc.stderrW.Write([]byte(strings.Join(lines, "\n") + "\n")); err != nil {
+		t.Fatalf("write stderr: %v", err)
+	}
+	waitForStderrContains(t, tr, lines...)
+	waitForCondition(t, 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(callback) == len(lines) && callback[0] == lines[0] && callback[1] == lines[1]
+	})
+	waitForCondition(t, 2*time.Second, func() bool {
+		data, err := os.ReadFile(logPath)
+		if err != nil {
+			return false
+		}
+		logText := string(data)
+		return strings.Contains(logText, lines[0]) && strings.Contains(logText, lines[1])
+	})
+	waitForCondition(t, 2*time.Second, func() bool {
+		err := tr.GetError()
+		var sessionErr *types.SessionNotFoundError
+		return errors.As(err, &sessionErr) && sessionErr.SessionID == "session-123"
+	})
+
+	mockProc.signalExit()
+	closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := tr.Close(closeCtx); err != nil {
+		t.Fatalf("Close() failed: %v", err)
 	}
 }
 
