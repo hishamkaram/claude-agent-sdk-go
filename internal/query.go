@@ -42,15 +42,16 @@ type Query struct {
 	mcpServers map[string]types.MCPServer
 
 	// Message handling
-	messagesChan      chan types.Message
-	closeMessagesOnce sync.Once // guards close(messagesChan) — called from Stop() or messageLoop()
-	stopChan          chan struct{}
-	readLoopDone      chan struct{}
-	handlerWg         sync.WaitGroup // tracks in-flight handleControlRequest goroutines
-	started           bool
-	initialized       bool
-	initializeResult  map[string]interface{}
-	isStreamingMode   bool
+	messagesChan               chan types.Message
+	messagesBackpressureWarned atomic.Bool
+	closeMessagesOnce          sync.Once // guards close(messagesChan) — called from Stop() or messageLoop()
+	stopChan                   chan struct{}
+	readLoopDone               chan struct{}
+	handlerWg                  sync.WaitGroup // tracks in-flight handleControlRequest goroutines
+	started                    bool
+	initialized                bool
+	initializeResult           map[string]interface{}
+	isStreamingMode            bool
 }
 
 // responseResult wraps the response or error from a control request.
@@ -295,9 +296,32 @@ func (q *Query) routeMessage(msg types.Message) error {
 		return types.NewControlProtocolError("invalid control_request message type")
 	}
 
-	// Regular message - send to consumer
+	// Regular message - send to consumer. The second select preserves the
+	// existing blocking backpressure behavior when the internal queue is full.
 	select {
 	case q.messagesChan <- msg:
+		if len(q.messagesChan) < cap(q.messagesChan) {
+			q.messagesBackpressureWarned.Store(false)
+		}
+		return nil
+	case <-q.ctx.Done():
+		return q.ctx.Err()
+	default:
+	}
+
+	if q.messagesBackpressureWarned.CompareAndSwap(false, true) {
+		q.logger.Warn("message queue backpressure detected",
+			zap.Int("queued", len(q.messagesChan)),
+			zap.Int("capacity", cap(q.messagesChan)),
+			zap.String("message_type", msgType),
+		)
+	}
+
+	select {
+	case q.messagesChan <- msg:
+		if len(q.messagesChan) < cap(q.messagesChan) {
+			q.messagesBackpressureWarned.Store(false)
+		}
 		return nil
 	case <-q.ctx.Done():
 		return q.ctx.Err()
