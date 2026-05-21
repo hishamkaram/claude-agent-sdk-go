@@ -32,6 +32,8 @@ const (
 
 	// StderrRingSize is the bounded diagnostic stderr tail retained after close.
 	StderrRingSize = 64 * 1024
+
+	stderrReadChunkSize = 32 * 1024
 )
 
 // getExitCode extracts the numeric exit code from an *exec.ExitError.
@@ -1265,33 +1267,36 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadC
 			if err != nil {
 				t.logger.Warn("readStderr: could not determine home directory, stderr logging disabled",
 					zap.Error(err))
-				return
+				logPath = ""
+			} else {
+				logPath = fmt.Sprintf("%s/.claude/agents_server/cli_stderr.log", homeDir)
 			}
-			logPath = fmt.Sprintf("%s/.claude/agents_server/cli_stderr.log", homeDir)
 		}
 
-		// Create parent directory if it doesn't exist
-		logDir := filepath.Dir(logPath)
-		if err := os.MkdirAll(logDir, 0755); err != nil {
-			fmt.Fprintf(os.Stderr,
-				"[SDK] Failed to create stderr log directory %s: %v\n"+
-					"Stderr file logging disabled. To fix, create directory:\n"+
-					"  mkdir -p %s\n",
-				logDir, err, logDir)
-		} else {
-			// Try to open log file
-			var err error
-			logFile, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-			if err != nil {
+		if logPath != "" {
+			// Create parent directory if it doesn't exist
+			logDir := filepath.Dir(logPath)
+			if err := os.MkdirAll(logDir, 0755); err != nil {
 				fmt.Fprintf(os.Stderr,
-					"[SDK] Failed to open stderr log file %s: %v\n"+
-						"Stderr file logging disabled. Possible fixes:\n"+
-						"  1. Ensure directory exists: mkdir -p %s\n"+
-						"  2. Check file permissions: chmod 644 %s\n"+
-						"  3. Use custom path: opts.WithCustomStderrLogFile(\"/path/to/file.log\")\n",
-					logPath, err, logDir, logPath)
+					"[SDK] Failed to create stderr log directory %s: %v\n"+
+						"Stderr file logging disabled. To fix, create directory:\n"+
+						"  mkdir -p %s\n",
+					logDir, err, logDir)
 			} else {
-				t.logger.Debug("stderr file logging enabled", zap.String("path", logPath))
+				// Try to open log file
+				var err error
+				logFile, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+				if err != nil {
+					fmt.Fprintf(os.Stderr,
+						"[SDK] Failed to open stderr log file %s: %v\n"+
+							"Stderr file logging disabled. Possible fixes:\n"+
+							"  1. Ensure directory exists: mkdir -p %s\n"+
+							"  2. Check file permissions: chmod 644 %s\n"+
+							"  3. Use custom path: opts.WithCustomStderrLogFile(\"/path/to/file.log\")\n",
+						logPath, err, logDir, logPath)
+				} else {
+					t.logger.Debug("stderr file logging enabled", zap.String("path", logPath))
+				}
 			}
 		}
 	}
@@ -1320,40 +1325,98 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadC
 		}
 	}()
 
-	reader := NewJSONLineReader(stderr)
+	partial := make([]byte, 0, StderrRingSize)
+	emit := func(fragment []byte) {
+		t.emitStderrFragment(logFile, fragment)
+	}
+	flushPartial := func() {
+		if len(partial) == 0 {
+			return
+		}
+		emit(partial)
+		partial = partial[:0]
+	}
+
+	buf := make([]byte, stderrReadChunkSize)
 	for {
-		line, err := reader.ReadLine()
+		n, err := stderr.Read(buf)
+		if n > 0 {
+			partial = t.consumeStderrChunk(tail, partial, buf[:n], emit)
+		}
 		if err != nil {
+			flushPartial()
 			return
-		}
-
-		// Check for context cancellation between reads
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		// Process stderr output
-		if len(line) > 0 {
-			captureStderrTail(tail, line)
-			stderrText := string(line)
-
-			// Write to log file if enabled and file is open
-			if logFile != nil {
-				_, _ = fmt.Fprintf(logFile, "[Claude CLI stderr]: %s\n", stderrText)
-				_ = logFile.Sync() // Flush to disk immediately
-			}
-
-			// Call stderr callback if configured (for runtime control)
-			if t.options != nil && t.options.Stderr != nil {
-				t.options.Stderr(stderrText)
-			}
-
-			// Parse known error patterns and create typed errors
-			t.parseStderrError(stderrText)
 		}
 	}
+}
+
+func (t *SubprocessCLITransport) consumeStderrChunk(tail *ringBuffer, partial []byte, chunk []byte, emit func([]byte)) []byte {
+	for len(chunk) > 0 {
+		newline := bytes.IndexByte(chunk, '\n')
+		if newline >= 0 {
+			partial = appendStderrPartial(tail, partial, chunk[:newline], emit)
+			if len(partial) > 0 {
+				emit(partial)
+			}
+			partial = partial[:0]
+			chunk = chunk[newline+1:]
+			continue
+		}
+
+		return appendStderrPartial(tail, partial, chunk, emit)
+	}
+	return partial
+}
+
+func appendStderrPartial(tail *ringBuffer, partial []byte, data []byte, emit func([]byte)) []byte {
+	for len(data) > 0 {
+		room := StderrRingSize - len(partial)
+		if room == 0 {
+			emit(partial)
+			partial = partial[:0]
+			room = StderrRingSize
+		}
+		if len(data) <= room {
+			captureStderrTail(tail, data)
+			return append(partial, data...)
+		}
+
+		piece := data[:room]
+		captureStderrTail(tail, piece)
+		partial = append(partial, piece...)
+		emit(partial)
+		partial = partial[:0]
+		data = data[room:]
+	}
+	return partial
+}
+
+func (t *SubprocessCLITransport) emitStderrFragment(logFile *os.File, fragment []byte) {
+	if len(fragment) == 0 {
+		return
+	}
+	if fragment[len(fragment)-1] == '\r' {
+		fragment = fragment[:len(fragment)-1]
+		if len(fragment) == 0 {
+			return
+		}
+	}
+
+	stderrText := string(fragment)
+
+	// Write to log file if enabled and file is open
+	if logFile != nil {
+		_, _ = fmt.Fprintf(logFile, "[Claude CLI stderr]: %s\n", stderrText)
+		_ = logFile.Sync() // Flush to disk immediately
+	}
+
+	// Call stderr callback if configured (for runtime control)
+	if t.options != nil && t.options.Stderr != nil {
+		t.options.Stderr(stderrText)
+	}
+
+	// Parse known error patterns and create typed errors
+	t.parseStderrError(stderrText)
 }
 
 // parseStderrError parses stderr text for known error patterns and stores typed errors.
