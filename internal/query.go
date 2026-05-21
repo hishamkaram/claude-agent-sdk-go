@@ -511,7 +511,7 @@ func (q *Query) handlePermissionRequest(requestData map[string]interface{}) (map
 		zap.String("tool_name", toolName),
 		zap.Duration("timeout", callbackTimeout),
 	)
-	result, err := q.canUseTool(callbackCtx, toolName, input, ctx)
+	result, err := q.invokeCanUseTool(callbackCtx, toolName, input, ctx)
 	q.logger.Debug("handlePermissionRequest: canUseTool callback returned", zap.Any("result", result), zap.Error(err))
 	if err != nil {
 		q.logger.Error("handlePermissionRequest: canUseTool callback returned error", zap.Error(err))
@@ -567,6 +567,25 @@ func (q *Query) handlePermissionRequest(requestData map[string]interface{}) (map
 	}
 
 	return response, nil
+}
+
+func (q *Query) invokeCanUseTool(callbackCtx context.Context, toolName string, input map[string]interface{}, ctx types.ToolPermissionContext) (result interface{}, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			cause, ok := r.(error)
+			if !ok {
+				cause = fmt.Errorf("%v", r)
+			}
+			q.logger.Error("panic in canUseTool callback recovered",
+				zap.Any("panic", r),
+				zap.Stack("stack"),
+				zap.String("tool_name", toolName),
+			)
+			err = types.NewControlProtocolErrorWithCause("permission callback panicked", cause)
+		}
+	}()
+
+	return q.canUseTool(callbackCtx, toolName, input, ctx)
 }
 
 // handleHookCallback handles a hook callback request.
