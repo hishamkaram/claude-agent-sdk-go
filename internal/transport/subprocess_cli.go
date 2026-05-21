@@ -263,7 +263,7 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
-		t.messageReaderLoop(capturedCtx, capturedStdout)
+		t.messageReaderLoop(capturedCtx, capturedStdout, capturedProcDone)
 	}()
 
 	// Launch stderr reader for debugging (tracked by wg for clean shutdown)
@@ -376,7 +376,7 @@ func (t *SubprocessCLITransport) connectWithExecCommand(args []string, envMap ma
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
-		t.messageReaderLoop(capturedCtx, capturedStdout)
+		t.messageReaderLoop(capturedCtx, capturedStdout, capturedProcDone)
 	}()
 
 	// Launch stderr reader for debugging (tracked by wg for clean shutdown)
@@ -430,18 +430,44 @@ const maxConsecutiveParseErrors uint = 6
 // messageReaderLoop reads JSON lines from stdout and parses them into messages.
 // It runs in a goroutine and sends messages to the messages channel.
 // It respects context cancellation and closes the messages channel when done.
-// stdout is passed as a parameter to avoid a data race with Connect() overwriting t.stdout.
+// stdout and procDone are passed as parameters to avoid a data race with Connect()
+// overwriting the corresponding struct fields.
 //
-// Note on context cancellation: ReadLine() blocks on stdout, which cannot be interrupted
-// by context cancel directly. Instead, when the context is cancelled, the process is killed
-// (via the context monitor goroutine or exec.CommandContext), which closes the stdout pipe,
-// causing ReadLine() to return io.EOF and exit the loop.
+// Note on lifecycle cancellation: ReadLine() blocks on stdout, which cannot be
+// interrupted by context cancel directly. Since the transport owns stdout after
+// Connect(), this loop closes stdout when the context is cancelled or the
+// captured process-done channel closes. That unblocks ReadLine() even when a
+// subprocess exits while stdout remains open with a partial line.
 //
 // Parse errors trigger exponential backoff (1s, 2s, 4s, ... up to 30s) to prevent
 // CPU spin on repeated invalid JSON. The backoff counter resets on successful parse.
-func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout io.Reader) {
+func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout io.ReadCloser, procDone <-chan struct{}) {
 	ch := t.messages
-	defer close(ch)
+
+	if stdout == nil {
+		close(ch)
+		return
+	}
+
+	readDone := make(chan struct{})
+	monitorDone := make(chan struct{})
+	go func() {
+		defer close(monitorDone)
+		select {
+		case <-ctx.Done():
+			_ = stdout.Close()
+		case <-procDone:
+			_ = stdout.Close()
+		case <-readDone:
+			// Read loop finished normally — nothing to do.
+		}
+	}()
+
+	defer func() {
+		close(readDone)
+		<-monitorDone
+		close(ch)
+	}()
 
 	t.logger.Debug("Message reader loop started")
 	reader := NewJSONLineReader(stdout)
@@ -453,6 +479,9 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 		select {
 		case <-ctx.Done():
 			t.logger.Debug("Message reader loop stopped: context cancelled")
+			return
+		case <-procDone:
+			t.logger.Debug("Message reader loop stopped: process exited")
 			return
 		default:
 		}
@@ -472,6 +501,10 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 			// Connect() overwriting t.ctx under t.mu.
 			if ctx.Err() != nil {
 				t.logger.Debug("message reader loop stopped during shutdown", zap.Error(err))
+				return
+			}
+			if procDoneClosed(procDone) {
+				t.logger.Debug("message reader loop stopped after process exit", zap.Error(err))
 				return
 			}
 
@@ -533,6 +566,10 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 				timer.Stop()
 				t.logger.Debug("Message reader loop stopped during backoff: context cancelled")
 				return
+			case <-procDone:
+				timer.Stop()
+				t.logger.Debug("Message reader loop stopped during backoff: process exited")
+				return
 			case <-timer.C:
 				// Backoff complete, continue reading
 			}
@@ -550,7 +587,7 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 			return
 		case ch <- msg:
 			// Message sent successfully
-		case <-t.procDone:
+		case <-procDone:
 			return
 		}
 	}
@@ -602,7 +639,14 @@ func (t *SubprocessCLITransport) connectWithWarmProcess(warm *WarmProcess) error
 
 	// Use the warm process's done channel as procDone
 	t.procDone = warm.Done
+	t.stderrDone = make(chan struct{})
 	warmCmd := t.cmd
+	capturedCtx := t.ctx
+	capturedProcDone := t.procDone
+	capturedStdout := t.stdout
+	capturedStderr := t.stderr
+	capturedStderrDone := t.stderrDone
+	stderrTail := t.stderrTail
 
 	// Launch watcher goroutine: mirrors connectWithExecCommand.
 	// The warm process background goroutine already called cmd.Wait() and closed Done.
@@ -610,7 +654,7 @@ func (t *SubprocessCLITransport) connectWithWarmProcess(warm *WarmProcess) error
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
-		<-t.procDone
+		<-capturedProcDone
 		t.mu.Lock()
 		wasReady := t.ready
 		t.ready = false
@@ -634,14 +678,12 @@ func (t *SubprocessCLITransport) connectWithWarmProcess(warm *WarmProcess) error
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
-		t.messageReaderLoop(t.ctx, t.stdout)
+		t.messageReaderLoop(capturedCtx, capturedStdout, capturedProcDone)
 	}()
 
 	// Launch stderr reader
-	t.stderrDone = make(chan struct{})
-	stderrTail := t.stderrTail
 	t.wg.Add(1)
-	go t.readStderr(t.ctx, t.stderr, stderrTail, t.stderrDone)
+	go t.readStderr(capturedCtx, capturedStderr, stderrTail, capturedStderrDone)
 
 	// Mark as ready
 	t.ready = true
@@ -1151,6 +1193,18 @@ func waitForProcDone(ctx context.Context, procDone <-chan struct{}, timeout time
 	case <-timer.C:
 		return false
 	case <-ctx.Done():
+		return false
+	}
+}
+
+func procDoneClosed(procDone <-chan struct{}) bool {
+	if procDone == nil {
+		return false
+	}
+	select {
+	case <-procDone:
+		return true
+	default:
 		return false
 	}
 }
