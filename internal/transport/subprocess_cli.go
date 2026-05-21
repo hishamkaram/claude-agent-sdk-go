@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,16 @@ import (
 const (
 	// SDKVersion is the version identifier for this SDK
 	SDKVersion = "0.1.0"
+
+	// ShutdownGrace is the time allowed for the subprocess to exit cleanly
+	// after stdin is closed before interrupt/cancel escalation.
+	ShutdownGrace = 3 * time.Second
+
+	// TerminateGrace is the time allowed after interrupt/cancel before kill.
+	TerminateGrace = 2 * time.Second
+
+	// StderrRingSize is the bounded diagnostic stderr tail retained after close.
+	StderrRingSize = 64 * 1024
 )
 
 // getExitCode extracts the numeric exit code from an *exec.ExitError.
@@ -48,6 +59,8 @@ type SubprocessCLITransport struct {
 	stdin         io.WriteCloser
 	stdout        io.ReadCloser
 	stderr        io.ReadCloser
+	stderrTail    *ringBuffer
+	stderrDone    chan struct{}
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -69,6 +82,10 @@ type SubprocessCLITransport struct {
 	mu    sync.Mutex
 	err   error
 	ready bool
+
+	// shutdownRequested is set before stdin is closed during Close. Watchers use
+	// it to distinguish expected close exits from actionable subprocess crashes.
+	shutdownRequested bool
 }
 
 // NewSubprocessCLITransport creates a new transport instance.
@@ -87,6 +104,7 @@ func NewSubprocessCLITransport(cliPath, cwd string, env map[string]string, logge
 		resumeSessionID: resumeSessionID,
 		options:         options,
 		messages:        make(chan types.Message, 10), // Buffered channel for smooth streaming
+		stderrTail:      newRingBuffer(StderrRingSize),
 	}
 }
 
@@ -105,6 +123,10 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) error {
 	// Re-create the messages channel for this connection attempt.
 	// A previous Connect/Close cycle may have closed the old channel.
 	t.messages = make(chan types.Message, 10)
+	t.stderrTail = newRingBuffer(StderrRingSize)
+	t.stderrDone = nil
+	t.shutdownRequested = false
+	t.err = nil
 
 	// Create cancellable context
 	t.ctx, t.cancel = context.WithCancel(ctx)
@@ -183,16 +205,25 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 	// Launch watcher goroutine: mirrors the exec-command path.
 	// customProcess.Wait() is called exactly once here; closeCustomProcess drains procDone.
 	t.procDone = make(chan struct{})
+	t.stderrDone = make(chan struct{})
+	capturedProcess := t.customProcess
+	capturedCtx := t.ctx
+	capturedProcDone := t.procDone
+	capturedStderrDone := t.stderrDone
+	capturedStdout := t.stdout
+	capturedStderr := t.stderr
+	stderrTail := t.stderrTail
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
-		waitErr := t.customProcess.Wait()
-		close(t.procDone) // signal Close() that Wait() is done — BEFORE acquiring mutex
+		waitErr := capturedProcess.Wait()
+		close(capturedProcDone) // signal Close() that Wait() is done — BEFORE acquiring mutex
+		t.drainStderr(capturedStderrDone)
 		t.mu.Lock()
 		wasReady := t.ready
 		t.ready = false
-		if waitErr != nil && t.err == nil {
-			t.err = types.NewProcessErrorWithCode("subprocess exited unexpectedly", t.customProcess.ExitCode())
+		if waitErr != nil && t.err == nil && !t.shutdownRequested {
+			t.err = t.newProcessErrorWithDiagnostics("subprocess exited unexpectedly", capturedProcess.ExitCode())
 		}
 		cancelFn := t.cancel // capture under lock to avoid race with Close()
 		t.mu.Unlock()
@@ -207,18 +238,21 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 	// Unlike exec.CommandContext, custom processes don't auto-kill on context cancel.
 	// This goroutine kills the process when the transport context is cancelled,
 	// unblocking Wait() and the pipe readers.
-	capturedCtx := t.ctx
-	capturedProcess := t.customProcess
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
 		select {
 		case <-capturedCtx.Done():
+			select {
+			case <-capturedProcDone:
+				return
+			default:
+			}
 			if err := capturedProcess.Kill(); err != nil {
 				t.logger.Debug("context cancel: process kill returned error (process may have already exited)",
 					zap.Error(err))
 			}
-		case <-t.procDone:
+		case <-capturedProcDone:
 			// Process already exited — nothing to do
 		}
 	}()
@@ -229,12 +263,12 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
-		t.messageReaderLoop(t.ctx, t.stdout)
+		t.messageReaderLoop(capturedCtx, capturedStdout)
 	}()
 
 	// Launch stderr reader for debugging (tracked by wg for clean shutdown)
 	t.wg.Add(1)
-	go t.readStderr(t.ctx, t.stderr)
+	go t.readStderr(capturedCtx, capturedStderr, stderrTail, capturedStderrDone)
 
 	// Mark as ready
 	t.ready = true
@@ -307,16 +341,25 @@ func (t *SubprocessCLITransport) connectWithExecCommand(args []string, envMap ma
 	// where Close() holds t.mu while waiting for procDone, and the watcher needs
 	// t.mu to close procDone.
 	t.procDone = make(chan struct{})
+	t.stderrDone = make(chan struct{})
+	capturedCmd := t.cmd
+	capturedCtx := t.ctx
+	capturedProcDone := t.procDone
+	capturedStderrDone := t.stderrDone
+	capturedStdout := t.stdout
+	capturedStderr := t.stderr
+	stderrTail := t.stderrTail
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
-		waitErr := t.cmd.Wait()
-		close(t.procDone) // signal Close() that Wait() is done — BEFORE acquiring mutex
+		waitErr := capturedCmd.Wait()
+		close(capturedProcDone) // signal Close() that Wait() is done — BEFORE acquiring mutex
+		t.drainStderr(capturedStderrDone)
 		t.mu.Lock()
 		wasReady := t.ready
 		t.ready = false
-		if waitErr != nil && t.err == nil {
-			t.err = types.NewProcessErrorWithCode("subprocess exited unexpectedly", getExitCode(waitErr))
+		if waitErr != nil && t.err == nil && !t.shutdownRequested {
+			t.err = t.newProcessErrorWithDiagnostics("subprocess exited unexpectedly", getExitCode(waitErr))
 		}
 		cancelFn := t.cancel // capture under lock to avoid race with Close()
 		t.mu.Unlock()
@@ -333,12 +376,12 @@ func (t *SubprocessCLITransport) connectWithExecCommand(args []string, envMap ma
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
-		t.messageReaderLoop(t.ctx, t.stdout)
+		t.messageReaderLoop(capturedCtx, capturedStdout)
 	}()
 
 	// Launch stderr reader for debugging (tracked by wg for clean shutdown)
 	t.wg.Add(1)
-	go t.readStderr(t.ctx, t.stderr)
+	go t.readStderr(capturedCtx, capturedStderr, stderrTail, capturedStderrDone)
 
 	// Mark as ready
 	t.ready = true
@@ -559,6 +602,7 @@ func (t *SubprocessCLITransport) connectWithWarmProcess(warm *WarmProcess) error
 
 	// Use the warm process's done channel as procDone
 	t.procDone = warm.Done
+	warmCmd := t.cmd
 
 	// Launch watcher goroutine: mirrors connectWithExecCommand.
 	// The warm process background goroutine already called cmd.Wait() and closed Done.
@@ -570,12 +614,12 @@ func (t *SubprocessCLITransport) connectWithWarmProcess(warm *WarmProcess) error
 		t.mu.Lock()
 		wasReady := t.ready
 		t.ready = false
-		if t.err == nil {
+		if t.err == nil && !t.shutdownRequested {
 			exitCode := 0
-			if t.cmd.ProcessState != nil {
-				exitCode = t.cmd.ProcessState.ExitCode()
+			if warmCmd != nil && warmCmd.ProcessState != nil {
+				exitCode = warmCmd.ProcessState.ExitCode()
 			}
-			t.err = types.NewProcessErrorWithCode("subprocess exited unexpectedly", exitCode)
+			t.err = t.newProcessErrorWithDiagnostics("subprocess exited unexpectedly", exitCode)
 		}
 		cancelFn := t.cancel
 		t.mu.Unlock()
@@ -594,8 +638,10 @@ func (t *SubprocessCLITransport) connectWithWarmProcess(warm *WarmProcess) error
 	}()
 
 	// Launch stderr reader
+	t.stderrDone = make(chan struct{})
+	stderrTail := t.stderrTail
 	t.wg.Add(1)
-	go t.readStderr(t.ctx, t.stderr)
+	go t.readStderr(t.ctx, t.stderr, stderrTail, t.stderrDone)
 
 	// Mark as ready
 	t.ready = true
@@ -938,10 +984,15 @@ func (t *SubprocessCLITransport) buildSettingsJSON() string {
 }
 
 // Close terminates the subprocess and cleans up all resources.
-// It closes stdin first to allow the subprocess to exit gracefully,
-// then waits for exit. The transport context is cancelled only after
-// the process has exited (cleanup) or as a fallback kill if the
-// caller's context expires before the process exits.
+//
+// Shutdown is staged to match Codex SDK semantics:
+//  1. mark shutdown requested and close stdin to signal EOF;
+//  2. wait up to ShutdownGrace for the watcher-owned Wait() result;
+//  3. interrupt/cancel and wait up to TerminateGrace;
+//  4. kill as a last resort.
+//
+// cmd.Wait() / customProcess.Wait() is owned by the watcher goroutine. Close
+// drains procDone and must not call Wait() directly.
 func (t *SubprocessCLITransport) Close(ctx context.Context) error {
 	t.mu.Lock()
 
@@ -952,6 +1003,7 @@ func (t *SubprocessCLITransport) Close(ctx context.Context) error {
 
 	t.logger.Debug("Closing CLI subprocess...")
 	t.ready = false
+	t.shutdownRequested = true
 
 	// 1. Close stdin FIRST — signals subprocess to exit gracefully.
 	if t.stdin != nil {
@@ -980,59 +1032,74 @@ func (t *SubprocessCLITransport) Close(ctx context.Context) error {
 // customProcess.Wait() is owned by the watcher goroutine (launched in connectWithCustomSpawner).
 // This method drains procDone — it must NOT call customProcess.Wait() again.
 func (t *SubprocessCLITransport) closeCustomProcess(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		// Caller's timeout expired — force kill, then drain.
-		_ = t.customProcess.Kill()
+	if waitForProcDone(ctx, t.procDone, ShutdownGrace) {
 		if t.cancel != nil {
 			t.cancel()
 			t.cancel = nil
 		}
-		// Safe to block here while holding t.mu: the watcher goroutine guarantees
-		// close(procDone) happens BEFORE it acquires t.mu, so no deadlock is possible.
-		<-t.procDone
 		t.customProcess = nil
-		return types.NewProcessError("subprocess did not exit gracefully, killed")
-
-	case <-t.procDone:
-		// Watcher already called Wait() and closed procDone.
-		if t.cancel != nil {
-			t.cancel()
-			t.cancel = nil
-		}
+		return nil
 	}
 
+	// Custom processes do not expose a portable interrupt. Cancel the transport
+	// context first; the context monitor goroutine will call Kill().
+	if t.cancel != nil {
+		t.cancel()
+		t.cancel = nil
+	}
+	if waitForProcDone(ctx, t.procDone, TerminateGrace) {
+		t.customProcess = nil
+		return nil
+	}
+
+	_ = t.customProcess.Kill()
+	<-t.procDone
 	t.customProcess = nil
-	return nil
+	return t.newProcessErrorWithDiagnostics("subprocess did not exit gracefully, killed", -1)
 }
 
 // closeExecCommand handles cleanup for exec.Command-spawned process.
 // cmd.Wait() is owned by the watcher goroutine (launched in connectWithExecCommand).
 // This method drains procDone — it must NOT call cmd.Wait() again.
 func (t *SubprocessCLITransport) closeExecCommand(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		// Caller's timeout expired — force kill via context cancel, then drain.
+	if waitForProcDone(ctx, t.procDone, ShutdownGrace) {
 		if t.cancel != nil {
 			t.cancel()
 			t.cancel = nil
 		}
-		// Safe to block here while holding t.mu: the watcher goroutine guarantees
-		// close(procDone) happens BEFORE it acquires t.mu, so no deadlock is possible.
-		<-t.procDone
 		t.cmd = nil
-		return types.NewProcessError("subprocess did not exit gracefully, killed")
-
-	case <-t.procDone:
-		// Watcher already called Wait() and closed procDone — just cancel context.
-		if t.cancel != nil {
-			t.cancel()
-			t.cancel = nil
-		}
+		return nil
 	}
 
+	if t.cmd != nil && t.cmd.Process != nil {
+		_ = t.cmd.Process.Signal(os.Interrupt)
+	}
+	if waitForProcDone(ctx, t.procDone, TerminateGrace) {
+		if t.cancel != nil {
+			t.cancel()
+			t.cancel = nil
+		}
+		t.cmd = nil
+		return nil
+	}
+
+	if t.cmd != nil && t.cmd.Process != nil {
+		_ = t.cmd.Process.Kill()
+	}
+	<-t.procDone
+	if t.cancel != nil {
+		t.cancel()
+		t.cancel = nil
+	}
 	t.cmd = nil
-	return nil
+	return t.newProcessErrorWithDiagnostics("subprocess did not exit gracefully, killed", -1)
+}
+
+// Stderr returns the captured stderr diagnostic tail. It is stable after Close.
+func (t *SubprocessCLITransport) Stderr() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.stderrStringLocked()
 }
 
 // OnError stores an error that occurred during transport operation.
@@ -1075,12 +1142,59 @@ func (t *SubprocessCLITransport) ProcessID() int {
 	return 0
 }
 
+func waitForProcDone(ctx context.Context, procDone <-chan struct{}, timeout time.Duration) bool {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-procDone:
+		return true
+	case <-timer.C:
+		return false
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (t *SubprocessCLITransport) drainStderr(done <-chan struct{}) {
+	if done == nil {
+		return
+	}
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+	}
+}
+
+func (t *SubprocessCLITransport) stderrStringLocked() string {
+	if t.stderrTail == nil {
+		return ""
+	}
+	return t.stderrTail.String()
+}
+
+func captureStderrTail(tail *ringBuffer, line []byte) {
+	if tail == nil || len(line) == 0 {
+		return
+	}
+	_, _ = tail.Write(line)
+}
+
+func (t *SubprocessCLITransport) newProcessErrorWithDiagnostics(message string, exitCode int) *types.ProcessError {
+	if tail := t.stderrStringLocked(); tail != "" {
+		message = fmt.Sprintf("%s: stderr tail: %q", message, tail)
+	}
+	return types.NewProcessErrorWithCode(message, exitCode)
+}
+
 // readStderr reads stderr output in a goroutine for debugging.
 // This is a helper function for monitoring subprocess errors.
 // It also parses known error patterns and stores them as typed errors.
 // stderr is passed as a parameter to avoid a data race with Connect() overwriting t.stderr.
-func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadCloser) {
+func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadCloser, tail *ringBuffer, done chan<- struct{}) {
 	defer t.wg.Done()
+	if done != nil {
+		defer close(done)
+	}
 
 	if stderr == nil {
 		return
@@ -1168,6 +1282,7 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadC
 
 		// Process stderr output
 		if len(line) > 0 {
+			captureStderrTail(tail, line)
 			stderrText := string(line)
 
 			// Write to log file if enabled and file is open
@@ -1260,4 +1375,71 @@ func trimWhitespace(s string) string {
 
 func isWhitespace(r rune) bool {
 	return r == ' ' || r == '\t' || r == '\n' || r == '\r'
+}
+
+// ringBuffer is a bounded byte buffer that keeps the most recent N bytes.
+// Safe for concurrent Write from the stderr reader and String from callers.
+type ringBuffer struct {
+	mu   sync.Mutex
+	data []byte
+	size int
+	full bool
+	pos  int
+}
+
+func newRingBuffer(size int) *ringBuffer {
+	return &ringBuffer{data: make([]byte, 0, size), size: size}
+}
+
+func (r *ringBuffer) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	written := len(p)
+
+	if !r.full {
+		room := r.size - len(r.data)
+		if len(p) <= room {
+			r.data = append(r.data, p...)
+			if len(r.data) == r.size {
+				r.full = true
+				r.pos = 0
+			}
+			return written, nil
+		}
+		r.data = append(r.data, p[:room]...)
+		p = p[room:]
+		r.full = true
+		r.pos = 0
+	}
+
+	if len(p) >= r.size {
+		p = p[len(p)-r.size:]
+		copy(r.data, p)
+		r.pos = 0
+		return written, nil
+	}
+	n := copy(r.data[r.pos:], p)
+	if n < len(p) {
+		copy(r.data, p[n:])
+		r.pos = len(p) - n
+	} else {
+		r.pos += n
+		if r.pos == r.size {
+			r.pos = 0
+		}
+	}
+	return written, nil
+}
+
+func (r *ringBuffer) String() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.full {
+		return string(r.data)
+	}
+	var out bytes.Buffer
+	out.Grow(r.size)
+	out.Write(r.data[r.pos:])
+	out.Write(r.data[:r.pos])
+	return out.String()
 }

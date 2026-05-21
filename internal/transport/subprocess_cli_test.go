@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -55,6 +57,15 @@ func hasFlag(args []string, flag string) bool {
 		}
 	}
 	return false
+}
+
+func TestTransportInterfaceDoesNotExposeStderr(t *testing.T) {
+	t.Parallel()
+
+	transportType := reflect.TypeOf((*Transport)(nil)).Elem()
+	if _, ok := transportType.MethodByName("Stderr"); ok {
+		t.Fatal("Transport interface must not expose Stderr(); diagnostics stay on concrete subprocess transport")
+	}
 }
 
 // TestBuildCommandArgs_Effort tests --effort flag generation.
@@ -1379,11 +1390,15 @@ func (m *mockSpawnedProcess) Killed() bool {
 }
 
 type mockWriteCloser struct {
-	buf    *bytes.Buffer
-	closed bool
+	mu      sync.Mutex
+	buf     *bytes.Buffer
+	closed  bool
+	onClose func()
 }
 
 func (m *mockWriteCloser) Write(p []byte) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.closed {
 		return 0, errors.New("write to closed writer")
 	}
@@ -1391,8 +1406,239 @@ func (m *mockWriteCloser) Write(p []byte) (int, error) {
 }
 
 func (m *mockWriteCloser) Close() error {
+	m.mu.Lock()
+	alreadyClosed := m.closed
 	m.closed = true
+	onClose := m.onClose
+	m.mu.Unlock()
+	if !alreadyClosed && onClose != nil {
+		onClose()
+	}
 	return nil
+}
+
+func (m *mockSpawnedProcess) signalExit() {
+	_ = m.stdoutW.Close()
+	_ = m.stderrW.Close()
+	select {
+	case <-m.waitCh:
+	default:
+		close(m.waitCh)
+	}
+}
+
+func waitForCondition(t *testing.T, timeout time.Duration, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("condition was not satisfied before timeout")
+}
+
+func waitForStderr(t *testing.T, tr *SubprocessCLITransport, want string) {
+	t.Helper()
+	waitForCondition(t, 2*time.Second, func() bool {
+		return tr.Stderr() == want
+	})
+}
+
+func newMockTransportWithProcess(t *testing.T, mockProc *mockSpawnedProcess, opts *types.ClaudeAgentOptions) *SubprocessCLITransport {
+	t.Helper()
+	spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+		return mockProc, nil
+	})
+	if opts == nil {
+		opts = types.NewClaudeAgentOptions()
+	}
+	opts.WithSpawnProcess(spawner)
+	tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+	if err := tr.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect() failed: %v", err)
+	}
+	return tr
+}
+
+func TestSubprocessCLITransportStderrTailRetainsLast64KiB(t *testing.T) {
+	t.Parallel()
+
+	mockProc := newMockSpawnedProcess()
+	tr := newMockTransportWithProcess(t, mockProc, nil)
+
+	payload := strings.Repeat("A", StderrRingSize+17)
+	want := payload[len(payload)-StderrRingSize:]
+	if _, err := mockProc.stderrW.Write([]byte(payload + "\n")); err != nil {
+		t.Fatalf("write stderr: %v", err)
+	}
+
+	waitForStderr(t, tr, want)
+	mockProc.signalExit()
+	waitForNotReady(tr, 2*time.Second)
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := tr.Close(closeCtx); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+	if got := tr.Stderr(); got != want {
+		t.Fatalf("Stderr() after close changed: len=%d want len=%d", len(got), len(want))
+	}
+}
+
+func TestSubprocessCLITransportUnexpectedExitIncludesStderrTail(t *testing.T) {
+	t.Parallel()
+
+	mockProc := newMockSpawnedProcess()
+	mockProc.exitCode = 7
+	mockProc.waitErr = errors.New("exit status 7")
+	tr := newMockTransportWithProcess(t, mockProc, nil)
+
+	const stderrTail = "deterministic stderr tail"
+	if _, err := mockProc.stderrW.Write([]byte(stderrTail + "\n")); err != nil {
+		t.Fatalf("write stderr: %v", err)
+	}
+	waitForStderr(t, tr, stderrTail)
+
+	mockProc.signalExit()
+	if !waitForNotReady(tr, 2*time.Second) {
+		t.Fatal("transport did not observe subprocess exit")
+	}
+
+	err := tr.GetError()
+	var procErr *types.ProcessError
+	if !errors.As(err, &procErr) {
+		t.Fatalf("GetError() = %T %v, want *types.ProcessError", err, err)
+	}
+	if procErr.ExitCode != 7 {
+		t.Fatalf("ProcessError.ExitCode = %d, want 7", procErr.ExitCode)
+	}
+	if got := err.Error(); !strings.Contains(got, stderrTail) || !strings.Contains(got, "exit code: 7") {
+		t.Fatalf("ProcessError message = %q, want exit code and stderr tail", got)
+	}
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = tr.Close(closeCtx)
+}
+
+func TestSubprocessCLITransportStderrCallbackFileAndDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	logPath := tempDir + "/stderr.log"
+	var (
+		mu       sync.Mutex
+		callback []string
+	)
+	opts := types.NewClaudeAgentOptions().
+		WithCustomStderrLogFile(logPath).
+		WithStderr(func(line string) {
+			mu.Lock()
+			defer mu.Unlock()
+			callback = append(callback, line)
+		})
+	mockProc := newMockSpawnedProcess()
+	tr := newMockTransportWithProcess(t, mockProc, opts)
+
+	const line = "callback file diagnostic line"
+	if _, err := mockProc.stderrW.Write([]byte(line + "\n")); err != nil {
+		t.Fatalf("write stderr: %v", err)
+	}
+	waitForStderr(t, tr, line)
+	waitForCondition(t, 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(callback) == 1 && callback[0] == line
+	})
+	waitForCondition(t, 2*time.Second, func() bool {
+		data, err := os.ReadFile(logPath)
+		return err == nil && strings.Contains(string(data), line)
+	})
+
+	mockProc.signalExit()
+	closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := tr.Close(closeCtx); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+}
+
+func TestSubprocessCLITransportCloseGracefulEOF(t *testing.T) {
+	t.Parallel()
+
+	mockProc := newMockSpawnedProcess()
+	mockProc.stdin.onClose = mockProc.signalExit
+	tr := newMockTransportWithProcess(t, mockProc, nil)
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := tr.Close(closeCtx); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+	if mockProc.Killed() {
+		t.Fatal("Close() killed process that exited after stdin EOF")
+	}
+}
+
+func TestSubprocessCLITransportCloseIdempotent(t *testing.T) {
+	t.Parallel()
+
+	mockProc := newMockSpawnedProcess()
+	mockProc.stdin.onClose = mockProc.signalExit
+	tr := newMockTransportWithProcess(t, mockProc, nil)
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := tr.Close(closeCtx); err != nil {
+		t.Fatalf("first Close() failed: %v", err)
+	}
+	if err := tr.Close(closeCtx); err != nil {
+		t.Fatalf("second Close() failed: %v", err)
+	}
+	if mockProc.Killed() {
+		t.Fatal("idempotent Close() should not kill after graceful exit")
+	}
+}
+
+func TestSubprocessCLITransportWriteAfterCloseReturnsTypedError(t *testing.T) {
+	t.Parallel()
+
+	mockProc := newMockSpawnedProcess()
+	mockProc.stdin.onClose = mockProc.signalExit
+	tr := newMockTransportWithProcess(t, mockProc, nil)
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := tr.Close(closeCtx); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+
+	err := tr.Write(context.Background(), `{"type":"user","message":"after close"}`)
+	var cliErr *types.CLIConnectionError
+	if !errors.As(err, &cliErr) {
+		t.Fatalf("Write() after close = %T %v, want *types.CLIConnectionError", err, err)
+	}
+}
+
+func TestSubprocessCLITransportCloseContextCancellationEscalates(t *testing.T) {
+	t.Parallel()
+
+	mockProc := newMockSpawnedProcess()
+	tr := newMockTransportWithProcess(t, mockProc, nil)
+
+	closeCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := tr.Close(closeCtx)
+	var procErr *types.ProcessError
+	if !errors.As(err, &procErr) {
+		t.Fatalf("Close(canceled ctx) = %T %v, want *types.ProcessError", err, err)
+	}
+	if !mockProc.Killed() {
+		t.Fatal("Close(canceled ctx) did not escalate to Kill")
+	}
 }
 
 // TestConnectWithCustomSpawner verifies that Connect() uses the custom spawner

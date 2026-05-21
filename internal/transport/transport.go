@@ -15,7 +15,8 @@ type Transport interface {
 	Connect(ctx context.Context) error
 
 	// Close terminates subprocess and cleans up resources.
-	// This should gracefully shut down the subprocess and clean up all goroutines.
+	// Implementations should close stdin first, wait for a graceful exit,
+	// escalate with interrupt/cancel, and kill only as a last resort.
 	Close(ctx context.Context) error
 
 	// Write sends a JSON message to the subprocess stdin.
