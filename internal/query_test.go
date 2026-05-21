@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -90,6 +91,62 @@ func (m *mockTransport) getWrittenData() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]string{}, m.writtenData...)
+}
+
+func waitForControlResponses(t *testing.T, transport *mockTransport, want int) []map[string]interface{} {
+	t.Helper()
+
+	deadline := time.After(2 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		written := transport.getWrittenData()
+		responses := make([]map[string]interface{}, 0, len(written))
+		for _, data := range written {
+			var msg map[string]interface{}
+			if err := json.Unmarshal([]byte(data), &msg); err != nil {
+				continue
+			}
+			if msg["type"] == "control_response" {
+				responses = append(responses, msg)
+			}
+		}
+
+		if len(responses) >= want {
+			return responses
+		}
+
+		select {
+		case <-ticker.C:
+		case <-deadline:
+			t.Fatalf("timed out waiting for %d control_response messages, got %d: %v", want, len(responses), written)
+		}
+	}
+}
+
+func assertPermissionPanicErrorResponse(t *testing.T, transport *mockTransport, requestID string) {
+	t.Helper()
+
+	responses := waitForControlResponses(t, transport, 1)
+	if len(responses) != 1 {
+		t.Fatalf("expected exactly one control_response, got %d: %v", len(responses), responses)
+	}
+
+	response, ok := responses[0]["response"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("response field missing or invalid: %v", responses[0])
+	}
+	if got, _ := response["request_id"].(string); got != requestID {
+		t.Fatalf("response.request_id = %q, want %q", got, requestID)
+	}
+	if got, _ := response["subtype"].(string); got != "error" {
+		t.Fatalf("response.subtype = %q, want error", got)
+	}
+	errMsg, _ := response["error"].(string)
+	if !strings.Contains(errMsg, "permission callback panicked") {
+		t.Fatalf("response.error = %q, want permission callback panicked", errMsg)
+	}
 }
 
 // TestNewQuery tests Query construction.
@@ -1453,9 +1510,9 @@ func TestMessageLoop_PanicRecovery(t *testing.T) {
 	}
 }
 
-// TestHandleControlRequest_PanicRecovery verifies that a panic inside
-// handleControlRequest (via a panicking canUseTool callback) is caught by the
-// deferred recover(). The handlerWg must still complete so Stop() doesn't hang.
+// TestHandleControlRequest_PanicRecovery verifies that a panicking canUseTool
+// callback is converted into an error response and that handler cleanup still
+// completes so Stop() doesn't hang.
 func TestHandleControlRequest_PanicRecovery(t *testing.T) {
 	t.Parallel()
 
@@ -1503,8 +1560,7 @@ func TestHandleControlRequest_PanicRecovery(t *testing.T) {
 
 			mt.sendMessage(controlRequest)
 
-			// Give time for the handler goroutine to execute and panic
-			time.Sleep(200 * time.Millisecond)
+			assertPermissionPanicErrorResponse(t, mt, "test-panic-req-1")
 
 			// Stop should complete without hanging — handlerWg.Done() was
 			// called even though the handler panicked.
@@ -1522,6 +1578,54 @@ func TestHandleControlRequest_PanicRecovery(t *testing.T) {
 				t.Fatal("Stop() hung — handlerWg.Done() was not called after panic")
 			}
 		})
+	}
+}
+
+func TestHandleControlRequest_CanUseTool_PanicSendsErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	mt := newMockTransport()
+	opts := types.NewClaudeAgentOptions().WithCanUseTool(
+		func(ctx context.Context, toolName string, input map[string]interface{}, permCtx types.ToolPermissionContext) (interface{}, error) {
+			panic("permission callback exploded")
+		},
+	)
+
+	logger := log.NewLogger(false)
+	query := NewQuery(ctx, mt, opts, logger, true)
+
+	if err := query.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	mt.sendMessage(&types.SystemMessage{
+		Type:      "control_request",
+		Subtype:   "control_request",
+		RequestID: "test-panic-req-1",
+		Request: map[string]interface{}{
+			"subtype":   "can_use_tool",
+			"tool_name": "Bash",
+			"input":     map[string]interface{}{"command": "ls"},
+		},
+	})
+
+	assertPermissionPanicErrorResponse(t, mt, "test-panic-req-1")
+
+	stopDone := make(chan error, 1)
+	go func() {
+		stopDone <- query.Stop(ctx)
+	}()
+
+	select {
+	case err := <-stopDone:
+		if err != nil {
+			t.Fatalf("Stop() returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop() hung after permission callback panic")
 	}
 }
 
