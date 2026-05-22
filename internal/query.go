@@ -34,7 +34,9 @@ type Query struct {
 	nextHookCallbackID int64
 
 	// Options (for init protocol fields)
-	options *types.ClaudeAgentOptions
+	options         *types.ClaudeAgentOptions
+	sessionStore    types.SessionStore
+	sessionStoreKey types.SessionKey
 
 	// Callbacks
 	canUseTool types.CanUseToolFunc
@@ -82,6 +84,10 @@ func NewQuery(ctx context.Context, transport transport.Transport, opts *types.Cl
 		q.options = opts
 		q.canUseTool = opts.CanUseTool
 		q.hooks = opts.Hooks
+		q.sessionStore = opts.SessionStore
+		if opts.SessionStoreKey != nil {
+			q.sessionStoreKey = *opts.SessionStoreKey
+		}
 	}
 
 	return q
@@ -296,8 +302,26 @@ func (q *Query) routeMessage(msg types.Message) error {
 		return types.NewControlProtocolError("invalid control_request message type")
 	}
 
-	// Regular message - send to consumer. The second select preserves the
-	// existing blocking backpressure behavior when the internal queue is full.
+	if err := q.appendSessionStoreMessage(msg); err != nil {
+		q.logger.Warn("session store append failed", zap.Error(err))
+		if enqueueErr := q.enqueueMessage(&types.SystemMessage{
+			Type:    "system",
+			Subtype: "session_store_error",
+			Data: map[string]interface{}{
+				"operation": "append",
+				"error":     err.Error(),
+			},
+		}); enqueueErr != nil {
+			return enqueueErr
+		}
+	}
+	return q.enqueueMessage(msg)
+}
+
+func (q *Query) enqueueMessage(msg types.Message) error {
+	msgType := msg.GetMessageType()
+	// The second select preserves the existing blocking backpressure behavior
+	// when the internal queue is full.
 	select {
 	case q.messagesChan <- msg:
 		if len(q.messagesChan) < cap(q.messagesChan) {
@@ -326,6 +350,64 @@ func (q *Query) routeMessage(msg types.Message) error {
 	case <-q.ctx.Done():
 		return q.ctx.Err()
 	}
+}
+
+func (q *Query) appendSessionStoreMessage(msg types.Message) error {
+	if q.sessionStore == nil {
+		return nil
+	}
+	entry, ok := sessionStoreMessageFromMessage(msg)
+	if !ok {
+		return nil
+	}
+	q.mu.Lock()
+	key := q.sessionStoreKey
+	if key.SessionID == "" && entry.SessionID != "" {
+		key.SessionID = entry.SessionID
+		q.sessionStoreKey.SessionID = entry.SessionID
+	}
+	q.mu.Unlock()
+	if key.SessionID == "" {
+		return nil
+	}
+	return q.sessionStore.Append(q.ctx, key, []types.SessionMessage{entry})
+}
+
+func sessionStoreMessageFromMessage(msg types.Message) (types.SessionMessage, bool) {
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		return types.SessionMessage{}, false
+	}
+	out := types.SessionMessage{
+		Type:    msg.GetMessageType(),
+		Message: json.RawMessage(raw),
+	}
+	switch m := msg.(type) {
+	case *types.UserMessage:
+		out.UUID = m.UUID
+		out.SessionID = m.SessionID
+		out.ParentToolUseID = m.ParentToolUseID
+	case *types.AssistantMessage:
+		out.UUID = m.UUID
+		out.SessionID = m.SessionID
+		out.ParentToolUseID = m.ParentToolUseID
+	case *types.ResultMessage:
+		out.UUID = m.UUID
+		out.SessionID = m.SessionID
+	case *types.StreamEvent:
+		out.UUID = m.UUID
+		out.SessionID = m.SessionID
+		out.ParentToolUseID = m.ParentToolUseID
+	default:
+		var probe struct {
+			UUID      string `json:"uuid"`
+			SessionID string `json:"session_id"`
+		}
+		_ = json.Unmarshal(raw, &probe)
+		out.UUID = probe.UUID
+		out.SessionID = probe.SessionID
+	}
+	return out, true
 }
 
 // handleControlResponse handles a control response message.

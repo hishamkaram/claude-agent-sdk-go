@@ -84,7 +84,8 @@ type SubagentInfo struct {
 
 // GetSubagentMessagesOptions configures the GetSubagentMessages function.
 type GetSubagentMessagesOptions struct {
-	Dir    string `json:"dir,omitempty"`
-	Limit  int    `json:"limit,omitempty"`
-	Offset int    `json:"offset,omitempty"`
+	Dir             string `json:"dir,omitempty"`
+	ParentSessionID string `json:"parentSessionId,omitempty"`
+	Limit           int    `json:"limit,omitempty"`
+	Offset          int    `json:"offset,omitempty"`
 }

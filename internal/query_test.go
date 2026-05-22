@@ -27,6 +27,16 @@ type mockTransport struct {
 	onErrorHandler func(error)
 }
 
+type failingSessionStore struct{}
+
+func (failingSessionStore) Append(ctx context.Context, key types.SessionKey, entries []types.SessionMessage) error {
+	return errors.New("mirror append failed")
+}
+
+func (failingSessionStore) Load(ctx context.Context, key types.SessionKey) (*types.SessionStoreEntry, error) {
+	return nil, nil
+}
+
 func newMockTransport() *mockTransport {
 	return &mockTransport{
 		messagesChan: make(chan types.Message, 100),
@@ -234,6 +244,33 @@ func TestRouteMessage_LogsBackpressureWhenMessagesChannelFull(t *testing.T) {
 	}
 	if !deliveredOverflow {
 		t.Fatal("overflow message was not delivered after backpressure cleared")
+	}
+}
+
+func TestRouteMessageSessionStoreAppendErrorEmitsSystemMessage(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opts := types.NewClaudeAgentOptions().
+		WithSessionStore(failingSessionStore{}).
+		WithSessionStoreKey(types.SessionKey{SessionID: "session-1", ProjectKey: "project-1"})
+	query := NewQuery(ctx, newMockTransport(), opts, log.NewLogger(false), true)
+
+	msg := &types.UserMessage{Type: "user", Content: "hello", SessionID: "session-1"}
+	if err := query.routeMessage(msg); err != nil {
+		t.Fatalf("routeMessage: %v", err)
+	}
+	first := <-query.messagesChan
+	sys, ok := first.(*types.SystemMessage)
+	if !ok {
+		t.Fatalf("first message = %T, want *types.SystemMessage", first)
+	}
+	if sys.Subtype != "session_store_error" {
+		t.Fatalf("system subtype = %q, want session_store_error", sys.Subtype)
+	}
+	second := <-query.messagesChan
+	if second != msg {
+		t.Fatalf("second message = %T, want original user message", second)
 	}
 }
 

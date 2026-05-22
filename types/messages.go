@@ -160,6 +160,7 @@ type UserMessage struct {
 	ParentToolUseID *string     `json:"parent_tool_use_id,omitempty"`
 	IsReplay        bool        `json:"isReplay,omitempty"`
 	UUID            string      `json:"uuid,omitempty"` // User message identifier for checkpoint targeting
+	SessionID       string      `json:"session_id,omitempty"`
 }
 
 // GetMessageType returns the type of the message.
@@ -246,6 +247,8 @@ type AssistantMessage struct {
 	Content         []ContentBlock `json:"content"`
 	Model           string         `json:"model"`
 	ParentToolUseID *string        `json:"parent_tool_use_id,omitempty"`
+	UUID            string         `json:"uuid,omitempty"`
+	SessionID       string         `json:"session_id,omitempty"`
 }
 
 // GetMessageType returns the type of the message.

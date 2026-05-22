@@ -110,11 +110,17 @@ func Query(ctx context.Context, prompt string, options *types.ClaudeAgentOptions
 		resumeID = *options.Resume
 	}
 
+	cleanupSessionStore, err := prepareSessionStoreRuntime(ctx, options, cwd, resumeID, env)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create subprocess transport with optional resume and options
 	transportInst := transport.NewSubprocessCLITransport(cliPath, cwd, env, logger, resumeID, options)
 
 	// Connect to CLI
 	if err := transportInst.Connect(ctx); err != nil {
+		cleanupSessionStore()
 		return nil, types.NewCLIConnectionErrorWithCause("failed to connect to Claude CLI", err)
 	}
 
@@ -124,6 +130,7 @@ func Query(ctx context.Context, prompt string, options *types.ClaudeAgentOptions
 	// Start message processing
 	if err := queryHandler.Start(ctx); err != nil {
 		_ = transportInst.Close(ctx)
+		cleanupSessionStore()
 		return nil, err
 	}
 
@@ -168,6 +175,7 @@ func Query(ctx context.Context, prompt string, options *types.ClaudeAgentOptions
 		defer func() {
 			_ = queryHandler.Stop(ctx)
 			_ = transportInst.Close(ctx)
+			cleanupSessionStore()
 		}()
 
 		messagesChan := queryHandler.GetMessages(ctx)
