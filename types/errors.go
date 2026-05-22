@@ -468,4 +468,16 @@ var (
 
 	// ErrEmptyParameter indicates a required parameter was empty.
 	ErrEmptyParameter = errors.New("required parameter is empty")
+
+	// ErrSessionHistoryUnsupported indicates the selected history backend does not support the requested operation.
+	ErrSessionHistoryUnsupported = errors.New("session history operation unsupported")
+
+	// ErrInvalidSessionID indicates a session ID is not a valid UUID.
+	ErrInvalidSessionID = errors.New("invalid session id")
+
+	// ErrSessionNotFound indicates the requested session history does not exist.
+	ErrSessionNotFound = errors.New("session not found")
+
+	// ErrMalformedTranscript indicates a Claude Code transcript could not be parsed deterministically.
+	ErrMalformedTranscript = errors.New("malformed transcript")
 )

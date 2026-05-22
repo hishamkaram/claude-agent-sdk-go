@@ -453,6 +453,10 @@ func TestSentinelErrors(t *testing.T) {
 		{"ErrNoActiveQuery", ErrNoActiveQuery, "no active query"},
 		{"ErrClientClosed", ErrClientClosed, "client is closed"},
 		{"ErrEmptyParameter", ErrEmptyParameter, "required parameter is empty"},
+		{"ErrSessionHistoryUnsupported", ErrSessionHistoryUnsupported, "session history operation unsupported"},
+		{"ErrInvalidSessionID", ErrInvalidSessionID, "invalid session id"},
+		{"ErrSessionNotFound", ErrSessionNotFound, "session not found"},
+		{"ErrMalformedTranscript", ErrMalformedTranscript, "malformed transcript"},
 	}
 
 	for _, tt := range tests {
