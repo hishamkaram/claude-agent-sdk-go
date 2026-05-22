@@ -9,6 +9,69 @@ This document explains how the Python and Go Agent SDKs differ at the architectu
 4. [Error Handling](#error-handling)
 5. [Type System](#type-system)
 6. [Memory & Performance](#memory--performance)
+7. [State Ownership](#state-ownership)
+
+---
+
+## State Ownership
+
+Claude Code owns its native transcript files under `CLAUDE_CONFIG_DIR`
+or `~/.claude/projects`. The Go SDK treats those files as provider
+state, not as business replay state.
+
+Read-only history APIs:
+
+- `ListSessions`, `GetSessionInfo`, and `GetSessionMessages` read local
+  JSONL through `LocalTranscriptBackend` by default.
+- `SessionMessage.Message` preserves the provider message JSON so
+  callers can re-parse future Claude fields without waiting for SDK
+  upgrades.
+- `SessionStoreBackend` adapts a mirrored `types.SessionStore` for
+  callers that need to read from their own state mirror instead of local
+  files.
+
+Runtime mirror APIs:
+
+- `types.SessionStore` requires `Append(ctx, key, entries)` and
+  `Load(ctx, key)`.
+- `SessionKey.ProjectKey` identifies the Claude project directory key;
+  `Dir` remains as a deprecated cwd hint for older callers.
+- When `WithSessionStore` is used with `WithResume`, the SDK loads the
+  mirror and materializes it into an isolated `CLAUDE_CONFIG_DIR` before
+  starting Claude.
+- During execution the SDK appends parsed transcript messages to the
+  store. Append failures are emitted as `system` messages with subtype
+  `session_store_error`; Claude's own local transcript durability is not
+  interrupted.
+
+Mutating session APIs:
+
+- Rename, tag, delete, and fork are not hidden CLI fallbacks. Unsupported
+  operations return typed errors that match `ErrSessionHistoryUnsupported`.
+- Store-specific optional operations are explicit extension interfaces
+  (`SessionStoreLister`, `SessionStoreSummaryLister`,
+  `SessionStoreSubkeyLister`, `SessionStoreDeleter`).
+
+Provider files touched:
+
+- Default history reads touch `CLAUDE_CONFIG_DIR/projects` or
+  `~/.claude/projects`.
+- `WithSessionStore` resume hydration writes only a temporary isolated
+  `CLAUDE_CONFIG_DIR`, removed on close.
+
+APIs that can consume model turns:
+
+- `Query`, `Client.Query`, and `Client.QueryWithContent` start model
+  work.
+- History APIs and `SessionStore` load/list calls do not execute
+  `claude`.
+
+Drift guard:
+
+- Fixture-based JSONL tests cover parent chains, compaction, malformed
+  JSONL, path confinement, and raw provider-message preservation.
+  Manual probes should capture fresh Claude transcript JSONL and add the
+  minimal new shape as a fixture when upstream fields change.
 
 ---
 

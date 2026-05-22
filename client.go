@@ -84,6 +84,8 @@ type Client struct {
 	initResult   *types.InitializeResult // Parsed initialization response.
 
 	recvWg sync.WaitGroup // tracks in-flight ReceiveResponse goroutines
+
+	sessionStoreCleanup func()
 }
 
 // NewClient creates a new interactive client with the given options.
@@ -152,16 +154,23 @@ func NewClient(ctx context.Context, options *types.ClaudeAgentOptions) (*Client,
 		resumeID = *options.Resume
 	}
 
+	cleanupSessionStore, err := prepareSessionStoreRuntime(ctx, options, cwd, resumeID, env)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+
 	// Create subprocess transport with optional resume and options
 	transportInst := transport.NewSubprocessCLITransport(cliPath, cwd, env, logger, resumeID, options)
 
 	return &Client{
-		options:   options,
-		transport: transportInst,
-		logger:    logger,
-		connected: false,
-		ctx:       clientCtx,
-		cancel:    cancel,
+		options:             options,
+		transport:           transportInst,
+		logger:              logger,
+		connected:           false,
+		ctx:                 clientCtx,
+		cancel:              cancel,
+		sessionStoreCleanup: cleanupSessionStore,
 	}, nil
 }
 
@@ -201,11 +210,15 @@ func (c *Client) Connect(ctx context.Context) error {
 	c.mu.Unlock()
 
 	// Ensure the connecting and closePending flags are cleared on any exit path.
+	connectSucceeded := false
 	defer func() {
 		c.mu.Lock()
 		c.connecting = false
 		c.closePending = false
 		c.mu.Unlock()
+		if !connectSucceeded {
+			c.cleanupSessionStoreRuntime()
+		}
 	}()
 
 	c.logger.Info("Connecting to Claude CLI...")
@@ -277,6 +290,7 @@ func (c *Client) Connect(ctx context.Context) error {
 	c.mu.Unlock()
 
 	c.logger.Info("Successfully connected to Claude")
+	connectSucceeded = true
 	return nil
 }
 
@@ -522,6 +536,7 @@ func (c *Client) Close(ctx context.Context) error {
 			return nil
 		}
 		c.mu.Unlock()
+		c.cleanupSessionStoreRuntime()
 		return nil
 	}
 
@@ -576,6 +591,7 @@ func (c *Client) Close(ctx context.Context) error {
 	}
 
 	c.logger.Debug("Connection closed")
+	c.cleanupSessionStoreRuntime()
 
 	// Return first error if any
 	if len(errs) > 0 {
@@ -583,6 +599,16 @@ func (c *Client) Close(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (c *Client) cleanupSessionStoreRuntime() {
+	c.mu.Lock()
+	cleanup := c.sessionStoreCleanup
+	c.sessionStoreCleanup = nil
+	c.mu.Unlock()
+	if cleanup != nil {
+		cleanup()
+	}
 }
 
 // IsConnected returns true if the client is currently connected to Claude.

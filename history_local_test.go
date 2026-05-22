@@ -96,6 +96,38 @@ func TestLocalTranscriptBackendTypedErrors(t *testing.T) {
 	}
 }
 
+func TestLocalTranscriptBackendSubagentMessages(t *testing.T) {
+	t.Parallel()
+	cwd := t.TempDir()
+	backend, parentPath := writeTranscriptFixture(t, cwd, fixtureSessionID, `{"type":"user","uuid":"`+fixtureUser1+`","sessionId":"`+fixtureSessionID+`","cwd":"`+cwd+`","message":{"role":"user","content":"parent"}}`)
+	projectDir := filepath.Dir(parentPath)
+	subPath := filepath.Join(projectDir, "subagents", "worker.jsonl")
+	if err := os.MkdirAll(filepath.Dir(subPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll subagent: %v", err)
+	}
+	if err := os.WriteFile(subPath, []byte(strings.Join([]string{
+		`{"type":"user","uuid":"` + fixtureUser1 + `","sessionId":"` + fixtureSessionID + `","message":{"role":"user","content":"sub prompt"}}`,
+		`{"type":"assistant","uuid":"` + fixtureAsst1 + `","parentUuid":"` + fixtureUser1 + `","sessionId":"` + fixtureSessionID + `","message":{"role":"assistant","content":[{"type":"text","text":"sub answer"}]}}`,
+	}, "\n")+"\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile subagent: %v", err)
+	}
+
+	agents, err := backend.ListSubagents(context.Background(), fixtureSessionID, &types.ListSubagentsOptions{Dir: cwd})
+	if err != nil {
+		t.Fatalf("ListSubagents: %v", err)
+	}
+	if len(agents) != 1 || agents[0].ID != "subagents/worker" || agents[0].ParentSessionID != fixtureSessionID {
+		t.Fatalf("subagents = %+v", agents)
+	}
+	messages, err := backend.GetSubagentMessages(context.Background(), fixtureSessionID, "subagents/worker", &types.GetSubagentMessagesOptions{Dir: cwd})
+	if err != nil {
+		t.Fatalf("GetSubagentMessages: %v", err)
+	}
+	if len(messages) != 2 || messages[1].UUID != fixtureAsst1 {
+		t.Fatalf("subagent messages = %+v", messages)
+	}
+}
+
 func TestLocalTranscriptBackendMalformedJSONL(t *testing.T) {
 	t.Parallel()
 	cwd := t.TempDir()

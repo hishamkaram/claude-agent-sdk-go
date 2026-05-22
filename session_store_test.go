@@ -2,7 +2,10 @@ package claude
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
@@ -13,6 +16,14 @@ type fakeSessionStore struct {
 	list      []SessionStoreListEntry
 	summaries []SessionSummaryEntry
 	loadKey   SessionKey
+	appendKey SessionKey
+	appended  []types.SessionMessage
+}
+
+func (s *fakeSessionStore) Append(ctx context.Context, key SessionKey, entries []types.SessionMessage) error {
+	s.appendKey = key
+	s.appended = append(s.appended, entries...)
+	return nil
 }
 
 func (s *fakeSessionStore) Load(ctx context.Context, key SessionKey) (*SessionStoreEntry, error) {
@@ -103,5 +114,51 @@ func TestSessionStoreBackendUnsupportedAndMissing(t *testing.T) {
 	}
 	if _, err := NewSessionStoreBackend(nil); err == nil {
 		t.Fatal("NewSessionStoreBackend(nil) error = nil, want error")
+	}
+}
+
+func TestPrepareSessionStoreRuntimeMaterializesIsolatedConfigDir(t *testing.T) {
+	t.Parallel()
+	cwd := t.TempDir()
+	projectKey, err := ClaudeProjectKey(cwd)
+	if err != nil {
+		t.Fatalf("ClaudeProjectKey: %v", err)
+	}
+	store := &fakeSessionStore{entry: &SessionStoreEntry{
+		SessionID: fixtureSessionID,
+		Messages: []types.SessionMessage{{
+			Type:      "user",
+			UUID:      fixtureUser1,
+			SessionID: fixtureSessionID,
+			Message:   []byte(`{"role":"user","content":"hello"}`),
+		}},
+	}}
+	opts := types.NewClaudeAgentOptions().
+		WithResume(fixtureSessionID).
+		WithSessionStore(store)
+	env := map[string]string{}
+	cleanup, err := prepareSessionStoreRuntime(context.Background(), opts, cwd, fixtureSessionID, env)
+	if err != nil {
+		t.Fatalf("prepareSessionStoreRuntime: %v", err)
+	}
+	defer cleanup()
+	if store.loadKey.ProjectKey != projectKey || store.loadKey.SessionID != fixtureSessionID {
+		t.Fatalf("load key = %+v, want projectKey=%q sessionID=%q", store.loadKey, projectKey, fixtureSessionID)
+	}
+	configDir := env["CLAUDE_CONFIG_DIR"]
+	if configDir == "" {
+		t.Fatal("CLAUDE_CONFIG_DIR not set")
+	}
+	transcriptPath := filepath.Join(configDir, "projects", projectKey, fixtureSessionID+".jsonl")
+	data, err := os.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatalf("read materialized transcript: %v", err)
+	}
+	line := data
+	if len(line) > 0 && line[len(line)-1] == '\n' {
+		line = line[:len(line)-1]
+	}
+	if !json.Valid(line) {
+		t.Fatalf("materialized transcript line is not JSON: %s", data)
 	}
 }

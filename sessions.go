@@ -134,7 +134,11 @@ func GetSubagentMessages(ctx context.Context, subagentID string, opts *types.Get
 	if subagentID == "" {
 		return nil, fmt.Errorf("GetSubagentMessages: subagentID: %w", types.ErrEmptyParameter)
 	}
-	messages, err := selectedHistoryBackend().GetSubagentMessages(ctx, "", subagentID, opts)
+	sessionID := ""
+	if opts != nil {
+		sessionID = opts.ParentSessionID
+	}
+	messages, err := selectedHistoryBackend().GetSubagentMessages(ctx, sessionID, subagentID, opts)
 	if err != nil {
 		return nil, fmt.Errorf("GetSubagentMessages: %w", err)
 	}

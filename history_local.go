@@ -129,17 +129,103 @@ func (b *LocalTranscriptBackend) ListSubagents(ctx context.Context, sessionID st
 	if !isValidUUID(sessionID) {
 		return nil, types.ErrInvalidSessionID
 	}
-	return nil, types.ErrSessionHistoryUnsupported
+	parentPath, err := b.findSessionTranscript(ctx, sessionID, listSubagentsDir(opts))
+	if err != nil {
+		return nil, err
+	}
+	projectDir := filepath.Dir(parentPath)
+	var out []types.SubagentInfo
+	err = filepath.WalkDir(projectDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if d.IsDir() || path == parentPath || filepath.Ext(path) != ".jsonl" {
+			return nil
+		}
+		rel, err := filepath.Rel(projectDir, path)
+		if err != nil {
+			return err
+		}
+		if rel == filepath.Base(rel) {
+			return nil
+		}
+		id := strings.TrimSuffix(filepath.ToSlash(rel), ".jsonl")
+		out = append(out, types.SubagentInfo{
+			ID:              id,
+			Name:            filepath.Base(id),
+			ParentSessionID: sessionID,
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return applySubagentWindow(out, listSubagentsOffset(opts), listSubagentsLimit(opts)), nil
 }
 
 func (b *LocalTranscriptBackend) GetSubagentMessages(ctx context.Context, sessionID string, subagentID string, opts *types.GetSubagentMessagesOptions) ([]types.SessionMessage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if subagentID == "" || strings.ContainsAny(subagentID, `/\`) || strings.Contains(subagentID, "..") {
+	if sessionID == "" {
+		sessionID = getSubagentMessagesParentSessionID(opts)
+	}
+	if !isValidUUID(sessionID) {
 		return nil, types.ErrInvalidSessionID
 	}
-	return nil, types.ErrSessionHistoryUnsupported
+	if !isValidSubagentSubpath(subagentID) {
+		return nil, types.ErrInvalidSessionID
+	}
+	parentPath, err := b.findSessionTranscript(ctx, sessionID, getSubagentMessagesDir(opts))
+	if err != nil {
+		return nil, err
+	}
+	projectDir := filepath.Dir(parentPath)
+	path := filepath.Join(projectDir, filepath.FromSlash(subagentID)+".jsonl")
+	if err := ensurePathUnder(projectDir, path); err != nil {
+		return nil, err
+	}
+	entries, err := b.readTranscriptEntries(ctx, path, sessionID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, types.ErrSessionNotFound
+		}
+		return nil, err
+	}
+	chain, err := buildParentChain(entries)
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]types.SessionMessage, 0, len(chain))
+	for _, entry := range chain {
+		messages = append(messages, types.SessionMessage{
+			Type:      entry.Type,
+			UUID:      entry.UUID,
+			SessionID: sessionID,
+			Message:   cloneRaw(entry.Message),
+		})
+	}
+	return applyMessageWindow(messages, getSubagentMessagesOffset(opts), getSubagentMessagesLimit(opts)), nil
+}
+
+func isValidSubagentSubpath(value string) bool {
+	if value == "" || strings.Contains(value, `\`) || strings.HasPrefix(value, "/") {
+		return false
+	}
+	clean := filepath.Clean(filepath.FromSlash(value))
+	if clean == "." || clean != filepath.FromSlash(value) {
+		return false
+	}
+	for _, part := range strings.Split(filepath.ToSlash(clean), "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 // ClaudeProjectKey returns the Claude Code projects-directory key for cwd.
@@ -586,6 +672,20 @@ func applyMessageWindow(values []types.SessionMessage, offset, limit int) []type
 	return values
 }
 
+func applySubagentWindow(values []types.SubagentInfo, offset, limit int) []types.SubagentInfo {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(values) {
+		return []types.SubagentInfo{}
+	}
+	values = values[offset:]
+	if limit > 0 && limit < len(values) {
+		values = values[:limit]
+	}
+	return values
+}
+
 func listSessionsDir(opts *types.ListSessionsOptions) string {
 	if opts == nil {
 		return ""
@@ -629,6 +729,55 @@ func getSessionMessagesLimit(opts *types.GetSessionMessagesOptions) int {
 }
 
 func getSessionMessagesOffset(opts *types.GetSessionMessagesOptions) int {
+	if opts == nil {
+		return 0
+	}
+	return opts.Offset
+}
+
+func listSubagentsDir(opts *types.ListSubagentsOptions) string {
+	if opts == nil {
+		return ""
+	}
+	return opts.Dir
+}
+
+func listSubagentsLimit(opts *types.ListSubagentsOptions) int {
+	if opts == nil {
+		return 0
+	}
+	return opts.Limit
+}
+
+func listSubagentsOffset(opts *types.ListSubagentsOptions) int {
+	if opts == nil {
+		return 0
+	}
+	return opts.Offset
+}
+
+func getSubagentMessagesDir(opts *types.GetSubagentMessagesOptions) string {
+	if opts == nil {
+		return ""
+	}
+	return opts.Dir
+}
+
+func getSubagentMessagesParentSessionID(opts *types.GetSubagentMessagesOptions) string {
+	if opts == nil {
+		return ""
+	}
+	return opts.ParentSessionID
+}
+
+func getSubagentMessagesLimit(opts *types.GetSubagentMessagesOptions) int {
+	if opts == nil {
+		return 0
+	}
+	return opts.Limit
+}
+
+func getSubagentMessagesOffset(opts *types.GetSubagentMessagesOptions) int {
 	if opts == nil {
 		return 0
 	}

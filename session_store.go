@@ -7,65 +7,16 @@ import (
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
-// SessionKey identifies one mirrored session in a SessionStore.
-type SessionKey struct {
-	SessionID string `json:"sessionId"`
-	Dir       string `json:"dir,omitempty"`
-}
-
-// SessionStoreEntry is the full mirrored transcript entry for one session.
-type SessionStoreEntry struct {
-	Key          SessionKey             `json:"key"`
-	SessionID    string                 `json:"sessionId,omitempty"`
-	Summary      string                 `json:"summary,omitempty"`
-	LastModified int64                  `json:"lastModified,omitempty"`
-	FileSize     int64                  `json:"fileSize,omitempty"`
-	CustomTitle  string                 `json:"customTitle,omitempty"`
-	FirstPrompt  string                 `json:"firstPrompt,omitempty"`
-	GitBranch    string                 `json:"gitBranch,omitempty"`
-	CWD          string                 `json:"cwd,omitempty"`
-	Tag          string                 `json:"tag,omitempty"`
-	CreatedAt    int64                  `json:"createdAt,omitempty"`
-	Messages     []types.SessionMessage `json:"messages,omitempty"`
-}
-
-// SessionStoreListEntry is a list-optimized mirrored session entry.
-type SessionStoreListEntry struct {
-	SessionID    string `json:"sessionId"`
-	Summary      string `json:"summary,omitempty"`
-	LastModified int64  `json:"lastModified,omitempty"`
-	FileSize     int64  `json:"fileSize,omitempty"`
-	CustomTitle  string `json:"customTitle,omitempty"`
-	FirstPrompt  string `json:"firstPrompt,omitempty"`
-	GitBranch    string `json:"gitBranch,omitempty"`
-	CWD          string `json:"cwd,omitempty"`
-	Tag          string `json:"tag,omitempty"`
-	CreatedAt    int64  `json:"createdAt,omitempty"`
-}
-
-// SessionSummaryEntry is a summary-only mirrored session entry.
-type SessionSummaryEntry struct {
-	SessionID    string `json:"sessionId"`
-	Summary      string `json:"summary,omitempty"`
-	LastModified int64  `json:"lastModified,omitempty"`
-	CWD          string `json:"cwd,omitempty"`
-	CreatedAt    int64  `json:"createdAt,omitempty"`
-}
-
-// SessionStore loads mirrored session transcripts.
-type SessionStore interface {
-	Load(ctx context.Context, key SessionKey) (*SessionStoreEntry, error)
-}
-
-// SessionStoreLister is implemented by stores that can list full session metadata efficiently.
-type SessionStoreLister interface {
-	ListSessions(ctx context.Context, opts *types.ListSessionsOptions) ([]SessionStoreListEntry, error)
-}
-
-// SessionStoreSummaryLister is implemented by stores that can list session summaries efficiently.
-type SessionStoreSummaryLister interface {
-	ListSessionSummaries(ctx context.Context, opts *types.ListSessionsOptions) ([]SessionSummaryEntry, error)
-}
+type SessionKey = types.SessionKey
+type SessionStoreEntry = types.SessionStoreEntry
+type SessionStoreListEntry = types.SessionStoreListEntry
+type SessionSummaryEntry = types.SessionSummaryEntry
+type SessionStore = types.SessionStore
+type SessionStoreLister = types.SessionStoreLister
+type SessionStoreSummaryLister = types.SessionStoreSummaryLister
+type SessionStoreSubkeyLister = types.SessionStoreSubkeyLister
+type SessionStoreDeleter = types.SessionStoreDeleter
+type UnsupportedSessionStoreOperationError = types.UnsupportedSessionStoreOperationError
 
 // SessionStoreBackend adapts an official-style SessionStore to HistoryBackend.
 type SessionStoreBackend struct {
@@ -87,7 +38,7 @@ func (b *SessionStoreBackend) ListSessions(ctx context.Context, opts *types.List
 		return nil, err
 	}
 	if b == nil || b.Store == nil {
-		return nil, types.ErrSessionHistoryUnsupported
+		return nil, types.NewUnsupportedSessionStoreOperationError("ListSessions")
 	}
 	if lister, ok := b.Store.(SessionStoreLister); ok {
 		entries, err := lister.ListSessions(ctx, opts)
@@ -133,7 +84,7 @@ func (b *SessionStoreBackend) GetSessionInfo(ctx context.Context, sessionID stri
 	if !isValidUUID(sessionID) {
 		return nil, types.ErrInvalidSessionID
 	}
-	entry, err := b.load(ctx, SessionKey{SessionID: sessionID, Dir: getSessionInfoDir(opts)})
+	entry, err := b.load(ctx, sessionStoreKeyFromDir(sessionID, getSessionInfoDir(opts), ""))
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +99,7 @@ func (b *SessionStoreBackend) GetSessionMessages(ctx context.Context, sessionID 
 	if !isValidUUID(sessionID) {
 		return nil, types.ErrInvalidSessionID
 	}
-	entry, err := b.load(ctx, SessionKey{SessionID: sessionID, Dir: getSessionMessagesDir(opts)})
+	entry, err := b.load(ctx, sessionStoreKeyFromDir(sessionID, getSessionMessagesDir(opts), ""))
 	if err != nil {
 		return nil, err
 	}
@@ -164,14 +115,41 @@ func (b *SessionStoreBackend) ListSubagents(ctx context.Context, sessionID strin
 	if !isValidUUID(sessionID) {
 		return nil, types.ErrInvalidSessionID
 	}
-	return nil, types.ErrSessionHistoryUnsupported
+	if lister, ok := b.Store.(SessionStoreSubkeyLister); ok {
+		keys, err := lister.ListSubkeys(ctx, sessionStoreKeyFromDir(sessionID, listSubagentsDir(opts), ""))
+		if err != nil {
+			return nil, err
+		}
+		out := make([]types.SubagentInfo, 0, len(keys))
+		for _, key := range keys {
+			if key.Subpath == "" {
+				continue
+			}
+			out = append(out, types.SubagentInfo{
+				ID:              key.Subpath,
+				Name:            key.Subpath,
+				ParentSessionID: sessionID,
+			})
+		}
+		return out, nil
+	}
+	return nil, types.NewUnsupportedSessionStoreOperationError("ListSubagents")
 }
 
 func (b *SessionStoreBackend) GetSubagentMessages(ctx context.Context, sessionID string, subagentID string, opts *types.GetSubagentMessagesOptions) ([]types.SessionMessage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return nil, types.ErrSessionHistoryUnsupported
+	if subagentID == "" {
+		return nil, types.ErrInvalidSessionID
+	}
+	entry, err := b.load(ctx, sessionStoreKeyFromDir(sessionID, getSubagentMessagesDir(opts), subagentID))
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]types.SessionMessage, len(entry.Messages))
+	copy(messages, entry.Messages)
+	return applyMessageWindow(messages, getSubagentMessagesOffset(opts), getSubagentMessagesLimit(opts)), nil
 }
 
 func (b *SessionStoreBackend) load(ctx context.Context, key SessionKey) (*SessionStoreEntry, error) {
@@ -195,6 +173,16 @@ func (b *SessionStoreBackend) load(ctx context.Context, key SessionKey) (*Sessio
 		return nil, types.ErrInvalidSessionID
 	}
 	return entry, nil
+}
+
+func sessionStoreKeyFromDir(sessionID, dir, subpath string) SessionKey {
+	key := SessionKey{SessionID: sessionID, Dir: dir, Subpath: subpath}
+	if dir != "" {
+		if projectKey, err := ClaudeProjectKey(dir); err == nil {
+			key.ProjectKey = projectKey
+		}
+	}
+	return key
 }
 
 func sessionStoreEntryInfo(entry SessionStoreEntry) types.SDKSessionInfo {

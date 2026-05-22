@@ -508,6 +508,15 @@ type ClaudeAgentOptions struct {
 	// - &"path": Use custom path
 	// For runtime control, use the Stderr callback instead
 	StderrLogFile *string `json:"-"`
+
+	// SessionStore mirrors Claude Code transcript entries for SDK-managed
+	// runtimes. Resume loads are materialized into an isolated
+	// CLAUDE_CONFIG_DIR; runtime mirror failures are surfaced as system
+	// messages and do not interrupt Claude's local transcript durability.
+	SessionStore SessionStore `json:"-"`
+
+	// SessionStoreKey overrides the default key derived from CWD + Resume.
+	SessionStoreKey *SessionKey `json:"-"`
 }
 
 // NewClaudeAgentOptions creates a new ClaudeAgentOptions with sensible defaults.
@@ -582,6 +591,19 @@ func (o *ClaudeAgentOptions) WithContinueConversation(continue_ bool) *ClaudeAge
 // WithResume sets the session ID to resume.
 func (o *ClaudeAgentOptions) WithResume(sessionID string) *ClaudeAgentOptions {
 	o.Resume = &sessionID
+	return o
+}
+
+// WithSessionStore sets the mirrored SessionStore used for resume hydration
+// and runtime transcript appends.
+func (o *ClaudeAgentOptions) WithSessionStore(store SessionStore) *ClaudeAgentOptions {
+	o.SessionStore = store
+	return o
+}
+
+// WithSessionStoreKey overrides the key used with WithSessionStore.
+func (o *ClaudeAgentOptions) WithSessionStoreKey(key SessionKey) *ClaudeAgentOptions {
+	o.SessionStoreKey = &key
 	return o
 }
 
