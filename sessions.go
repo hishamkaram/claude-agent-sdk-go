@@ -2,315 +2,141 @@ package claude
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os/exec"
-	"strconv"
+	"sync"
 
-	"github.com/hishamkaram/claude-agent-sdk-go/internal/transport"
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
-// ListSessions lists all Claude Code sessions, optionally filtered by project directory.
-// This spawns a standalone CLI process and does not require an active Client connection.
+// HistoryBackend reads Claude Code session history without starting Claude Code.
+type HistoryBackend interface {
+	ListSessions(ctx context.Context, opts *types.ListSessionsOptions) ([]types.SDKSessionInfo, error)
+	GetSessionInfo(ctx context.Context, sessionID string, opts *types.GetSessionInfoOptions) (*types.SDKSessionInfo, error)
+	GetSessionMessages(ctx context.Context, sessionID string, opts *types.GetSessionMessagesOptions) ([]types.SessionMessage, error)
+	ListSubagents(ctx context.Context, sessionID string, opts *types.ListSubagentsOptions) ([]types.SubagentInfo, error)
+	GetSubagentMessages(ctx context.Context, sessionID string, subagentID string, opts *types.GetSubagentMessagesOptions) ([]types.SessionMessage, error)
+}
+
+var (
+	historyBackendMu sync.RWMutex
+	historyBackend   HistoryBackend = NewLocalTranscriptBackend()
+)
+
+// SetHistoryBackend replaces the package-level history backend and returns a restore function.
+// Passing nil resets the backend to the read-only local transcript backend.
+func SetHistoryBackend(backend HistoryBackend) func() {
+	historyBackendMu.Lock()
+	previous := historyBackend
+	if backend == nil {
+		historyBackend = NewLocalTranscriptBackend()
+	} else {
+		historyBackend = backend
+	}
+	historyBackendMu.Unlock()
+
+	return func() {
+		historyBackendMu.Lock()
+		historyBackend = previous
+		historyBackendMu.Unlock()
+	}
+}
+
+func selectedHistoryBackend() HistoryBackend {
+	historyBackendMu.RLock()
+	backend := historyBackend
+	historyBackendMu.RUnlock()
+	if backend == nil {
+		return NewLocalTranscriptBackend()
+	}
+	return backend
+}
+
+// ListSessions lists Claude Code sessions from read-only transcript storage.
 func ListSessions(ctx context.Context, opts *types.ListSessionsOptions) ([]types.SDKSessionInfo, error) {
-	cliPath, err := transport.FindCLI()
+	sessions, err := selectedHistoryBackend().ListSessions(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("ListSessions: %w", err)
 	}
-
-	args := []string{"sessions", "list", "--output-format", "json"}
-	if opts != nil {
-		if opts.Dir != "" {
-			args = append(args, "--dir", opts.Dir)
-		}
-		if opts.Limit > 0 {
-			args = append(args, "--limit", strconv.Itoa(opts.Limit))
-		}
-		if opts.Offset > 0 {
-			args = append(args, "--offset", strconv.Itoa(opts.Offset))
-		}
-		if opts.IncludeWorktrees {
-			args = append(args, "--include-worktrees")
-		}
-	}
-
-	cmd := exec.CommandContext(ctx, cliPath, args...)
-	output, err := cmd.Output()
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("ListSessions: %w", ctx.Err())
-		}
-		return nil, fmt.Errorf("ListSessions: CLI command failed: %w", err)
-	}
-
-	var sessions []types.SDKSessionInfo
-	if err := json.Unmarshal(output, &sessions); err != nil {
-		return nil, fmt.Errorf("ListSessions: failed to parse CLI output: %w", err)
-	}
-
 	return sessions, nil
 }
 
-// GetSessionMessages retrieves the message history for a specific session.
-// This spawns a standalone CLI process and does not require an active Client connection.
+// GetSessionMessages retrieves message history for a specific session from read-only transcript storage.
 func GetSessionMessages(ctx context.Context, sessionID string, opts *types.GetSessionMessagesOptions) ([]types.SessionMessage, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("GetSessionMessages: sessionID: %w", types.ErrEmptyParameter)
 	}
-
-	cliPath, err := transport.FindCLI()
+	messages, err := selectedHistoryBackend().GetSessionMessages(ctx, sessionID, opts)
 	if err != nil {
 		return nil, fmt.Errorf("GetSessionMessages: %w", err)
 	}
-
-	args := []string{"sessions", "messages", sessionID, "--output-format", "json"}
-	if opts != nil {
-		if opts.Dir != "" {
-			args = append(args, "--dir", opts.Dir)
-		}
-		if opts.Limit > 0 {
-			args = append(args, "--limit", strconv.Itoa(opts.Limit))
-		}
-		if opts.Offset > 0 {
-			args = append(args, "--offset", strconv.Itoa(opts.Offset))
-		}
-		if opts.IncludeSystemMessages {
-			args = append(args, "--include-system-messages")
-		}
-	}
-
-	cmd := exec.CommandContext(ctx, cliPath, args...)
-	output, err := cmd.Output()
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("GetSessionMessages: %w", ctx.Err())
-		}
-		return nil, fmt.Errorf("GetSessionMessages: CLI command failed: %w", err)
-	}
-
-	var messages []types.SessionMessage
-	if err := json.Unmarshal(output, &messages); err != nil {
-		return nil, fmt.Errorf("GetSessionMessages: failed to parse CLI output: %w", err)
-	}
-
 	return messages, nil
 }
 
-// GetSessionInfo retrieves metadata for a specific session.
-// This spawns a standalone CLI process and does not require an active Client connection.
-// Wraps: claude sessions info <sessionID> --output-format json
+// GetSessionInfo retrieves metadata for a specific session from read-only transcript storage.
 func GetSessionInfo(ctx context.Context, sessionID string, opts *types.GetSessionInfoOptions) (*types.SDKSessionInfo, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("GetSessionInfo: sessionID: %w", types.ErrEmptyParameter)
 	}
-
-	cliPath, err := transport.FindCLI()
+	info, err := selectedHistoryBackend().GetSessionInfo(ctx, sessionID, opts)
 	if err != nil {
 		return nil, fmt.Errorf("GetSessionInfo: %w", err)
 	}
-
-	args := []string{"sessions", "info", sessionID, "--output-format", "json"}
-	if opts != nil && opts.Dir != "" {
-		args = append(args, "--dir", opts.Dir)
-	}
-
-	cmd := exec.CommandContext(ctx, cliPath, args...)
-	output, err := cmd.Output()
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("GetSessionInfo: %w", ctx.Err())
-		}
-		return nil, fmt.Errorf("GetSessionInfo: CLI command failed: %w", err)
-	}
-
-	var info types.SDKSessionInfo
-	if err := json.Unmarshal(output, &info); err != nil {
-		return nil, fmt.Errorf("GetSessionInfo: failed to parse CLI output: %w", err)
-	}
-
-	return &info, nil
+	return info, nil
 }
 
-// RenameSession sets a custom title for a session.
-// This spawns a standalone CLI process and does not require an active Client connection.
-// Wraps: claude sessions rename <sessionID> <title>
+// RenameSession is unsupported by the read-only history backend.
 func RenameSession(ctx context.Context, sessionID string, title string, opts *types.RenameSessionOptions) error {
 	if sessionID == "" {
 		return fmt.Errorf("RenameSession: sessionID: %w", types.ErrEmptyParameter)
 	}
-
-	cliPath, err := transport.FindCLI()
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("RenameSession: %w", err)
 	}
-
-	args := []string{"sessions", "rename", sessionID, title}
-	if opts != nil && opts.Dir != "" {
-		args = append(args, "--dir", opts.Dir)
-	}
-
-	cmd := exec.CommandContext(ctx, cliPath, args...)
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return fmt.Errorf("RenameSession: %w", ctx.Err())
-		}
-		return fmt.Errorf("RenameSession: CLI command failed: %w", err)
-	}
-
-	return nil
+	return fmt.Errorf("RenameSession: %w", types.ErrSessionHistoryUnsupported)
 }
 
-// TagSession applies or clears a tag on a session.
-// This spawns a standalone CLI process and does not require an active Client connection.
-// Pass an empty string for tag to clear the existing tag.
-// Wraps: claude sessions tag <sessionID> [<tag>]
+// TagSession is unsupported by the read-only history backend.
 func TagSession(ctx context.Context, sessionID string, tag string, opts *types.TagSessionOptions) error {
 	if sessionID == "" {
 		return fmt.Errorf("TagSession: sessionID: %w", types.ErrEmptyParameter)
 	}
-
-	cliPath, err := transport.FindCLI()
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("TagSession: %w", err)
 	}
-
-	args := []string{"sessions", "tag", sessionID}
-	if tag != "" {
-		args = append(args, tag)
-	}
-	if opts != nil && opts.Dir != "" {
-		args = append(args, "--dir", opts.Dir)
-	}
-
-	cmd := exec.CommandContext(ctx, cliPath, args...)
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return fmt.Errorf("TagSession: %w", ctx.Err())
-		}
-		return fmt.Errorf("TagSession: CLI command failed: %w", err)
-	}
-
-	return nil
+	return fmt.Errorf("TagSession: %w", types.ErrSessionHistoryUnsupported)
 }
 
-// ForkSession creates a copy of an existing session.
-// This spawns a standalone CLI process and does not require an active Client connection.
-// Wraps: claude sessions fork <sessionID> --output-format json
+// ForkSession is unsupported by the read-only history backend.
 func ForkSession(ctx context.Context, sessionID string, opts *types.ForkSessionOptions) (*types.ForkSessionResult, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("ForkSession: sessionID: %w", types.ErrEmptyParameter)
 	}
-
-	cliPath, err := transport.FindCLI()
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("ForkSession: %w", err)
 	}
-
-	args := []string{"sessions", "fork", sessionID, "--output-format", "json"}
-	if opts != nil && opts.Dir != "" {
-		args = append(args, "--dir", opts.Dir)
-	}
-
-	cmd := exec.CommandContext(ctx, cliPath, args...)
-	output, err := cmd.Output()
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("ForkSession: %w", ctx.Err())
-		}
-		return nil, fmt.Errorf("ForkSession: CLI command failed: %w", err)
-	}
-
-	var result types.ForkSessionResult
-	if err := json.Unmarshal(output, &result); err != nil {
-		return nil, fmt.Errorf("ForkSession: failed to parse CLI output: %w", err)
-	}
-
-	return &result, nil
+	return nil, fmt.Errorf("ForkSession: %w", types.ErrSessionHistoryUnsupported)
 }
 
-// ListSubagents lists subagent processes within a session.
-// This spawns a standalone CLI process and does not require an active Client connection.
-// Wraps: claude sessions subagents <sessionID> --output-format json
+// ListSubagents lists subagents if the selected read-only backend supports subagent history.
 func ListSubagents(ctx context.Context, sessionID string, opts *types.ListSubagentsOptions) ([]types.SubagentInfo, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("ListSubagents: sessionID: %w", types.ErrEmptyParameter)
 	}
-
-	cliPath, err := transport.FindCLI()
+	agents, err := selectedHistoryBackend().ListSubagents(ctx, sessionID, opts)
 	if err != nil {
 		return nil, fmt.Errorf("ListSubagents: %w", err)
 	}
-
-	args := []string{"sessions", "subagents", sessionID, "--output-format", "json"}
-	if opts != nil {
-		if opts.Dir != "" {
-			args = append(args, "--dir", opts.Dir)
-		}
-		if opts.Limit > 0 {
-			args = append(args, "--limit", strconv.Itoa(opts.Limit))
-		}
-		if opts.Offset > 0 {
-			args = append(args, "--offset", strconv.Itoa(opts.Offset))
-		}
-	}
-
-	cmd := exec.CommandContext(ctx, cliPath, args...)
-	output, err := cmd.Output()
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("ListSubagents: %w", ctx.Err())
-		}
-		return nil, fmt.Errorf("ListSubagents: CLI command failed: %w", err)
-	}
-
-	var agents []types.SubagentInfo
-	if err := json.Unmarshal(output, &agents); err != nil {
-		return nil, fmt.Errorf("ListSubagents: failed to parse CLI output: %w", err)
-	}
-
 	return agents, nil
 }
 
-// GetSubagentMessages retrieves the message history for a specific subagent.
-// This spawns a standalone CLI process and does not require an active Client connection.
-// Wraps: claude sessions subagent-messages <subagentID> --output-format json
+// GetSubagentMessages retrieves subagent messages if the selected read-only backend supports them.
 func GetSubagentMessages(ctx context.Context, subagentID string, opts *types.GetSubagentMessagesOptions) ([]types.SessionMessage, error) {
 	if subagentID == "" {
 		return nil, fmt.Errorf("GetSubagentMessages: subagentID: %w", types.ErrEmptyParameter)
 	}
-
-	cliPath, err := transport.FindCLI()
+	messages, err := selectedHistoryBackend().GetSubagentMessages(ctx, "", subagentID, opts)
 	if err != nil {
 		return nil, fmt.Errorf("GetSubagentMessages: %w", err)
 	}
-
-	args := []string{"sessions", "subagent-messages", subagentID, "--output-format", "json"}
-	if opts != nil {
-		if opts.Dir != "" {
-			args = append(args, "--dir", opts.Dir)
-		}
-		if opts.Limit > 0 {
-			args = append(args, "--limit", strconv.Itoa(opts.Limit))
-		}
-		if opts.Offset > 0 {
-			args = append(args, "--offset", strconv.Itoa(opts.Offset))
-		}
-	}
-
-	cmd := exec.CommandContext(ctx, cliPath, args...)
-	output, err := cmd.Output()
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("GetSubagentMessages: %w", ctx.Err())
-		}
-		return nil, fmt.Errorf("GetSubagentMessages: CLI command failed: %w", err)
-	}
-
-	var messages []types.SessionMessage
-	if err := json.Unmarshal(output, &messages); err != nil {
-		return nil, fmt.Errorf("GetSubagentMessages: failed to parse CLI output: %w", err)
-	}
-
 	return messages, nil
 }

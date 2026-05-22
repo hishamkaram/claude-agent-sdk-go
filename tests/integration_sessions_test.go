@@ -1,10 +1,10 @@
 //go:build integration
 // +build integration
 
-// Real-CLI coverage for the sessions.go public API. These tests enumerate
-// session state on disk and exercise the rename/tag/fork/list-subagents
-// flow. They do NOT burn model tokens — every call is a CLI subprocess
-// invocation over structured arguments.
+// Read-only transcript coverage for the sessions.go public API. These tests
+// enumerate session state on disk without invoking Claude Code or burning model
+// tokens. Mutating operations are expected to be unsupported by the default
+// history backend.
 //
 // Functions covered (sessions.go line refs):
 //
@@ -28,13 +28,11 @@ import (
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
-// sessionCtx builds a CLI-bound context with a 30s deadline and an auth
-// gate. The sessions.go functions are package-level — they do not need a
-// connected Client. They DO need the CLI on PATH.
+// sessionCtx builds a context with a 30s deadline. The sessions.go functions
+// are package-level and read transcript storage directly; they do not need a
+// connected Client or a Claude CLI on PATH.
 func sessionCtx(t *testing.T) context.Context {
 	t.Helper()
-	requireAuth(t)
-	_ = requireClaude(t)
 
 	ctx, cancel := CreateTestContext(t, 30*time.Second)
 	t.Cleanup(cancel)
