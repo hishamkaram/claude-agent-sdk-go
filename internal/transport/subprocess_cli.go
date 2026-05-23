@@ -85,6 +85,11 @@ type SubprocessCLITransport struct {
 	err   error
 	ready bool
 
+	// parseErrorBackoff returns the delay after N consecutive CLI JSON parse
+	// errors. Tests replace this with a short deterministic backoff; production
+	// uses the exponential backoff returned by defaultParseErrorBackoff.
+	parseErrorBackoff func(consecutive uint) time.Duration
+
 	// shutdownRequested is set before stdin is closed during Close. Watchers use
 	// it to distinguish expected close exits from actionable subprocess crashes.
 	shutdownRequested bool
@@ -99,14 +104,15 @@ type SubprocessCLITransport struct {
 // The options contains configuration for the CLI.
 func NewSubprocessCLITransport(cliPath, cwd string, env map[string]string, logger *log.Logger, resumeSessionID string, options *types.ClaudeAgentOptions) *SubprocessCLITransport {
 	return &SubprocessCLITransport{
-		cliPath:         cliPath,
-		cwd:             cwd,
-		env:             env,
-		logger:          logger,
-		resumeSessionID: resumeSessionID,
-		options:         options,
-		messages:        make(chan types.Message, 10), // Buffered channel for smooth streaming
-		stderrTail:      newRingBuffer(StderrRingSize),
+		cliPath:           cliPath,
+		cwd:               cwd,
+		env:               env,
+		logger:            logger,
+		resumeSessionID:   resumeSessionID,
+		options:           options,
+		messages:          make(chan types.Message, 10), // Buffered channel for smooth streaming
+		stderrTail:        newRingBuffer(StderrRingSize),
+		parseErrorBackoff: defaultParseErrorBackoff,
 	}
 }
 
@@ -546,22 +552,18 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 			// Store parse error but continue reading after backoff
 			t.OnError(err)
 
-			// Exponential backoff: 1s, 2s, 4s, 8s, ..., capped at maxParseErrorBackoff.
-			// Use time.NewTimer with select on ctx.Done() to remain cancellable.
-			// Cap shift count to prevent integer overflow. 2^5 = 32s already
-			// exceeds maxParseErrorBackoff (30s), so clamping at 5 is sufficient.
-			shift := consecutiveParseErrors - 1
-			if shift > 5 {
-				shift = 5
+			backoffFn := t.parseErrorBackoff
+			if backoffFn == nil {
+				backoffFn = defaultParseErrorBackoff
 			}
-			backoff := time.Duration(1<<shift) * time.Second
-			if backoff > maxParseErrorBackoff {
-				backoff = maxParseErrorBackoff
-			}
+			backoff := backoffFn(consecutiveParseErrors)
 			t.logger.Debug("parse error backoff",
 				zap.Duration("backoff", backoff),
 				zap.Uint("consecutive_errors", consecutiveParseErrors),
 			)
+			if backoff <= 0 {
+				continue
+			}
 			timer := time.NewTimer(backoff)
 			select {
 			case <-ctx.Done():
@@ -593,6 +595,24 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 			return
 		}
 	}
+}
+
+func defaultParseErrorBackoff(consecutive uint) time.Duration {
+	// Exponential backoff: 1s, 2s, 4s, 8s, ..., capped at maxParseErrorBackoff.
+	// Cap shift count to prevent integer overflow. 2^5 = 32s already exceeds
+	// maxParseErrorBackoff (30s), so clamping at 5 is sufficient.
+	if consecutive == 0 {
+		return 0
+	}
+	shift := consecutive - 1
+	if shift > 5 {
+		shift = 5
+	}
+	backoff := time.Duration(1<<shift) * time.Second
+	if backoff > maxParseErrorBackoff {
+		return maxParseErrorBackoff
+	}
+	return backoff
 }
 
 // Write sends a JSON message to the subprocess stdin.

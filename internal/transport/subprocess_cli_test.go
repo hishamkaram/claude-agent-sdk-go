@@ -2326,6 +2326,15 @@ func TestSubprocessCrash_NoGoroutineLeak(t *testing.T) {
 
 // ===== Bug C15: Parse error backoff tests =====
 
+func useFastParseErrorBackoff(tr *SubprocessCLITransport) {
+	tr.parseErrorBackoff = func(consecutive uint) time.Duration {
+		if consecutive == 0 {
+			return 0
+		}
+		return time.Duration(consecutive) * 5 * time.Millisecond
+	}
+}
+
 // TestMessageReaderLoop_ParseErrorBackoff verifies that repeated parse errors
 // trigger exponential backoff instead of spinning in a tight CPU loop.
 func TestMessageReaderLoop_ParseErrorBackoff(t *testing.T) {
@@ -2339,7 +2348,7 @@ func TestMessageReaderLoop_ParseErrorBackoff(t *testing.T) {
 		{
 			name:             "3 consecutive parse errors have increasing delay",
 			invalidLines:     3,
-			minTotalDuration: 3 * time.Second, // 1s + 2s = 3s minimum for 3 errors (first error: 1s, second: 2s, third still pending)
+			minTotalDuration: 25 * time.Millisecond,
 		},
 	}
 
@@ -2364,6 +2373,12 @@ func TestMessageReaderLoop_ParseErrorBackoff(t *testing.T) {
 
 			opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
 			tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+			tr.parseErrorBackoff = func(consecutive uint) time.Duration {
+				if consecutive == 0 {
+					return 0
+				}
+				return time.Duration(1<<min(consecutive-1, 5)) * 10 * time.Millisecond
+			}
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -2391,7 +2406,7 @@ func TestMessageReaderLoop_ParseErrorBackoff(t *testing.T) {
 
 			// Read from messages channel — the valid message should eventually arrive
 			// but only after backoff delays
-			timer := time.NewTimer(30 * time.Second)
+			timer := time.NewTimer(2 * time.Second)
 			defer timer.Stop()
 			select {
 			case msg, ok := <-tr.messages:
@@ -2402,10 +2417,8 @@ func TestMessageReaderLoop_ParseErrorBackoff(t *testing.T) {
 				if msg == nil {
 					t.Fatal("received nil message")
 				}
-				// The backoff for 3 parse errors should introduce at least some delay
-				// 1s (after 1st error) + 2s (after 2nd error) + 4s (after 3rd error) = 7s minimum
-				// But the valid message comes after the 3rd invalid line,
-				// so backoff from the 3rd error must complete before it's read
+				// The test transport uses a short deterministic backoff, but
+				// the valid message still must wait behind multiple parse-error delays.
 				if elapsed < tt.minTotalDuration {
 					t.Errorf("messages arrived too quickly: %v < minimum %v (no backoff?)",
 						elapsed, tt.minTotalDuration)
@@ -2443,6 +2456,7 @@ func TestMessageReaderLoop_ParseErrorBackoffResets(t *testing.T) {
 
 	opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
 	tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+	useFastParseErrorBackoff(tr)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2583,6 +2597,7 @@ func TestReadStderr_ExitsOnPipeClose(t *testing.T) {
 
 			opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
 			tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+			useFastParseErrorBackoff(tr)
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -2639,6 +2654,7 @@ func TestMessageReaderLoop_MaxConsecutiveParseErrors(t *testing.T) {
 
 			opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
 			tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+			useFastParseErrorBackoff(tr)
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -2655,7 +2671,7 @@ func TestMessageReaderLoop_MaxConsecutiveParseErrors(t *testing.T) {
 			}()
 
 			// The messages channel must close after the threshold is hit.
-			timer := time.NewTimer(120 * time.Second) // generous — backoff 1+2+4+8+16 = 31s total
+			timer := time.NewTimer(2 * time.Second)
 			defer timer.Stop()
 
 			channelClosed := false
@@ -2722,6 +2738,7 @@ func TestMessageReaderLoop_ParseErrorCounterResetPreventsThreshold(t *testing.T)
 
 			opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
 			tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+			useFastParseErrorBackoff(tr)
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -2752,7 +2769,7 @@ func TestMessageReaderLoop_ParseErrorCounterResetPreventsThreshold(t *testing.T)
 
 			// We should receive exactly 2 valid messages.
 			received := 0
-			timer := time.NewTimer(120 * time.Second)
+			timer := time.NewTimer(2 * time.Second)
 			defer timer.Stop()
 
 			for received < 2 {
