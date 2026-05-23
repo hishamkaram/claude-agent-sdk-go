@@ -546,17 +546,29 @@ func TestConnectWithCustomSpawnerPreservesThinkingDisplay(t *testing.T) {
 	}
 }
 
-func TestConnectWithCustomSpawnerProbeableOldCLIOmitsThinkingDisplay(t *testing.T) {
-	t.Parallel()
-
+func TestConnectWithCustomSpawnerPreservesThinkingDisplayWithProbeableOldHostCLI(t *testing.T) {
 	cliPath := filepath.Join(t.TempDir(), "claude")
 	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho '2.1.92 (Claude Code)'\n"), 0o755); err != nil {
 		t.Fatalf("write fake cli: %v", err)
 	}
 
+	warmDone := make(chan struct{})
+	var closeWarm sync.Once
+	StoreWarmProcess(&WarmProcess{Done: warmDone})
+	defer func() {
+		if warm := ConsumeWarmProcess(); warm != nil {
+			if warm.Done != warmDone {
+				warm.Kill()
+			}
+		}
+		closeWarm.Do(func() { close(warmDone) })
+	}()
+
+	var spawnerCalled bool
 	var receivedOpts types.SpawnOptions
 	mockProc := newMockSpawnedProcess()
 	spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+		spawnerCalled = true
 		receivedOpts = opts
 		return mockProc, nil
 	})
@@ -576,8 +588,23 @@ func TestConnectWithCustomSpawnerProbeableOldCLIOmitsThinkingDisplay(t *testing.
 		_ = transport.Close(closeCtx)
 	})
 
-	if hasFlag(receivedOpts.Args, "--thinking-display") {
-		t.Fatalf("--thinking-display should be omitted for probeable CLI 2.1.92; args: %v", receivedOpts.Args)
+	if !spawnerCalled {
+		t.Fatal("custom spawner was not invoked")
+	}
+	if warm := ConsumeWarmProcess(); warm == nil {
+		t.Fatal("custom spawner connection consumed warm pool")
+	} else if warm.Done != warmDone {
+		warm.Kill()
+		t.Fatal("custom spawner connection replaced warm pool entry")
+	}
+	closeWarm.Do(func() { close(warmDone) })
+
+	val, found := flagValue(receivedOpts.Args, "--thinking-display")
+	if !found {
+		t.Fatalf("--thinking-display missing from custom SpawnOptions.Args: %v", receivedOpts.Args)
+	}
+	if val != "summarized" {
+		t.Fatalf("--thinking-display = %q, want summarized", val)
 	}
 }
 

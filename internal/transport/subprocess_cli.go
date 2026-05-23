@@ -145,15 +145,16 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) error {
 	// Create cancellable context
 	t.ctx, t.cancel = context.WithCancel(ctx)
 
+	usesCustomSpawner := t.usesCustomSpawner()
 	wantsThinkingDisplay := t.wantsThinkingDisplay()
-	if wantsThinkingDisplay {
+	if wantsThinkingDisplay && !usesCustomSpawner {
 		t.thinkingDisplaySupported = t.detectThinkingDisplaySupport()
 	} else {
 		t.thinkingDisplaySupported = true
 	}
 
 	// Try warm pool first — if a pre-warmed process is available, use it
-	if !wantsThinkingDisplay || !t.thinkingDisplaySupported {
+	if !usesCustomSpawner && (!wantsThinkingDisplay || !t.thinkingDisplaySupported) {
 		if warm := ConsumeWarmProcess(); warm != nil && warm.IsAlive() {
 			t.logger.Debug("using pre-warmed subprocess from Startup()")
 			err := t.connectWithWarmProcess(warm)
@@ -196,15 +197,13 @@ func (t *SubprocessCLITransport) wantsThinkingDisplay() bool {
 		t.options.Thinking.Display != ""
 }
 
+func (t *SubprocessCLITransport) usesCustomSpawner() bool {
+	return t.options != nil && t.options.SpawnProcess != nil
+}
+
 func (t *SubprocessCLITransport) detectThinkingDisplaySupport() bool {
 	version, err := GetCLIVersion(t.cliPath)
 	if err != nil {
-		if t.options != nil && t.options.SpawnProcess != nil {
-			t.logger.Warn("unable to determine custom-spawned Claude CLI thinking display support; preserving thinking display flag",
-				zap.Error(err),
-			)
-			return true
-		}
 		t.logger.Warn("unable to determine Claude CLI thinking display support; omitting thinking display flag",
 			zap.Error(err),
 		)
