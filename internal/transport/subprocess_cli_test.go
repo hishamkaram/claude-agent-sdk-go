@@ -424,6 +424,62 @@ func TestBuildCommandArgs_SettingsThinking(t *testing.T) {
 	}
 }
 
+func TestBuildCommandArgs_ThinkingDisplay(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		thinking  types.ThinkingConfig
+		wantFlag  bool
+		wantValue string
+	}{
+		{
+			name:      "adaptive summarized",
+			thinking:  types.ThinkingConfig{Type: "adaptive", Display: "summarized"},
+			wantFlag:  true,
+			wantValue: "summarized",
+		},
+		{
+			name: "enabled omitted",
+			thinking: types.ThinkingConfig{
+				Type:    "enabled",
+				Display: "omitted",
+			},
+			wantFlag:  true,
+			wantValue: "omitted",
+		},
+		{
+			name:     "adaptive empty display",
+			thinking: types.ThinkingConfig{Type: "adaptive"},
+			wantFlag: false,
+		},
+		{
+			name:     "disabled display ignored",
+			thinking: types.ThinkingConfig{Type: "disabled", Display: "summarized"},
+			wantFlag: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := types.NewClaudeAgentOptions().WithThinking(tt.thinking)
+			transport := newTestTransport(t, opts)
+			args := transport.buildCommandArgs()
+
+			val, found := flagValue(args, "--thinking-display")
+			if found != tt.wantFlag {
+				t.Fatalf("--thinking-display found = %v, want %v; args: %v", found, tt.wantFlag, args)
+			}
+			if tt.wantFlag && val != tt.wantValue {
+				t.Fatalf("--thinking-display = %q, want %q", val, tt.wantValue)
+			}
+		})
+	}
+}
+
 // TestBuildCommandArgs_SettingsSandbox tests --settings flag with sandbox config.
 func TestBuildCommandArgs_SettingsSandbox(t *testing.T) {
 	t.Parallel()

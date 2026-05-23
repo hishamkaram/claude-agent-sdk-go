@@ -858,6 +858,14 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		t.logger.Debug("setting effort level", zap.String("effort", string(*t.options.Effort)))
 	}
 
+	// Claude Code consumes thinking display as a CLI flag. Keep the typed
+	// settings JSON for thinking mode/budget, and pass display explicitly so
+	// summarized/omitted behavior is honored by the subprocess.
+	if t.options != nil && t.options.Thinking != nil && t.options.Thinking.Type != "disabled" && t.options.Thinking.Display != "" {
+		args = append(args, "--thinking-display", t.options.Thinking.Display)
+		t.logger.Debug("setting thinking display", zap.String("display", t.options.Thinking.Display))
+	}
+
 	// Add fallback model if specified
 	if t.options != nil && t.options.FallbackModel != nil {
 		args = append(args, "--fallback-model", *t.options.FallbackModel)
