@@ -23,6 +23,7 @@ const (
 type ThinkingConfig struct {
 	Type         string `json:"type"`                   // "adaptive", "enabled", "disabled"
 	BudgetTokens *int   `json:"budgetTokens,omitempty"` // Only for type="enabled"
+	Display      string `json:"display,omitempty"`      // Optional provider display mode, e.g. "summarized"
 }
 
 // OutputFormat represents structured output configuration (JsonSchemaOutputFormat).

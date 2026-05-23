@@ -688,6 +688,20 @@ func TestThinkingConfig_JSONRoundtrip(t *testing.T) {
 			name:   "disabled type",
 			config: ThinkingConfig{Type: "disabled"},
 		},
+		{
+			name:   "adaptive type with summarized display",
+			config: ThinkingConfig{Type: "adaptive", Display: "summarized"},
+			checkJSON: func(t *testing.T, data []byte) {
+				t.Helper()
+				var m map[string]interface{}
+				if err := json.Unmarshal(data, &m); err != nil {
+					t.Fatalf("unmarshal to map: %v", err)
+				}
+				if m["display"] != "summarized" {
+					t.Errorf("display = %v, want summarized", m["display"])
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -711,6 +725,9 @@ func TestThinkingConfig_JSONRoundtrip(t *testing.T) {
 
 			if got.Type != tt.config.Type {
 				t.Errorf("Type = %q, want %q", got.Type, tt.config.Type)
+			}
+			if got.Display != tt.config.Display {
+				t.Errorf("Display = %q, want %q", got.Display, tt.config.Display)
 			}
 
 			if tt.config.BudgetTokens == nil {

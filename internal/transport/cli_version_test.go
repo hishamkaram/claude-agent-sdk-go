@@ -181,3 +181,49 @@ func TestSemanticVersionString(t *testing.T) {
 		})
 	}
 }
+
+func TestSupportsThinkingDisplay(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		version  SemanticVersion
+		expected bool
+	}{
+		{
+			name:     "below first supported patch",
+			version:  SemanticVersion{Major: 2, Minor: 1, Patch: 92},
+			expected: false,
+		},
+		{
+			name:     "first supported patch",
+			version:  SemanticVersion{Major: 2, Minor: 1, Patch: 94},
+			expected: true,
+		},
+		{
+			name:     "newer supported patch",
+			version:  SemanticVersion{Major: 2, Minor: 1, Patch: 150},
+			expected: true,
+		},
+		{
+			name:     "newer minor",
+			version:  SemanticVersion{Major: 2, Minor: 2, Patch: 0},
+			expected: true,
+		},
+		{
+			name:     "older minor",
+			version:  SemanticVersion{Major: 2, Minor: 0, Patch: 77},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := SupportsThinkingDisplay(tt.version); got != tt.expected {
+				t.Fatalf("SupportsThinkingDisplay(%s) = %v, want %v", tt.version.String(), got, tt.expected)
+			}
+		})
+	}
+}

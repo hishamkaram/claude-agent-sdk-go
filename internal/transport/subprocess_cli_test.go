@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -424,6 +425,189 @@ func TestBuildCommandArgs_SettingsThinking(t *testing.T) {
 	}
 }
 
+func TestBuildCommandArgs_ThinkingDisplay(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		thinking  types.ThinkingConfig
+		wantFlag  bool
+		wantValue string
+	}{
+		{
+			name:      "adaptive summarized",
+			thinking:  types.ThinkingConfig{Type: "adaptive", Display: "summarized"},
+			wantFlag:  true,
+			wantValue: "summarized",
+		},
+		{
+			name: "enabled omitted",
+			thinking: types.ThinkingConfig{
+				Type:    "enabled",
+				Display: "omitted",
+			},
+			wantFlag:  true,
+			wantValue: "omitted",
+		},
+		{
+			name:     "adaptive empty display",
+			thinking: types.ThinkingConfig{Type: "adaptive"},
+			wantFlag: false,
+		},
+		{
+			name:     "disabled display ignored",
+			thinking: types.ThinkingConfig{Type: "disabled", Display: "summarized"},
+			wantFlag: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := types.NewClaudeAgentOptions().WithThinking(tt.thinking)
+			transport := newTestTransport(t, opts)
+			args := transport.buildCommandArgs()
+
+			val, found := flagValue(args, "--thinking-display")
+			if found != tt.wantFlag {
+				t.Fatalf("--thinking-display found = %v, want %v; args: %v", found, tt.wantFlag, args)
+			}
+			if tt.wantFlag && val != tt.wantValue {
+				t.Fatalf("--thinking-display = %q, want %q", val, tt.wantValue)
+			}
+		})
+	}
+}
+
+func TestBuildCommandArgs_ThinkingDisplayUnsupportedCLI(t *testing.T) {
+	t.Parallel()
+
+	opts := types.NewClaudeAgentOptions().
+		WithThinking(types.ThinkingConfig{Type: "adaptive", Display: "summarized"})
+	transport := newTestTransport(t, opts)
+	transport.thinkingDisplaySupported = false
+
+	args := transport.buildCommandArgs()
+	if hasFlag(args, "--thinking-display") {
+		t.Fatalf("--thinking-display should be omitted when CLI support is not available; args: %v", args)
+	}
+}
+
+func TestDetectThinkingDisplaySupportIgnoresSkipVersionCheck(t *testing.T) {
+	t.Setenv("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK", "1")
+
+	cliPath := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho '2.1.92 (Claude Code)'\n"), 0o755); err != nil {
+		t.Fatalf("write fake cli: %v", err)
+	}
+
+	opts := types.NewClaudeAgentOptions().
+		WithThinking(types.ThinkingConfig{Type: "adaptive", Display: "summarized"})
+	transport := NewSubprocessCLITransport(cliPath, "", nil, log.NewLogger(false), "", opts)
+
+	if transport.detectThinkingDisplaySupport() {
+		t.Fatal("thinking display support should remain false for CLI 2.1.92 even when version checks are skipped")
+	}
+}
+
+func TestConnectWithCustomSpawnerPreservesThinkingDisplay(t *testing.T) {
+	t.Parallel()
+
+	var receivedOpts types.SpawnOptions
+	mockProc := newMockSpawnedProcess()
+	spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+		receivedOpts = opts
+		return mockProc, nil
+	})
+
+	opts := types.NewClaudeAgentOptions().
+		WithThinking(types.ThinkingConfig{Type: "adaptive", Display: "summarized"}).
+		WithSpawnProcess(spawner)
+	transport := NewSubprocessCLITransport("/remote/only/claude", "", nil, log.NewLogger(false), "", opts)
+
+	if err := transport.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect() failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = mockProc.Kill()
+		closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = transport.Close(closeCtx)
+	})
+
+	val, found := flagValue(receivedOpts.Args, "--thinking-display")
+	if !found {
+		t.Fatalf("--thinking-display missing from custom SpawnOptions.Args: %v", receivedOpts.Args)
+	}
+	if val != "summarized" {
+		t.Fatalf("--thinking-display = %q, want summarized", val)
+	}
+}
+
+func TestConnectWithCustomSpawnerPreservesThinkingDisplayWithProbeableOldHostCLI(t *testing.T) {
+	cliPath := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho '2.1.92 (Claude Code)'\n"), 0o755); err != nil {
+		t.Fatalf("write fake cli: %v", err)
+	}
+
+	warmDone := make(chan struct{})
+	var closeWarm sync.Once
+	StoreWarmProcess(&WarmProcess{Done: warmDone})
+	defer func() {
+		if warm := ConsumeWarmProcess(); warm != nil {
+			if warm.Done != warmDone {
+				warm.Kill()
+			}
+		}
+		closeWarm.Do(func() { close(warmDone) })
+	}()
+
+	var spawnerCalled bool
+	var receivedOpts types.SpawnOptions
+	mockProc := newMockSpawnedProcess()
+	spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+		spawnerCalled = true
+		receivedOpts = opts
+		return mockProc, nil
+	})
+
+	opts := types.NewClaudeAgentOptions().
+		WithThinking(types.ThinkingConfig{Type: "adaptive", Display: "summarized"}).
+		WithSpawnProcess(spawner)
+	transport := NewSubprocessCLITransport(cliPath, "", nil, log.NewLogger(false), "", opts)
+
+	if err := transport.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect() failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = mockProc.Kill()
+		closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = transport.Close(closeCtx)
+	})
+
+	if !spawnerCalled {
+		t.Fatal("custom spawner was not invoked")
+	}
+	if warm := ConsumeWarmProcess(); warm == nil {
+		t.Fatal("custom spawner connection consumed warm pool")
+	} else if warm.Done != warmDone {
+		warm.Kill()
+		t.Fatal("custom spawner connection replaced warm pool entry")
+	}
+	closeWarm.Do(func() { close(warmDone) })
+
+	val, found := flagValue(receivedOpts.Args, "--thinking-display")
+	if !found {
+		t.Fatalf("--thinking-display missing from custom SpawnOptions.Args: %v", receivedOpts.Args)
+	}
+	if val != "summarized" {
+		t.Fatalf("--thinking-display = %q, want summarized", val)
+	}
+}
+
 // TestBuildCommandArgs_SettingsSandbox tests --settings flag with sandbox config.
 func TestBuildCommandArgs_SettingsSandbox(t *testing.T) {
 	t.Parallel()
@@ -792,6 +976,29 @@ func TestBuildSettingsJSON_InvalidUserSettingsIgnored(t *testing.T) {
 
 	if _, ok := parsed["thinking"]; !ok {
 		t.Error("thinking key missing from result")
+	}
+}
+
+func TestBuildSettingsJSON_ThinkingDisplay(t *testing.T) {
+	t.Parallel()
+
+	opts := types.NewClaudeAgentOptions().
+		WithThinking(types.ThinkingConfig{Type: "adaptive", Display: "summarized"})
+
+	transport := newTestTransport(t, opts)
+	result := transport.buildSettingsJSON()
+
+	var parsed struct {
+		Thinking types.ThinkingConfig `json:"thinking"`
+	}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("buildSettingsJSON() returned invalid JSON: %v\nresult: %q", err, result)
+	}
+	if parsed.Thinking.Type != "adaptive" {
+		t.Fatalf("thinking.type = %q, want adaptive", parsed.Thinking.Type)
+	}
+	if parsed.Thinking.Display != "summarized" {
+		t.Fatalf("thinking.display = %q, want summarized", parsed.Thinking.Display)
 	}
 }
 
@@ -2303,6 +2510,15 @@ func TestSubprocessCrash_NoGoroutineLeak(t *testing.T) {
 
 // ===== Bug C15: Parse error backoff tests =====
 
+func useFastParseErrorBackoff(tr *SubprocessCLITransport) {
+	tr.parseErrorBackoff = func(consecutive uint) time.Duration {
+		if consecutive == 0 {
+			return 0
+		}
+		return time.Duration(consecutive) * 5 * time.Millisecond
+	}
+}
+
 // TestMessageReaderLoop_ParseErrorBackoff verifies that repeated parse errors
 // trigger exponential backoff instead of spinning in a tight CPU loop.
 func TestMessageReaderLoop_ParseErrorBackoff(t *testing.T) {
@@ -2316,7 +2532,7 @@ func TestMessageReaderLoop_ParseErrorBackoff(t *testing.T) {
 		{
 			name:             "3 consecutive parse errors have increasing delay",
 			invalidLines:     3,
-			minTotalDuration: 3 * time.Second, // 1s + 2s = 3s minimum for 3 errors (first error: 1s, second: 2s, third still pending)
+			minTotalDuration: 25 * time.Millisecond,
 		},
 	}
 
@@ -2341,6 +2557,12 @@ func TestMessageReaderLoop_ParseErrorBackoff(t *testing.T) {
 
 			opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
 			tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+			tr.parseErrorBackoff = func(consecutive uint) time.Duration {
+				if consecutive == 0 {
+					return 0
+				}
+				return time.Duration(1<<min(consecutive-1, 5)) * 10 * time.Millisecond
+			}
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -2368,7 +2590,7 @@ func TestMessageReaderLoop_ParseErrorBackoff(t *testing.T) {
 
 			// Read from messages channel — the valid message should eventually arrive
 			// but only after backoff delays
-			timer := time.NewTimer(30 * time.Second)
+			timer := time.NewTimer(2 * time.Second)
 			defer timer.Stop()
 			select {
 			case msg, ok := <-tr.messages:
@@ -2379,10 +2601,8 @@ func TestMessageReaderLoop_ParseErrorBackoff(t *testing.T) {
 				if msg == nil {
 					t.Fatal("received nil message")
 				}
-				// The backoff for 3 parse errors should introduce at least some delay
-				// 1s (after 1st error) + 2s (after 2nd error) + 4s (after 3rd error) = 7s minimum
-				// But the valid message comes after the 3rd invalid line,
-				// so backoff from the 3rd error must complete before it's read
+				// The test transport uses a short deterministic backoff, but
+				// the valid message still must wait behind multiple parse-error delays.
 				if elapsed < tt.minTotalDuration {
 					t.Errorf("messages arrived too quickly: %v < minimum %v (no backoff?)",
 						elapsed, tt.minTotalDuration)
@@ -2420,6 +2640,7 @@ func TestMessageReaderLoop_ParseErrorBackoffResets(t *testing.T) {
 
 	opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
 	tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+	useFastParseErrorBackoff(tr)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2560,6 +2781,7 @@ func TestReadStderr_ExitsOnPipeClose(t *testing.T) {
 
 			opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
 			tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+			useFastParseErrorBackoff(tr)
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -2616,6 +2838,7 @@ func TestMessageReaderLoop_MaxConsecutiveParseErrors(t *testing.T) {
 
 			opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
 			tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+			useFastParseErrorBackoff(tr)
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -2632,7 +2855,7 @@ func TestMessageReaderLoop_MaxConsecutiveParseErrors(t *testing.T) {
 			}()
 
 			// The messages channel must close after the threshold is hit.
-			timer := time.NewTimer(120 * time.Second) // generous — backoff 1+2+4+8+16 = 31s total
+			timer := time.NewTimer(2 * time.Second)
 			defer timer.Stop()
 
 			channelClosed := false
@@ -2699,6 +2922,7 @@ func TestMessageReaderLoop_ParseErrorCounterResetPreventsThreshold(t *testing.T)
 
 			opts := types.NewClaudeAgentOptions().WithSpawnProcess(spawner)
 			tr := NewSubprocessCLITransport("/fake/claude", "", nil, log.NewLogger(false), "", opts)
+			useFastParseErrorBackoff(tr)
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -2729,7 +2953,7 @@ func TestMessageReaderLoop_ParseErrorCounterResetPreventsThreshold(t *testing.T)
 
 			// We should receive exactly 2 valid messages.
 			received := 0
-			timer := time.NewTimer(120 * time.Second)
+			timer := time.NewTimer(2 * time.Second)
 			defer timer.Stop()
 
 			for received < 2 {
