@@ -546,6 +546,41 @@ func TestConnectWithCustomSpawnerPreservesThinkingDisplay(t *testing.T) {
 	}
 }
 
+func TestConnectWithCustomSpawnerProbeableOldCLIOmitsThinkingDisplay(t *testing.T) {
+	t.Parallel()
+
+	cliPath := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho '2.1.92 (Claude Code)'\n"), 0o755); err != nil {
+		t.Fatalf("write fake cli: %v", err)
+	}
+
+	var receivedOpts types.SpawnOptions
+	mockProc := newMockSpawnedProcess()
+	spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+		receivedOpts = opts
+		return mockProc, nil
+	})
+
+	opts := types.NewClaudeAgentOptions().
+		WithThinking(types.ThinkingConfig{Type: "adaptive", Display: "summarized"}).
+		WithSpawnProcess(spawner)
+	transport := NewSubprocessCLITransport(cliPath, "", nil, log.NewLogger(false), "", opts)
+
+	if err := transport.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect() failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = mockProc.Kill()
+		closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = transport.Close(closeCtx)
+	})
+
+	if hasFlag(receivedOpts.Args, "--thinking-display") {
+		t.Fatalf("--thinking-display should be omitted for probeable CLI 2.1.92; args: %v", receivedOpts.Args)
+	}
+}
+
 // TestBuildCommandArgs_SettingsSandbox tests --settings flag with sandbox config.
 func TestBuildCommandArgs_SettingsSandbox(t *testing.T) {
 	t.Parallel()

@@ -197,11 +197,14 @@ func (t *SubprocessCLITransport) wantsThinkingDisplay() bool {
 }
 
 func (t *SubprocessCLITransport) detectThinkingDisplaySupport() bool {
-	if t.options != nil && t.options.SpawnProcess != nil {
-		return true
-	}
 	version, err := GetCLIVersion(t.cliPath)
 	if err != nil {
+		if t.options != nil && t.options.SpawnProcess != nil {
+			t.logger.Warn("unable to determine custom-spawned Claude CLI thinking display support; preserving thinking display flag",
+				zap.Error(err),
+			)
+			return true
+		}
 		t.logger.Warn("unable to determine Claude CLI thinking display support; omitting thinking display flag",
 			zap.Error(err),
 		)
