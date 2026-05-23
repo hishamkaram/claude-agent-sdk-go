@@ -512,6 +512,40 @@ func TestDetectThinkingDisplaySupportIgnoresSkipVersionCheck(t *testing.T) {
 	}
 }
 
+func TestConnectWithCustomSpawnerPreservesThinkingDisplay(t *testing.T) {
+	t.Parallel()
+
+	var receivedOpts types.SpawnOptions
+	mockProc := newMockSpawnedProcess()
+	spawner := types.ProcessSpawner(func(ctx context.Context, opts types.SpawnOptions) (types.SpawnedProcess, error) {
+		receivedOpts = opts
+		return mockProc, nil
+	})
+
+	opts := types.NewClaudeAgentOptions().
+		WithThinking(types.ThinkingConfig{Type: "adaptive", Display: "summarized"}).
+		WithSpawnProcess(spawner)
+	transport := NewSubprocessCLITransport("/remote/only/claude", "", nil, log.NewLogger(false), "", opts)
+
+	if err := transport.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect() failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = mockProc.Kill()
+		closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = transport.Close(closeCtx)
+	})
+
+	val, found := flagValue(receivedOpts.Args, "--thinking-display")
+	if !found {
+		t.Fatalf("--thinking-display missing from custom SpawnOptions.Args: %v", receivedOpts.Args)
+	}
+	if val != "summarized" {
+		t.Fatalf("--thinking-display = %q, want summarized", val)
+	}
+}
+
 // TestBuildCommandArgs_SettingsSandbox tests --settings flag with sandbox config.
 func TestBuildCommandArgs_SettingsSandbox(t *testing.T) {
 	t.Parallel()
