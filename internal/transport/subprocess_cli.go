@@ -197,15 +197,12 @@ func (t *SubprocessCLITransport) wantsThinkingDisplay() bool {
 }
 
 func (t *SubprocessCLITransport) detectThinkingDisplaySupport() bool {
-	if os.Getenv("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK") != "" {
-		return true
-	}
 	version, err := GetCLIVersion(t.cliPath)
 	if err != nil {
-		t.logger.Debug("unable to determine Claude CLI thinking display support; emitting flag optimistically",
+		t.logger.Warn("unable to determine Claude CLI thinking display support; omitting thinking display flag",
 			zap.Error(err),
 		)
-		return true
+		return false
 	}
 	if SupportsThinkingDisplay(version) {
 		return true

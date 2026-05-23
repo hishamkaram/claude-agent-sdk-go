@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -491,6 +492,23 @@ func TestBuildCommandArgs_ThinkingDisplayUnsupportedCLI(t *testing.T) {
 	args := transport.buildCommandArgs()
 	if hasFlag(args, "--thinking-display") {
 		t.Fatalf("--thinking-display should be omitted when CLI support is not available; args: %v", args)
+	}
+}
+
+func TestDetectThinkingDisplaySupportIgnoresSkipVersionCheck(t *testing.T) {
+	t.Setenv("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK", "1")
+
+	cliPath := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\necho '2.1.92 (Claude Code)'\n"), 0o755); err != nil {
+		t.Fatalf("write fake cli: %v", err)
+	}
+
+	opts := types.NewClaudeAgentOptions().
+		WithThinking(types.ThinkingConfig{Type: "adaptive", Display: "summarized"})
+	transport := NewSubprocessCLITransport(cliPath, "", nil, log.NewLogger(false), "", opts)
+
+	if transport.detectThinkingDisplaySupport() {
+		t.Fatal("thinking display support should remain false for CLI 2.1.92 even when version checks are skipped")
 	}
 }
 
