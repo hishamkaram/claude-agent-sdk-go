@@ -795,6 +795,29 @@ func TestBuildSettingsJSON_InvalidUserSettingsIgnored(t *testing.T) {
 	}
 }
 
+func TestBuildSettingsJSON_ThinkingDisplay(t *testing.T) {
+	t.Parallel()
+
+	opts := types.NewClaudeAgentOptions().
+		WithThinking(types.ThinkingConfig{Type: "adaptive", Display: "summarized"})
+
+	transport := newTestTransport(t, opts)
+	result := transport.buildSettingsJSON()
+
+	var parsed struct {
+		Thinking types.ThinkingConfig `json:"thinking"`
+	}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("buildSettingsJSON() returned invalid JSON: %v\nresult: %q", err, result)
+	}
+	if parsed.Thinking.Type != "adaptive" {
+		t.Fatalf("thinking.type = %q, want adaptive", parsed.Thinking.Type)
+	}
+	if parsed.Thinking.Display != "summarized" {
+		t.Fatalf("thinking.display = %q, want summarized", parsed.Thinking.Display)
+	}
+}
+
 // TestBuildCommandArgs_NoSettingsWhenNothingSet verifies --settings is absent when
 // no settings-related options are configured.
 func TestBuildCommandArgs_NoSettingsWhenNothingSet(t *testing.T) {
