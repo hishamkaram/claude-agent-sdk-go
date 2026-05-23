@@ -26,6 +26,19 @@ const (
 
 	// MinimumCLIPatch is the minimum patch version
 	MinimumCLIPatch = 0
+
+	// MinimumThinkingDisplayCLIVersion is the first validated Claude Code CLI
+	// version that accepts --thinking-display during --print execution.
+	MinimumThinkingDisplayCLIVersion = "2.1.94"
+
+	// MinimumThinkingDisplayCLIMajor is the minimum major version for --thinking-display.
+	MinimumThinkingDisplayCLIMajor = 2
+
+	// MinimumThinkingDisplayCLIMinor is the minimum minor version for --thinking-display.
+	MinimumThinkingDisplayCLIMinor = 1
+
+	// MinimumThinkingDisplayCLIPatch is the minimum patch version for --thinking-display.
+	MinimumThinkingDisplayCLIPatch = 94
 )
 
 // SemanticVersion represents a semantic version number (major.minor.patch)
@@ -119,6 +132,17 @@ func GetCLIVersion(cliPath string) (SemanticVersion, error) {
 	// Parse version from output
 	versionStr := strings.TrimSpace(stdout.String())
 	return ParseSemanticVersion(versionStr)
+}
+
+// SupportsThinkingDisplay reports whether the parsed Claude CLI version accepts
+// --thinking-display. Older supported CLIs continue to work without the flag;
+// callers just receive the CLI's default thinking display behavior.
+func SupportsThinkingDisplay(version SemanticVersion) bool {
+	return version.IsAtLeast(SemanticVersion{
+		Major: MinimumThinkingDisplayCLIMajor,
+		Minor: MinimumThinkingDisplayCLIMinor,
+		Patch: MinimumThinkingDisplayCLIPatch,
+	})
 }
 
 // CheckCLIVersion verifies that the CLI version meets minimum requirements

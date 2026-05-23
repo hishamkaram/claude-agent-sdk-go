@@ -90,6 +90,11 @@ type SubprocessCLITransport struct {
 	// uses the exponential backoff returned by defaultParseErrorBackoff.
 	parseErrorBackoff func(consecutive uint) time.Duration
 
+	// thinkingDisplaySupported gates --thinking-display emission. The flag was
+	// added after the SDK's minimum supported Claude CLI version, so Connect()
+	// probes the installed CLI when a caller requests display control.
+	thinkingDisplaySupported bool
+
 	// shutdownRequested is set before stdin is closed during Close. Watchers use
 	// it to distinguish expected close exits from actionable subprocess crashes.
 	shutdownRequested bool
@@ -104,15 +109,16 @@ type SubprocessCLITransport struct {
 // The options contains configuration for the CLI.
 func NewSubprocessCLITransport(cliPath, cwd string, env map[string]string, logger *log.Logger, resumeSessionID string, options *types.ClaudeAgentOptions) *SubprocessCLITransport {
 	return &SubprocessCLITransport{
-		cliPath:           cliPath,
-		cwd:               cwd,
-		env:               env,
-		logger:            logger,
-		resumeSessionID:   resumeSessionID,
-		options:           options,
-		messages:          make(chan types.Message, 10), // Buffered channel for smooth streaming
-		stderrTail:        newRingBuffer(StderrRingSize),
-		parseErrorBackoff: defaultParseErrorBackoff,
+		cliPath:                  cliPath,
+		cwd:                      cwd,
+		env:                      env,
+		logger:                   logger,
+		resumeSessionID:          resumeSessionID,
+		options:                  options,
+		messages:                 make(chan types.Message, 10), // Buffered channel for smooth streaming
+		stderrTail:               newRingBuffer(StderrRingSize),
+		parseErrorBackoff:        defaultParseErrorBackoff,
+		thinkingDisplaySupported: true,
 	}
 }
 
@@ -139,15 +145,24 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) error {
 	// Create cancellable context
 	t.ctx, t.cancel = context.WithCancel(ctx)
 
+	wantsThinkingDisplay := t.wantsThinkingDisplay()
+	if wantsThinkingDisplay {
+		t.thinkingDisplaySupported = t.detectThinkingDisplaySupport()
+	} else {
+		t.thinkingDisplaySupported = true
+	}
+
 	// Try warm pool first — if a pre-warmed process is available, use it
-	if warm := ConsumeWarmProcess(); warm != nil && warm.IsAlive() {
-		t.logger.Debug("using pre-warmed subprocess from Startup()")
-		err := t.connectWithWarmProcess(warm)
-		if err == nil {
-			return nil
+	if !wantsThinkingDisplay || !t.thinkingDisplaySupported {
+		if warm := ConsumeWarmProcess(); warm != nil && warm.IsAlive() {
+			t.logger.Debug("using pre-warmed subprocess from Startup()")
+			err := t.connectWithWarmProcess(warm)
+			if err == nil {
+				return nil
+			}
+			// Warm process failed — fall through to normal spawn
+			t.logger.Debug("warm process unusable, falling through to normal spawn", zap.Error(err))
 		}
-		// Warm process failed — fall through to normal spawn
-		t.logger.Debug("warm process unusable, falling through to normal spawn", zap.Error(err))
 	}
 
 	// Build command arguments
@@ -172,6 +187,34 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func (t *SubprocessCLITransport) wantsThinkingDisplay() bool {
+	return t.options != nil &&
+		t.options.Thinking != nil &&
+		t.options.Thinking.Type != "disabled" &&
+		t.options.Thinking.Display != ""
+}
+
+func (t *SubprocessCLITransport) detectThinkingDisplaySupport() bool {
+	if os.Getenv("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK") != "" {
+		return true
+	}
+	version, err := GetCLIVersion(t.cliPath)
+	if err != nil {
+		t.logger.Debug("unable to determine Claude CLI thinking display support; emitting flag optimistically",
+			zap.Error(err),
+		)
+		return true
+	}
+	if SupportsThinkingDisplay(version) {
+		return true
+	}
+	t.logger.Warn("Claude CLI version does not support --thinking-display; omitting thinking display flag",
+		zap.String("version", version.String()),
+		zap.String("minimum", MinimumThinkingDisplayCLIVersion),
+	)
+	return false
 }
 
 // connectWithCustomSpawner uses the user-provided ProcessSpawner to create the process.
@@ -861,7 +904,7 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 	// Claude Code consumes thinking display as a CLI flag. Keep the typed
 	// settings JSON for thinking mode/budget, and pass display explicitly so
 	// summarized/omitted behavior is honored by the subprocess.
-	if t.options != nil && t.options.Thinking != nil && t.options.Thinking.Type != "disabled" && t.options.Thinking.Display != "" {
+	if t.thinkingDisplaySupported && t.wantsThinkingDisplay() {
 		args = append(args, "--thinking-display", t.options.Thinking.Display)
 		t.logger.Debug("setting thinking display", zap.String("display", t.options.Thinking.Display))
 	}

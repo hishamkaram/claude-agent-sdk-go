@@ -480,6 +480,20 @@ func TestBuildCommandArgs_ThinkingDisplay(t *testing.T) {
 	}
 }
 
+func TestBuildCommandArgs_ThinkingDisplayUnsupportedCLI(t *testing.T) {
+	t.Parallel()
+
+	opts := types.NewClaudeAgentOptions().
+		WithThinking(types.ThinkingConfig{Type: "adaptive", Display: "summarized"})
+	transport := newTestTransport(t, opts)
+	transport.thinkingDisplaySupported = false
+
+	args := transport.buildCommandArgs()
+	if hasFlag(args, "--thinking-display") {
+		t.Fatalf("--thinking-display should be omitted when CLI support is not available; args: %v", args)
+	}
+}
+
 // TestBuildCommandArgs_SettingsSandbox tests --settings flag with sandbox config.
 func TestBuildCommandArgs_SettingsSandbox(t *testing.T) {
 	t.Parallel()
