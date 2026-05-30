@@ -1363,6 +1363,24 @@ func (t *SubprocessCLITransport) ProcessID() int {
 	return 0
 }
 
+// Health returns a point-in-time snapshot of subprocess/transport health. The
+// transport owns this truth (liveness, readiness, last error); callers read it for
+// health endpoints rather than tracking subprocess state separately.
+func (t *SubprocessCLITransport) Health() types.TransportHealth {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	h := types.TransportHealth{
+		Connected: t.cmd != nil || t.customProcess != nil,
+		Ready:     t.ready,
+		LastError: t.err,
+	}
+	if t.cmd != nil && t.cmd.Process != nil {
+		h.PID = t.cmd.Process.Pid
+	}
+	return h
+}
+
 func waitForProcDone(ctx context.Context, procDone <-chan struct{}, timeout time.Duration) bool {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()

@@ -716,6 +716,22 @@ func (c *Client) ProcessID() int {
 	return 0
 }
 
+// Health returns a snapshot of the underlying transport/subprocess health
+// (connected, ready, PID, last error). It returns a zero TransportHealth when the
+// transport does not expose health (e.g. test stubs) or before Connect().
+func (c *Client) Health() types.TransportHealth {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	type healthProvider interface {
+		Health() types.TransportHealth
+	}
+	if hp, ok := c.transport.(healthProvider); ok {
+		return hp.Health()
+	}
+	return types.TransportHealth{}
+}
+
 // Interrupt sends an interrupt control request to cancel the active query.
 // Returns an error if the client is not connected.
 func (c *Client) Interrupt(ctx context.Context) error {

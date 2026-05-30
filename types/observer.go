@@ -49,6 +49,21 @@ type Observer interface {
 	OnUnknownMessage(discriminator string)
 }
 
+// TransportHealth is a point-in-time snapshot of subprocess/transport health. The
+// transport is the sole owner of this truth; consumers (e.g. a daemon health
+// endpoint) read it rather than reconstructing liveness from their own state.
+type TransportHealth struct {
+	// Connected is true when a subprocess is spawned and has not yet exited.
+	Connected bool
+	// Ready is true when the transport is ready to send and receive messages.
+	Ready bool
+	// PID is the subprocess OS process ID, or 0 when there is no live exec process
+	// (e.g. before Connect, after exit, or for a custom-spawned process).
+	PID int
+	// LastError is the most recent transport error, or nil when healthy.
+	LastError error
+}
+
 // NopObserver is an Observer whose methods do nothing. It is the implicit default
 // when no Observer is configured, and it is the recommended embedding base for real
 // Observer implementations: embed it to inherit forward-compatible no-op defaults
