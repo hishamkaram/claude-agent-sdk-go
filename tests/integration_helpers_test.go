@@ -8,6 +8,8 @@ package tests
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -98,4 +100,83 @@ func findAssistantText(msgs []types.Message) string {
 		}
 	}
 	return strings.ToLower(sb.String())
+}
+
+// requireClaude resolves the real `claude` CLI, skipping the test if it is not
+// on PATH or at a known install location.
+func requireClaude(t *testing.T) string {
+	t.Helper()
+	return FindRealCLI(t)
+}
+
+// requireAuth skips the test unless Claude credentials are available via
+// ANTHROPIC_API_KEY, CLAUDE_API_KEY, or a logged-in CLI credentials file.
+func requireAuth(t *testing.T) {
+	t.Helper()
+
+	if os.Getenv("ANTHROPIC_API_KEY") != "" || os.Getenv("CLAUDE_API_KEY") != "" {
+		return
+	}
+
+	credentialsPath := filepath.Join(os.Getenv("HOME"), ".claude", ".credentials.json")
+	if _, err := os.Stat(credentialsPath); err == nil {
+		return
+	}
+
+	t.Skip("Claude auth not available - set ANTHROPIC_API_KEY, CLAUDE_API_KEY, or log in with Claude CLI")
+}
+
+// requireRunTurns skips token-spending tests unless CLAUDE_SDK_RUN_TURNS=1 is
+// set, keeping quota-consuming turns opt-in.
+func requireRunTurns(t *testing.T) {
+	t.Helper()
+
+	if os.Getenv("CLAUDE_SDK_RUN_TURNS") != "1" {
+		t.Skip("CLAUDE_SDK_RUN_TURNS=1 not set - skipping token-spending integration test")
+	}
+}
+
+// safetyNetSettings snapshots and restores ~/.claude/settings.json around a
+// test that may mutate it.
+func safetyNetSettings(t *testing.T) {
+	t.Helper()
+	safetyNetClaudeConfigFile(t, "settings.json")
+}
+
+// safetyNetHooks snapshots and restores ~/.claude/hooks.json around a test that
+// may mutate it.
+func safetyNetHooks(t *testing.T) {
+	t.Helper()
+	safetyNetClaudeConfigFile(t, "hooks.json")
+}
+
+// safetyNetClaudeConfigFile snapshots a ~/.claude config file before the test
+// and restores its original contents (or removes a test-created file) on
+// cleanup, so integration tests never leak edits into the developer's real
+// Claude configuration.
+func safetyNetClaudeConfigFile(t *testing.T, name string) {
+	t.Helper()
+
+	path := filepath.Join(os.Getenv("HOME"), ".claude", name)
+	data, err := os.ReadFile(path)
+	existed := err == nil
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("snapshot %s: %v", path, err)
+	}
+
+	t.Cleanup(func() {
+		if existed {
+			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+				t.Errorf("restore %s parent: %v", path, err)
+				return
+			}
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Errorf("restore %s: %v", path, err)
+			}
+			return
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			t.Errorf("remove test-created %s: %v", path, err)
+		}
+	})
 }
