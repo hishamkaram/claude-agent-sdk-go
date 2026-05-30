@@ -205,16 +205,10 @@ func sessionStoreEntryInfo(entry SessionStoreEntry) types.SDKSessionInfo {
 }
 
 func sessionStoreListEntryInfo(entry SessionStoreListEntry) types.SDKSessionInfo {
-	return types.SDKSessionInfo{
-		SessionID:    entry.SessionID,
-		Summary:      entry.Summary,
-		LastModified: entry.LastModified,
-		FileSize:     entry.FileSize,
-		CustomTitle:  entry.CustomTitle,
-		FirstPrompt:  entry.FirstPrompt,
-		GitBranch:    entry.GitBranch,
-		CWD:          entry.CWD,
-		Tag:          entry.Tag,
-		CreatedAt:    entry.CreatedAt,
-	}
+	// SessionStoreListEntry mirrors SDKSessionInfo field-for-field (only the
+	// JSON tags differ), so a direct struct conversion is exact. The compiler
+	// enforces the mirror: if either struct's field set, types, or order
+	// diverges, this conversion stops compiling and forces an explicit mapping
+	// here rather than silently copying the wrong fields.
+	return types.SDKSessionInfo(entry)
 }
