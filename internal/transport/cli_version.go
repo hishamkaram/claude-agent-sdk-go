@@ -145,6 +145,24 @@ func SupportsThinkingDisplay(version SemanticVersion) bool {
 	})
 }
 
+// SupportsAgentProgressSummaries reports whether the CLI version accepts the
+// --agent-progress-summaries flag. No released version supports it: the flag string
+// is absent from the 2.1.158 CLI binary (verified by inspection), and emitting it
+// crashes Connect with "unknown option". This is the single authoritative gate —
+// when the flag ships, replace the constant false with a version.IsAtLeast(...)
+// check against its real minimum version.
+func SupportsAgentProgressSummaries(_ SemanticVersion) bool {
+	return false
+}
+
+// SupportsSubagentExecution reports whether the CLI version accepts the
+// --subagent-execution flag. Absent from every released version through 2.1.158
+// (verified by binary inspection); returns false until the flag ships and this gate
+// is updated with its real minimum version.
+func SupportsSubagentExecution(_ SemanticVersion) bool {
+	return false
+}
+
 // CheckCLIVersion verifies that the CLI version meets minimum requirements
 // Returns nil if version is acceptable, or an error if not
 func CheckCLIVersion(cliPath string) error {

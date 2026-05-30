@@ -95,6 +95,14 @@ type SubprocessCLITransport struct {
 	// probes the installed CLI when a caller requests display control.
 	thinkingDisplaySupported bool
 
+	// agentProgressSummariesSupported and subagentExecutionSupported gate emission of
+	// the experimental --agent-progress-summaries / --subagent-execution flags so the
+	// transport never sends a flag the installed CLI rejects (which crashes Connect).
+	// Resolved once in Connect from the detected CLI version (or assumed true for a
+	// custom spawner, which the consumer owns). Default false.
+	agentProgressSummariesSupported bool
+	subagentExecutionSupported      bool
+
 	// shutdownRequested is set before stdin is closed during Close. Watchers use
 	// it to distinguish expected close exits from actionable subprocess crashes.
 	shutdownRequested bool
@@ -119,6 +127,10 @@ func NewSubprocessCLITransport(cliPath, cwd string, env map[string]string, logge
 		stderrTail:               newRingBuffer(StderrRingSize),
 		parseErrorBackoff:        defaultParseErrorBackoff,
 		thinkingDisplaySupported: true,
+		// Default to "supported"; Connect's detection sets these false-first when a
+		// flag is actually requested, so an unverified CLI never receives them.
+		agentProgressSummariesSupported: true,
+		subagentExecutionSupported:      true,
 	}
 }
 
@@ -158,6 +170,15 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) (err error) {
 		t.thinkingDisplaySupported = t.detectThinkingDisplaySupport()
 	} else {
 		t.thinkingDisplaySupported = true
+	}
+
+	// Resolve experimental-flag capabilities before buildCommandArgs runs. Custom
+	// spawners are the consumer's responsibility, so assume supported there.
+	if usesCustomSpawner {
+		t.agentProgressSummariesSupported = true
+		t.subagentExecutionSupported = true
+	} else {
+		t.detectExperimentalFlagSupport()
 	}
 
 	// Try warm pool first — if a pre-warmed process is available, use it
@@ -223,6 +244,34 @@ func (t *SubprocessCLITransport) detectThinkingDisplaySupport() bool {
 		zap.String("minimum", MinimumThinkingDisplayCLIVersion),
 	)
 	return false
+}
+
+// detectExperimentalFlagSupport resolves whether the installed CLI accepts the
+// experimental --agent-progress-summaries / --subagent-execution flags, so
+// buildCommandArgs never emits one the CLI would reject (crashing Connect). It only
+// probes the version when a consumer actually opted into one of the flags; otherwise
+// the support fields stay false and the flags are never emitted anyway.
+func (t *SubprocessCLITransport) detectExperimentalFlagSupport() {
+	if t.options == nil {
+		return
+	}
+	wantsProgress := t.options.AgentProgressSummaries
+	wantsSubagent := t.options.SubagentExecution != nil
+	if !wantsProgress && !wantsSubagent {
+		return
+	}
+	// A flag was requested: default to NOT emitting it unless support is positively
+	// confirmed, so a version-detection failure fails safe (no Connect crash).
+	t.agentProgressSummariesSupported = false
+	t.subagentExecutionSupported = false
+	version, err := GetCLIVersion(t.cliPath)
+	if err != nil {
+		t.logger.Warn("unable to determine Claude CLI version; skipping experimental flags to avoid Connect failure",
+			zap.Error(err))
+		return
+	}
+	t.agentProgressSummariesSupported = SupportsAgentProgressSummaries(version)
+	t.subagentExecutionSupported = SupportsSubagentExecution(version)
 }
 
 // connectWithCustomSpawner uses the user-provided ProcessSpawner to create the process.
@@ -1077,9 +1126,11 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 			subagentJSONBytes, err := json.Marshal(subagentJSON)
 			if err != nil {
 				t.logger.Warn("failed to marshal subagent execution config to JSON", zap.Error(err))
-			} else {
+			} else if t.subagentExecutionSupported {
 				args = append(args, "--subagent-execution", string(subagentJSONBytes))
 				t.logger.Debug("subagent execution configuration", zap.String("config", string(subagentJSONBytes)))
+			} else {
+				t.logger.Warn("Claude CLI does not support --subagent-execution; skipping to avoid Connect failure")
 			}
 		}
 	}
@@ -1128,10 +1179,14 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		t.logger.Debug("setting task budget", zap.Float64("task_budget", *t.options.TaskBudget))
 	}
 
-	// Add --agent-progress-summaries flag if enabled
+	// Add --agent-progress-summaries flag if enabled AND the CLI supports it.
 	if t.options != nil && t.options.AgentProgressSummaries {
-		args = append(args, "--agent-progress-summaries")
-		t.logger.Debug("Enabling agent progress summaries")
+		if t.agentProgressSummariesSupported {
+			args = append(args, "--agent-progress-summaries")
+			t.logger.Debug("Enabling agent progress summaries")
+		} else {
+			t.logger.Warn("Claude CLI does not support --agent-progress-summaries; skipping to avoid Connect failure")
+		}
 	}
 
 	return args
