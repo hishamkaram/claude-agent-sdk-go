@@ -99,7 +99,8 @@ type SubprocessCLITransport struct {
 	// the experimental --agent-progress-summaries / --subagent-execution flags so the
 	// transport never sends a flag the installed CLI rejects (which crashes Connect).
 	// Resolved once in Connect from the detected CLI version (or assumed true for a
-	// custom spawner, which the consumer owns). Default false.
+	// custom spawner, which the consumer owns), and read by buildCommandArgs ONLY when
+	// the matching option is requested — see the constructor for the full invariant.
 	agentProgressSummariesSupported bool
 	subagentExecutionSupported      bool
 
@@ -127,8 +128,16 @@ func NewSubprocessCLITransport(cliPath, cwd string, env map[string]string, logge
 		stderrTail:               newRingBuffer(StderrRingSize),
 		parseErrorBackoff:        defaultParseErrorBackoff,
 		thinkingDisplaySupported: true,
-		// Default to "supported"; Connect's detection sets these false-first when a
-		// flag is actually requested, so an unverified CLI never receives them.
+		// INVARIANT: these are read by buildCommandArgs ONLY when the matching
+		// option (AgentProgressSummaries / SubagentExecution) is requested. Before
+		// that read, Connect always resolves them — detectExperimentalFlagSupport
+		// sets them false-first then to the version's true support, or the custom-
+		// spawner path assumes true (the consumer owns that CLI). So when a flag is
+		// requested against an unverified CLI the value is the detected one, never
+		// this default; when no flag is requested the default is simply never read.
+		// The default is therefore inert for emission and only seeds the
+		// build-args-without-Connect unit tests; keep it true so those tests
+		// (which don't call Connect) see "supported".
 		agentProgressSummariesSupported: true,
 		subagentExecutionSupported:      true,
 	}
@@ -536,6 +545,12 @@ const maxParseErrorBackoff = 30 * time.Second
 // stalling forever when the subprocess sends garbage.
 const maxConsecutiveParseErrors uint = 6
 
+// ErrParseGiveUp is the terminal error surfaced when messageReaderLoop gives up
+// after crossing the consecutive-parse-error threshold and terminates the
+// subprocess as unrecoverable. Consumers can detect it with errors.Is. Mirrors
+// codex-agent-sdk-go's jsonrpc.ErrParseGiveUp.
+var ErrParseGiveUp = errors.New("transport: too many consecutive parse errors, subprocess terminated")
+
 // messageReaderLoop reads JSON lines from stdout and parses them into messages.
 // It runs in a goroutine and sends messages to the messages channel.
 // It respects context cancellation and closes the messages channel when done.
@@ -581,16 +596,19 @@ func (t *SubprocessCLITransport) maxParseErrors() uint {
 
 // terminateOnUnrecoverableError forcibly terminates the subprocess after an
 // unrecoverable transport condition (e.g. sustained CLI parse failures). It is the
-// error-path analog of Close(): it records the cause as the transport error (first
-// error wins), kills the process so it cannot linger as a zombie, and cancels the
-// transport context so dependent goroutines unwind. The watcher goroutine then
-// observes procDone and emits the subprocess-exit telemetry. Safe to call from the
-// message-reader goroutine; Kill and cancel are idempotent.
+// error-path analog of Close(): it records the cause as the transport error, kills
+// the process so it cannot linger as a zombie, and cancels the transport context so
+// dependent goroutines unwind. The watcher goroutine then observes procDone and
+// emits the subprocess-exit telemetry. Safe to call from the message-reader
+// goroutine; Kill and cancel are idempotent.
+//
+// reason is the AUTHORITATIVE terminal cause and overrides any prior transient
+// error (e.g. an individual parse failure recorded via OnError): consumers asking
+// GetError() after termination want "why was the subprocess killed", and reason
+// (which wraps ErrParseGiveUp) carries that — and stays errors.Is-detectable.
 func (t *SubprocessCLITransport) terminateOnUnrecoverableError(reason error) {
 	t.mu.Lock()
-	if t.err == nil {
-		t.err = reason
-	}
+	t.err = reason
 	cancelFn := t.cancel
 	var proc *os.Process
 	if t.cmd != nil {
@@ -713,7 +731,7 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 				)
 				t.observer().OnParseGiveUp(consecutiveParseErrors)
 				t.terminateOnUnrecoverableError(
-					fmt.Errorf("transport.messageReaderLoop: %d consecutive parse errors, giving up", consecutiveParseErrors),
+					fmt.Errorf("transport.messageReaderLoop: %d consecutive parse errors (last: %v): %w", consecutiveParseErrors, err, ErrParseGiveUp),
 				)
 				return
 			}

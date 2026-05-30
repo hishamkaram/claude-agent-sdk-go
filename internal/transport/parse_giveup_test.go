@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync/atomic"
@@ -94,9 +95,14 @@ func TestMessageReaderLoop_GiveUpTerminatesSubprocess(t *testing.T) {
 		t.Fatal("subprocess was NOT terminated after parse give-up (B2 regression: zombie left alive)")
 	}
 
-	// The error is surfaced to the consumer.
-	if tr.GetError() == nil {
+	// The error is surfaced to the consumer and is detectable as the
+	// ErrParseGiveUp sentinel via errors.Is (so consumers can branch on it).
+	gotErr := tr.GetError()
+	if gotErr == nil {
 		t.Fatal("expected a stored transport error after give-up, got nil")
+	}
+	if !errors.Is(gotErr, ErrParseGiveUp) {
+		t.Fatalf("give-up error %v is not errors.Is(ErrParseGiveUp)", gotErr)
 	}
 
 	cancel()
