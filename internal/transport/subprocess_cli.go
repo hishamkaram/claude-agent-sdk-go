@@ -124,13 +124,20 @@ func NewSubprocessCLITransport(cliPath, cwd string, env map[string]string, logge
 
 // Connect starts the Claude Code CLI subprocess and establishes communication pipes.
 // It launches the subprocess with "agent --stdio" arguments and sets up the environment.
-func (t *SubprocessCLITransport) Connect(ctx context.Context) error {
+func (t *SubprocessCLITransport) Connect(ctx context.Context) (err error) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 
 	if t.cmd != nil || t.customProcess != nil {
-		return nil // Already connected
+		t.mu.Unlock()
+		return nil // Already connected — no telemetry for a no-op
 	}
+
+	// Emit connect telemetry once the attempt completes. Registered before the
+	// unlock defer so it runs AFTER t.mu is released (never call the Observer under
+	// the lock). err is the named return, so the deferred closure sees the outcome.
+	connectStart := time.Now()
+	defer func() { t.observer().OnConnect(time.Since(connectStart), err) }()
+	defer t.mu.Unlock()
 
 	t.logger.Debug("starting Claude CLI subprocess", zap.String("cli_path", t.cliPath))
 
@@ -157,12 +164,12 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) error {
 	if !usesCustomSpawner && (!wantsThinkingDisplay || !t.thinkingDisplaySupported) {
 		if warm := ConsumeWarmProcess(); warm != nil && warm.IsAlive() {
 			t.logger.Debug("using pre-warmed subprocess from Startup()")
-			err := t.connectWithWarmProcess(warm)
-			if err == nil {
+			warmErr := t.connectWithWarmProcess(warm)
+			if warmErr == nil {
 				return nil
 			}
 			// Warm process failed — fall through to normal spawn
-			t.logger.Debug("warm process unusable, falling through to normal spawn", zap.Error(err))
+			t.logger.Debug("warm process unusable, falling through to normal spawn", zap.Error(warmErr))
 		}
 	}
 
@@ -176,7 +183,6 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) error {
 	envMap := t.buildEnvMap()
 
 	// Check if a custom process spawner is provided
-	var err error
 	if t.options != nil && t.options.SpawnProcess != nil {
 		err = t.connectWithCustomSpawner(ctx, args, envMap)
 	} else {
@@ -275,11 +281,18 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 		t.mu.Lock()
 		wasReady := t.ready
 		t.ready = false
-		if waitErr != nil && t.err == nil && !t.shutdownRequested {
-			t.err = t.newProcessErrorWithDiagnostics("subprocess exited unexpectedly", capturedProcess.ExitCode())
+		requested := t.shutdownRequested
+		exitCode := capturedProcess.ExitCode()
+		if waitErr != nil && t.err == nil && !requested {
+			t.err = t.newProcessErrorWithDiagnostics("subprocess exited unexpectedly", exitCode)
+		}
+		var cause error
+		if !requested {
+			cause = t.err
 		}
 		cancelFn := t.cancel // capture under lock to avoid race with Close()
 		t.mu.Unlock()
+		t.observer().OnSubprocessExit(exitCode, requested, cause)
 		if wasReady {
 			if cancelFn != nil {
 				cancelFn()
@@ -411,11 +424,18 @@ func (t *SubprocessCLITransport) connectWithExecCommand(args []string, envMap ma
 		t.mu.Lock()
 		wasReady := t.ready
 		t.ready = false
-		if waitErr != nil && t.err == nil && !t.shutdownRequested {
-			t.err = t.newProcessErrorWithDiagnostics("subprocess exited unexpectedly", getExitCode(waitErr))
+		requested := t.shutdownRequested
+		exitCode := getExitCode(waitErr)
+		if waitErr != nil && t.err == nil && !requested {
+			t.err = t.newProcessErrorWithDiagnostics("subprocess exited unexpectedly", exitCode)
+		}
+		var cause error
+		if !requested {
+			cause = t.err
 		}
 		cancelFn := t.cancel // capture under lock to avoid race with Close()
 		t.mu.Unlock()
+		t.observer().OnSubprocessExit(exitCode, requested, cause)
 		if wasReady {
 			if cancelFn != nil {
 				cancelFn()
@@ -494,6 +514,66 @@ const maxConsecutiveParseErrors uint = 6
 //
 // Parse errors trigger exponential backoff (1s, 2s, 4s, ... up to 30s) to prevent
 // CPU spin on repeated invalid JSON. The backoff counter resets on successful parse.
+// maxBufferSize returns the maximum size (bytes) of a single JSON line the message
+// reader will accept. It honors ClaudeAgentOptions.MaxBufferSize when the caller set
+// a positive value, otherwise falls back to DefaultMaxBufferSize. This is the single
+// source of the line-size rule for every reader the transport creates, so the public
+// MaxBufferSize option is authoritative (it was previously silently ignored).
+func (t *SubprocessCLITransport) maxBufferSize() int {
+	if t.options != nil && t.options.MaxBufferSize != nil && *t.options.MaxBufferSize > 0 {
+		return *t.options.MaxBufferSize
+	}
+	return DefaultMaxBufferSize
+}
+
+// observer returns the telemetry Observer configured on the transport's options,
+// or NopObserver when none is set. Single accessor so emission sites never repeat
+// the nil-guard logic.
+func (t *SubprocessCLITransport) observer() types.Observer {
+	return t.options.ObserverOrNop()
+}
+
+// maxParseErrors returns the configured consecutive-parse-error threshold, honoring
+// ClaudeAgentOptions.MaxConsecutiveParseErrors when positive, else the package
+// default. Single source of the threshold rule.
+func (t *SubprocessCLITransport) maxParseErrors() uint {
+	if t.options != nil && t.options.MaxConsecutiveParseErrors != nil && *t.options.MaxConsecutiveParseErrors > 0 {
+		return *t.options.MaxConsecutiveParseErrors
+	}
+	return maxConsecutiveParseErrors
+}
+
+// terminateOnUnrecoverableError forcibly terminates the subprocess after an
+// unrecoverable transport condition (e.g. sustained CLI parse failures). It is the
+// error-path analog of Close(): it records the cause as the transport error (first
+// error wins), kills the process so it cannot linger as a zombie, and cancels the
+// transport context so dependent goroutines unwind. The watcher goroutine then
+// observes procDone and emits the subprocess-exit telemetry. Safe to call from the
+// message-reader goroutine; Kill and cancel are idempotent.
+func (t *SubprocessCLITransport) terminateOnUnrecoverableError(reason error) {
+	t.mu.Lock()
+	if t.err == nil {
+		t.err = reason
+	}
+	cancelFn := t.cancel
+	var proc *os.Process
+	if t.cmd != nil {
+		proc = t.cmd.Process
+	}
+	custom := t.customProcess
+	t.mu.Unlock()
+
+	if proc != nil {
+		_ = proc.Kill()
+	}
+	if custom != nil {
+		_ = custom.Kill()
+	}
+	if cancelFn != nil {
+		cancelFn()
+	}
+}
+
 func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout io.ReadCloser, procDone <-chan struct{}) {
 	ch := t.messages
 
@@ -523,9 +603,11 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 	}()
 
 	t.logger.Debug("Message reader loop started")
-	reader := NewJSONLineReader(stdout)
+	reader := NewJSONLineReaderWithSize(stdout, t.maxBufferSize())
 
 	var consecutiveParseErrors uint
+	loopStart := time.Now()
+	firstMessage := true
 
 	for {
 		// Check for context cancellation
@@ -580,17 +662,23 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 		msg, err := types.UnmarshalMessage(line)
 		if err != nil {
 			consecutiveParseErrors++
+			t.observer().OnParseError(consecutiveParseErrors, err)
 			t.logger.Warn("failed to parse message from CLI",
 				zap.Error(err),
 				zap.Uint("consecutive_errors", consecutiveParseErrors),
 			)
 
-			// Exit after too many consecutive parse failures — subprocess is broken.
-			if consecutiveParseErrors >= maxConsecutiveParseErrors {
-				t.logger.Error("too many consecutive parse errors, closing message reader",
+			// Exit after too many consecutive parse failures — the subprocess is
+			// emitting garbage and is unrecoverable. Terminate it authoritatively
+			// (reap the process, surface the error) rather than leaving a zombie.
+			if consecutiveParseErrors >= t.maxParseErrors() {
+				t.logger.Error("too many consecutive parse errors, terminating subprocess",
 					zap.Uint("consecutive_errors", consecutiveParseErrors),
 				)
-				t.OnError(fmt.Errorf("transport.messageReaderLoop: %d consecutive parse errors, giving up", consecutiveParseErrors))
+				t.observer().OnParseGiveUp(consecutiveParseErrors)
+				t.terminateOnUnrecoverableError(
+					fmt.Errorf("transport.messageReaderLoop: %d consecutive parse errors, giving up", consecutiveParseErrors),
+				)
 				return
 			}
 
@@ -627,6 +715,16 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 
 		// Successful parse — reset backoff counter
 		consecutiveParseErrors = 0
+
+		if firstMessage {
+			firstMessage = false
+			t.observer().OnFirstMessage(time.Since(loopStart))
+		}
+		if unknown, ok := msg.(*types.UnknownMessage); ok {
+			// Unrecognized message type — the CLI wire format has drifted ahead of
+			// the SDK. Surface it as telemetry so drift is observable, not silent.
+			t.observer().OnUnknownMessage(unknown.GetMessageType())
+		}
 
 		t.logger.Debug("received message from CLI", zap.String("type", msg.GetMessageType()))
 
@@ -725,15 +823,21 @@ func (t *SubprocessCLITransport) connectWithWarmProcess(warm *WarmProcess) error
 		t.mu.Lock()
 		wasReady := t.ready
 		t.ready = false
-		if t.err == nil && !t.shutdownRequested {
-			exitCode := 0
-			if warmCmd != nil && warmCmd.ProcessState != nil {
-				exitCode = warmCmd.ProcessState.ExitCode()
-			}
+		requested := t.shutdownRequested
+		exitCode := 0
+		if warmCmd != nil && warmCmd.ProcessState != nil {
+			exitCode = warmCmd.ProcessState.ExitCode()
+		}
+		if t.err == nil && !requested {
 			t.err = t.newProcessErrorWithDiagnostics("subprocess exited unexpectedly", exitCode)
+		}
+		var cause error
+		if !requested {
+			cause = t.err
 		}
 		cancelFn := t.cancel
 		t.mu.Unlock()
+		t.observer().OnSubprocessExit(exitCode, requested, cause)
 		if wasReady {
 			if cancelFn != nil {
 				cancelFn()

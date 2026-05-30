@@ -333,6 +333,10 @@ func (q *Query) enqueueMessage(msg types.Message) error {
 	default:
 	}
 
+	// Queue is full — the producer must block until the consumer drains. Surface
+	// each occurrence as a backpressure event so slow consumers are observable.
+	q.options.ObserverOrNop().OnBackpressure()
+
 	if q.messagesBackpressureWarned.CompareAndSwap(false, true) {
 		q.logger.Warn("message queue backpressure detected",
 			zap.Int("queued", len(q.messagesChan)),

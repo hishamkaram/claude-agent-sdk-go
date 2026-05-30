@@ -420,6 +420,16 @@ type ClaudeAgentOptions struct {
 	// Buffer configuration
 	MaxBufferSize *int `json:"max_buffer_size,omitempty"` // Max bytes when buffering CLI stdout
 
+	// Observability — Observer receives SDK lifecycle and health telemetry.
+	// A nil Observer drops all telemetry (NopObserver semantics). Never serialized.
+	Observer Observer `json:"-"`
+
+	// MaxConsecutiveParseErrors caps how many consecutive CLI JSON parse failures
+	// the transport tolerates before it terminates the subprocess as unrecoverable.
+	// nil or non-positive → the transport default. The terminated subprocess is
+	// reaped (not left as a zombie) and the error is surfaced to the consumer.
+	MaxConsecutiveParseErrors *uint `json:"max_consecutive_parse_errors,omitempty"`
+
 	// Streaming configuration
 	IncludePartialMessages bool `json:"include_partial_messages,omitempty"`
 
@@ -723,6 +733,30 @@ func (o *ClaudeAgentOptions) WithExtraArg(key string, value *string) *ClaudeAgen
 // WithMaxBufferSize sets the maximum buffer size.
 func (o *ClaudeAgentOptions) WithMaxBufferSize(size int) *ClaudeAgentOptions {
 	o.MaxBufferSize = &size
+	return o
+}
+
+// WithObserver sets the telemetry Observer for SDK lifecycle and health events.
+func (o *ClaudeAgentOptions) WithObserver(obs Observer) *ClaudeAgentOptions {
+	o.Observer = obs
+	return o
+}
+
+// ObserverOrNop returns the configured Observer, or NopObserver when none is set
+// (including when the receiver itself is nil). This is the single source of the
+// "default to no-op" rule — callers in the transport and query layers use it so
+// telemetry call sites never need their own nil guards.
+func (o *ClaudeAgentOptions) ObserverOrNop() Observer {
+	if o == nil || o.Observer == nil {
+		return NopObserver{}
+	}
+	return o.Observer
+}
+
+// WithMaxConsecutiveParseErrors sets how many consecutive CLI JSON parse failures
+// the transport tolerates before terminating the subprocess. Non-positive is ignored.
+func (o *ClaudeAgentOptions) WithMaxConsecutiveParseErrors(n uint) *ClaudeAgentOptions {
+	o.MaxConsecutiveParseErrors = &n
 	return o
 }
 
