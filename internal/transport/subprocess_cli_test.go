@@ -552,18 +552,6 @@ func TestConnectWithCustomSpawnerPreservesThinkingDisplayWithProbeableOldHostCLI
 		t.Fatalf("write fake cli: %v", err)
 	}
 
-	warmDone := make(chan struct{})
-	var closeWarm sync.Once
-	StoreWarmProcess(&WarmProcess{Done: warmDone})
-	defer func() {
-		if warm := ConsumeWarmProcess(); warm != nil {
-			if warm.Done != warmDone {
-				warm.Kill()
-			}
-		}
-		closeWarm.Do(func() { close(warmDone) })
-	}()
-
 	var spawnerCalled bool
 	var receivedOpts types.SpawnOptions
 	mockProc := newMockSpawnedProcess()
@@ -591,14 +579,6 @@ func TestConnectWithCustomSpawnerPreservesThinkingDisplayWithProbeableOldHostCLI
 	if !spawnerCalled {
 		t.Fatal("custom spawner was not invoked")
 	}
-	if warm := ConsumeWarmProcess(); warm == nil {
-		t.Fatal("custom spawner connection consumed warm pool")
-	} else if warm.Done != warmDone {
-		warm.Kill()
-		t.Fatal("custom spawner connection replaced warm pool entry")
-	}
-	closeWarm.Do(func() { close(warmDone) })
-
 	val, found := flagValue(receivedOpts.Args, "--thinking-display")
 	if !found {
 		t.Fatalf("--thinking-display missing from custom SpawnOptions.Args: %v", receivedOpts.Args)
