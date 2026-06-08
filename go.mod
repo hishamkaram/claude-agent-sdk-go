@@ -2,6 +2,8 @@ module github.com/hishamkaram/claude-agent-sdk-go
 
 go 1.25.10
 
+toolchain go1.25.11
+
 retract v0.2.0 // Accidentally published version
 
 require (
