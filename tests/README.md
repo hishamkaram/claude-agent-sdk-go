@@ -172,10 +172,10 @@ Tests are designed to run in parallel when possible using `t.Parallel()`.
 
 ### Coverage by Package
 ```
-github.com/schlunsen/claude-agent-sdk-go            - Public API
-github.com/schlunsen/claude-agent-sdk-go/internal   - Core logic
-github.com/schlunsen/claude-agent-sdk-go/internal/transport - Transport layer
-github.com/schlunsen/claude-agent-sdk-go/internal/types - Type definitions
+github.com/hishamkaram/claude-agent-sdk-go            - Public API
+github.com/hishamkaram/claude-agent-sdk-go/internal   - Core logic
+github.com/hishamkaram/claude-agent-sdk-go/internal/transport - Transport layer
+github.com/hishamkaram/claude-agent-sdk-go/internal/types - Type definitions
 ```
 
 ## Mock CLI Behavior
@@ -284,5 +284,5 @@ When adding new tests:
 ## Reference
 
 - Main implementation: `/internal/`
-- Python SDK reference: `/Users/schlunsen/projects/claude-agent-sdk-python/`
+- Python SDK reference: https://github.com/anthropics/claude-agent-sdk-python
 - Implementation plan: `/GO_PORT_PLAN.md`

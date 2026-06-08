@@ -35,9 +35,15 @@ go get github.com/hishamkaram/claude-agent-sdk-go
 ### One-shot query
 
 ```go
-import claude "github.com/hishamkaram/claude-agent-sdk-go"
+import (
+    claude "github.com/hishamkaram/claude-agent-sdk-go"
+    "github.com/hishamkaram/claude-agent-sdk-go/types"
+)
 
-msgs := claude.Query(ctx, "Explain this Go code", claude.NewClaudeAgentOptions())
+msgs, err := claude.Query(ctx, "Explain this Go code", types.NewClaudeAgentOptions())
+if err != nil {
+    log.Fatal(err)
+}
 for msg := range msgs {
     fmt.Println(msg)
 }
@@ -46,26 +52,32 @@ for msg := range msgs {
 ### Interactive multi-turn session
 
 ```go
-client, err := claude.NewClient(ctx, claude.NewClaudeAgentOptions())
+opts := types.NewClaudeAgentOptions()
+client, err := claude.NewClient(ctx, opts)
 if err != nil {
     log.Fatal(err)
 }
-defer client.Close()
+defer client.Close(ctx)
 
-if err := client.Connect(); err != nil {
+if err := client.Connect(ctx); err != nil {
     log.Fatal(err)
 }
 
-response := client.Query(ctx, "What files are in this directory?")
+if err := client.Query(ctx, "What files are in this directory?"); err != nil {
+    log.Fatal(err)
+}
+for msg := range client.ReceiveResponse(ctx) {
+    fmt.Println(msg)
+}
 ```
 
 ### Hook event interception
 
 ```go
-opts := claude.NewClaudeAgentOptions().
-    WithPermissionRequestHandler(func(ctx context.Context, e types.PermissionRequestInput) types.PermissionRequestResult {
-        // inspect e.ToolName, e.ToolInput — allow or deny
-        return types.PermissionRequestResult{Behavior: types.PermissionAllow}
+opts := types.NewClaudeAgentOptions().
+    WithCanUseTool(func(ctx context.Context, toolName string, input map[string]interface{}, permCtx types.ToolPermissionContext) (interface{}, error) {
+        // inspect toolName and input — allow or deny
+        return &types.PermissionResultAllow{Behavior: "allow"}, nil
     })
 
 client, _ := claude.NewClient(ctx, opts)

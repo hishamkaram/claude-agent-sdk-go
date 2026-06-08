@@ -40,8 +40,8 @@ package main
 import (
     "context"
     "fmt"
-    sdk "github.com/schlunsen/claude-agent-sdk-go"
-    "github.com/schlunsen/claude-agent-sdk-go/types"
+    sdk "github.com/hishamkaram/claude-agent-sdk-go"
+    "github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 func main() {
@@ -94,7 +94,7 @@ options = AgentOptions(
 ### Go: Builder Pattern
 
 ```go
-options := sdk.NewClaudeAgentOptions().
+options := types.NewClaudeAgentOptions().
     WithModel("claude-opus-4-20250514").
     WithAllowedTools("Bash", "Read", "Write").
     WithSystemPrompt("You are a helpful assistant").
@@ -105,7 +105,7 @@ options := sdk.NewClaudeAgentOptions().
 - Go uses method chaining (builder pattern)
 - Each `With*()` method returns the options object for chaining
 - Configuration is verified at compile-time, not runtime
-- No need to import from multiple modules
+- Options and wire types live in the `types` subpackage
 
 ---
 
@@ -137,8 +137,8 @@ package main
 import (
     "context"
     "fmt"
-    sdk "github.com/schlunsen/claude-agent-sdk-go"
-    "github.com/schlunsen/claude-agent-sdk-go/types"
+    sdk "github.com/hishamkaram/claude-agent-sdk-go"
+    "github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 func main() {
@@ -204,33 +204,40 @@ package main
 import (
     "context"
     "fmt"
-    sdk "github.com/schlunsen/claude-agent-sdk-go"
-    "github.com/schlunsen/claude-agent-sdk-go/types"
+    sdk "github.com/hishamkaram/claude-agent-sdk-go"
+    "github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 func main() {
     ctx := context.Background()
 
-    options := sdk.NewClaudeAgentOptions()
-    client, _ := sdk.NewClient(ctx, options)
+    options := types.NewClaudeAgentOptions()
+    client, err := sdk.NewClient(ctx, options)
+    if err != nil {
+        panic(err)
+    }
     defer client.Close(ctx)
 
-    client.Connect(ctx)
+    if err := client.Connect(ctx); err != nil {
+        panic(err)
+    }
 
     // Send first query
-    client.Query(ctx, "What is the capital of France?")
+    if err := client.Query(ctx, "What is the capital of France?"); err != nil {
+        panic(err)
+    }
     messages := []types.Message{}
     for msg := range client.ReceiveResponse(ctx) {
         messages = append(messages, msg)
     }
 
     // Continue conversation
-    client.Query(ctx, "And Germany?")
+    if err := client.Query(ctx, "And Germany?"); err != nil {
+        panic(err)
+    }
     for msg := range client.ReceiveResponse(ctx) {
         messages = append(messages, msg)
     }
-
-    client.Close(ctx)
 }
 ```
 
@@ -264,8 +271,8 @@ package main
 import (
     "context"
     "fmt"
-    sdk "github.com/schlunsen/claude-agent-sdk-go"
-    "github.com/schlunsen/claude-agent-sdk-go/types"
+    sdk "github.com/hishamkaram/claude-agent-sdk-go"
+    "github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 func main() {
@@ -281,7 +288,7 @@ func main() {
         },
     }
 
-    options := sdk.NewClaudeAgentOptions().
+    options := types.NewClaudeAgentOptions().
         WithHook(types.HookEventPreToolUse, preHook)
 
     // ... rest of code
@@ -331,8 +338,8 @@ package main
 import (
     "context"
     "strings"
-    sdk "github.com/schlunsen/claude-agent-sdk-go"
-    "github.com/schlunsen/claude-agent-sdk-go/types"
+    sdk "github.com/hishamkaram/claude-agent-sdk-go"
+    "github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 func checkPermissions(ctx context.Context,
@@ -358,7 +365,7 @@ func checkPermissions(ctx context.Context,
 }
 
 func main() {
-    options := sdk.NewClaudeAgentOptions().
+    options := types.NewClaudeAgentOptions().
         WithCanUseTool(checkPermissions)
 
     // ... rest of code
@@ -407,8 +414,8 @@ package main
 
 import (
     "context"
-    sdk "github.com/schlunsen/claude-agent-sdk-go"
-    "github.com/schlunsen/claude-agent-sdk-go/types"
+    sdk "github.com/hishamkaram/claude-agent-sdk-go"
+    "github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 func main() {
@@ -434,7 +441,7 @@ func main() {
         },
     )
 
-    options := sdk.NewClaudeAgentOptions().
+    options := types.NewClaudeAgentOptions().
         WithMCPServer("calculator", calculator)
 
     // ... rest of code
@@ -483,8 +490,8 @@ package main
 import (
     "errors"
     "fmt"
-    sdk "github.com/schlunsen/claude-agent-sdk-go"
-    "github.com/schlunsen/claude-agent-sdk-go/types"
+    sdk "github.com/hishamkaram/claude-agent-sdk-go"
+    "github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
 func main() {
@@ -551,7 +558,7 @@ import (
     "context"
     "fmt"
     "time"
-    sdk "github.com/schlunsen/claude-agent-sdk-go"
+    sdk "github.com/hishamkaram/claude-agent-sdk-go"
 )
 
 func queryWithRetry(ctx context.Context, prompt string, maxRetries int) (<-chan interface{}, error) {
@@ -606,7 +613,7 @@ import (
     "context"
     "fmt"
     "sync"
-    sdk "github.com/schlunsen/claude-agent-sdk-go"
+    sdk "github.com/hishamkaram/claude-agent-sdk-go"
 )
 
 func main() {
@@ -669,7 +676,7 @@ import (
     "context"
     "fmt"
     "time"
-    sdk "github.com/schlunsen/claude-agent-sdk-go"
+    sdk "github.com/hishamkaram/claude-agent-sdk-go"
 )
 
 func main() {
@@ -757,4 +764,4 @@ for msg := range messages {
 
 ---
 
-**Have questions?** Open an [issue](https://github.com/schlunsen/claude-agent-sdk-go/issues) or start a [discussion](https://github.com/schlunsen/claude-agent-sdk-go/discussions).
+**Have questions?** Open an [issue](https://github.com/hishamkaram/claude-agent-sdk-go/issues) or start a [discussion](https://github.com/hishamkaram/claude-agent-sdk-go/discussions).
