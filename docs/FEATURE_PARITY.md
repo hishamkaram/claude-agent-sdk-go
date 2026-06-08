@@ -104,7 +104,7 @@ This document provides a comprehensive comparison of features between the Go Age
 | Feature | Python | Go | Notes |
 |---------|--------|-----|-------|
 | **System prompt** | ✅ | ✅ | Custom system instructions |
-| **System prompt presets** | ⚠️ | ⚠️ | claude_code preset (emerging) |
+| **System prompt presets** | ✅ | ✅ | `claude_code` preset supported via system-prompt preset options |
 | **Model parameter** | ✅ | ✅ | Specify model version |
 | **Temperature** | ❌ | ❌ | Not exposed by current APIs |
 | **Top P** | ❌ | ❌ | Not exposed by current APIs |
@@ -189,17 +189,12 @@ This document provides a comprehensive comparison of features between the Go Age
 
 ### Minor Gaps
 
-1. **System Prompt Presets** (⚠️ Emerging)
-   - Status: Being added to Python SDK
-   - Impact: Low - can use custom prompts
-   - Timeline: Q1 2026
-
-2. **Advanced Streaming Events** (⚠️ Not Yet)
+1. **Advanced Streaming Events** (⚠️ Not Yet)
    - Status: Planned for future releases
    - Impact: Low - can use standard streaming
    - Workaround: Use hook callbacks
 
-3. **Subagent Framework** (⚠️ Development)
+2. **Subagent Framework** (⚠️ Development)
    - Status: In Python SDK development branch
    - Impact: Medium for complex agentic systems
    - Timeline: Q1-Q2 2026
@@ -232,8 +227,7 @@ Currently **not implemented** in either SDK:
 - Beta features (fully supported)
 - Debugging features (Go has less runtime introspection)
 
-### Emerging/Preview (3 features)
-- System prompt presets (coming to both)
+### Emerging/Preview (2 features)
 - Subagent framework (Python developing)
 - Advanced streaming (future)
 
@@ -293,12 +287,8 @@ Both SDKs use the same control protocol and are forward-compatible with differen
 
 ## Roadmap & Future Parity
 
-### Q1 2026
-- [ ] System prompt presets (both)
 - [ ] Subagent framework (both)
 - [ ] Advanced streaming events
-
-### Q2 2026
 - [ ] Custom tokenizer support
 - [ ] Performance optimizations
 - [ ] Enhanced debugging features
@@ -307,9 +297,9 @@ Both SDKs use the same control protocol and are forward-compatible with differen
 
 ## Help Us Close the Gaps
 
-- Found a missing feature? [Open an issue](https://github.com/schlunsen/claude-agent-sdk-go/issues)
+- Found a missing feature? [Open an issue](https://github.com/hishamkaram/claude-agent-sdk-go/issues)
 - Want to contribute? See [DEVELOPMENT.md](../DEVELOPMENT.md)
-- Have feedback? [Discussions](https://github.com/schlunsen/claude-agent-sdk-go/discussions)
+- Have feedback? [Discussions](https://github.com/hishamkaram/claude-agent-sdk-go/discussions)
 
 ---
 
@@ -332,9 +322,9 @@ A: Both SDKs maintain backward compatibility within major versions.
 
 ---
 
-**Last Verified**: 2026-03-19
-**Next Review**: 2026-06-30
+**Last Verified**: 2026-06-07
+**Next Review**: 2026-09-30
 
 For the latest SDK versions and features, see:
-- [Go SDK Releases](https://github.com/schlunsen/claude-agent-sdk-go/releases)
+- [Go SDK Releases](https://github.com/hishamkaram/claude-agent-sdk-go/releases)
 - [Python SDK Releases](https://github.com/anthropics/claude-agent-sdk-python/releases)

@@ -118,7 +118,10 @@ func main() {
     client := Agent{}
 
     // Non-blocking request returns channel
-    messages := client.Query(ctx, "What is 2+2?")
+    messages, err := Query(ctx, "What is 2+2?")
+    if err != nil {
+        panic(err)
+    }
 
     // Receive from channel (blocking read)
     for message := range messages {
@@ -131,21 +134,21 @@ func main() {
     ch3 := make(chan *Message)
 
     go func() {
-        messages, _ := client.Query(ctx, "Q1")
+        messages, _ := Query(ctx, "Q1")
         for m := range messages {
             ch1 <- m
         }
     }()
 
     go func() {
-        messages, _ := client.Query(ctx, "Q2")
+        messages, _ := Query(ctx, "Q2")
         for m := range messages {
             ch2 <- m
         }
     }()
 
     go func() {
-        messages, _ := client.Query(ctx, "Q3")
+        messages, _ := Query(ctx, "Q3")
         for m := range messages {
             ch3 <- m
         }
@@ -378,7 +381,7 @@ except Exception as e:
 **Go uses error values and type predicates:**
 
 ```go
-result, err := client.Query(ctx, "Malicious command")
+err := client.Query(ctx, "Malicious command")
 
 var permError *PermissionDeniedError
 var cliError *CLINotFoundError

@@ -37,7 +37,7 @@ calculator, err := types.NewSDKMCPServer("calculator",
 ### Registering with Claude
 
 ```go
-options := sdk.NewClaudeAgentOptions().
+options := types.NewClaudeAgentOptions().
     WithMCPServer("calculator", calculator)
 
 messages, _ := sdk.Query(ctx, "What is 15 * 23?", options)
