@@ -105,51 +105,7 @@ func (q *Query) Initialize(ctx context.Context) (map[string]interface{}, error) 
 
 	q.logger.Debug("Initializing control protocol...")
 
-	// Build hooks configuration
-	hooksConfig := make(map[string]interface{})
-	if q.hooks != nil {
-		for event, matchers := range q.hooks {
-			if len(matchers) == 0 {
-				continue
-			}
-
-			eventHooks := make([]map[string]interface{}, 0, len(matchers))
-			for _, matcher := range matchers {
-				callbackIDs := make([]string, 0, len(matcher.Hooks))
-				for _, callback := range matcher.Hooks {
-					callbackID := q.registerHookCallback(callback)
-					callbackIDs = append(callbackIDs, callbackID)
-				}
-
-				hookConfig := map[string]interface{}{
-					"hookCallbackIds": callbackIDs,
-				}
-				if matcher.Matcher != nil {
-					hookConfig["matcher"] = *matcher.Matcher
-				}
-				eventHooks = append(eventHooks, hookConfig)
-			}
-			hooksConfig[string(event)] = eventHooks
-		}
-	}
-
-	// Send initialize request
-	request := map[string]interface{}{
-		"subtype": "initialize",
-	}
-	if len(hooksConfig) > 0 {
-		request["hooks"] = hooksConfig
-	}
-
-	// Add promptSuggestions if enabled
-	if q.options != nil && q.options.PromptSuggestions {
-		request["promptSuggestions"] = true
-	}
-
-	// Add jsonSchema from OutputFormat if specified
-	if q.options != nil && q.options.OutputFormat != nil && q.options.OutputFormat.Schema != nil {
-		request["jsonSchema"] = q.options.OutputFormat.Schema
-	}
+	request := q.buildInitializeRequest(q.buildHooksConfig())
 
 	result, err := q.sendControlRequest(ctx, request)
 	if err != nil {
@@ -164,6 +120,65 @@ func (q *Query) Initialize(ctx context.Context) (map[string]interface{}, error) 
 	return result, nil
 }
 
+// buildHooksConfig builds the initialize request's hooks configuration, keyed by
+// event name. It registers each hook callback (assigning a stable callback id)
+// as a side effect and skips events with no matchers. The returned map is empty
+// (never nil) when no hooks are configured.
+func (q *Query) buildHooksConfig() map[string]interface{} {
+	hooksConfig := make(map[string]interface{})
+	if q.hooks == nil {
+		return hooksConfig
+	}
+	for event, matchers := range q.hooks {
+		if len(matchers) == 0 {
+			continue
+		}
+		hooksConfig[string(event)] = q.buildEventHooks(matchers)
+	}
+	return hooksConfig
+}
+
+// buildEventHooks converts the matchers for a single hook event into the wire
+// shape ([]{hookCallbackIds, matcher?}), registering each callback to obtain its
+// id.
+func (q *Query) buildEventHooks(matchers []types.HookMatcher) []map[string]interface{} {
+	eventHooks := make([]map[string]interface{}, 0, len(matchers))
+	for _, matcher := range matchers {
+		callbackIDs := make([]string, 0, len(matcher.Hooks))
+		for _, callback := range matcher.Hooks {
+			callbackIDs = append(callbackIDs, q.registerHookCallback(callback))
+		}
+		hookConfig := map[string]interface{}{
+			"hookCallbackIds": callbackIDs,
+		}
+		if matcher.Matcher != nil {
+			hookConfig["matcher"] = *matcher.Matcher
+		}
+		eventHooks = append(eventHooks, hookConfig)
+	}
+	return eventHooks
+}
+
+// buildInitializeRequest assembles the initialize control request from the
+// prepared hooks config and the option-gated fields (promptSuggestions,
+// jsonSchema). Keys are added only when their source is present so the emitted
+// request shape is unchanged from the original inline construction.
+func (q *Query) buildInitializeRequest(hooksConfig map[string]interface{}) map[string]interface{} {
+	request := map[string]interface{}{
+		"subtype": "initialize",
+	}
+	if len(hooksConfig) > 0 {
+		request["hooks"] = hooksConfig
+	}
+	if q.options != nil && q.options.PromptSuggestions {
+		request["promptSuggestions"] = true
+	}
+	if q.options != nil && q.options.OutputFormat != nil && q.options.OutputFormat.Schema != nil {
+		request["jsonSchema"] = q.options.OutputFormat.Schema
+	}
+	return request
+}
+
 // Start begins the control message handling loop.
 func (q *Query) Start(ctx context.Context) error {
 	q.mu.Lock()
@@ -174,8 +189,17 @@ func (q *Query) Start(ctx context.Context) error {
 	q.started = true
 	q.mu.Unlock()
 
-	// Start message reading loop
-	go q.messageLoop()
+	// Start message reading loop. Pass the query lifecycle context (q.ctx, not
+	// the caller's Start ctx) so the loop and its control-request handler chain
+	// observe the same cancellation as Stop(), while threading it as a parameter
+	// down to the permission callback's timeout.
+	//
+	// q.ctx is created via context.WithCancel in NewQuery and is canceled by
+	// Stop(); the caller's Start ctx has different cancellation semantics (it does
+	// not fire on Stop's q.cancel()). contextcheck cannot see that this struct
+	// field originated from context.WithCancel, so the field read at this single
+	// entry point is annotated rather than restructured into a behavior change.
+	go q.messageLoop(q.ctx) //nolint:contextcheck // q.ctx is the query lifecycle context (context.WithCancel in NewQuery, canceled by Stop); the caller's Start ctx has different cancellation semantics.
 
 	return nil
 }
@@ -230,8 +254,10 @@ func (q *Query) GetMessages(ctx context.Context) <-chan types.Message {
 	return q.messagesChan
 }
 
-// messageLoop reads messages from transport and routes them.
-func (q *Query) messageLoop() {
+// messageLoop reads messages from transport and routes them. ctx is the query
+// lifecycle context (q.ctx), threaded as a parameter so the control-request
+// handler chain inherits it rather than reaching for the struct field.
+func (q *Query) messageLoop(ctx context.Context) {
 	defer close(q.readLoopDone) // Always close, even on panic (runs second — LIFO)
 	defer func() {              // Runs first (LIFO) — catches panic before readLoopDone closes
 		if r := recover(); r != nil {
@@ -244,12 +270,12 @@ func (q *Query) messageLoop() {
 		}
 	}()
 
-	messages := q.transport.ReadMessages(q.ctx)
+	messages := q.transport.ReadMessages(ctx)
 	q.logger.Debug("Message routing loop started")
 
 	for {
 		select {
-		case <-q.ctx.Done():
+		case <-ctx.Done():
 			q.logger.Debug("Message loop stopped: context canceled")
 			return
 		case <-q.stopChan:
@@ -267,7 +293,7 @@ func (q *Query) messageLoop() {
 			}
 
 			// Route message based on type
-			if err := q.routeMessage(msg); err != nil {
+			if err := q.routeMessage(ctx, msg); err != nil {
 				q.logger.Warn("message routing error", zap.Error(err))
 				// Log error but continue processing
 				// In a production system, we might want to report this via an error channel
@@ -277,8 +303,9 @@ func (q *Query) messageLoop() {
 	}
 }
 
-// routeMessage routes a message to the appropriate handler.
-func (q *Query) routeMessage(msg types.Message) error {
+// routeMessage routes a message to the appropriate handler. ctx is threaded to
+// the control-request handler goroutine so the permission callback inherits it.
+func (q *Query) routeMessage(ctx context.Context, msg types.Message) error {
 	// Check message type
 	msgType := msg.GetMessageType()
 	q.logger.Debug("routing message", zap.String("type", msgType))
@@ -296,7 +323,7 @@ func (q *Query) routeMessage(msg types.Message) error {
 		q.logger.Debug("Handling control request from CLI")
 		if sysMsg, ok := msg.(*types.SystemMessage); ok {
 			q.handlerWg.Add(1)
-			go q.handleControlRequest(sysMsg)
+			go q.handleControlRequest(ctx, sysMsg)
 			return nil
 		}
 		return types.NewControlProtocolError("invalid control_request message type")
@@ -473,7 +500,7 @@ func (q *Query) handleControlResponse(msg *types.SystemMessage) error {
 }
 
 // handleControlRequest handles an incoming control request from CLI.
-func (q *Query) handleControlRequest(msg *types.SystemMessage) {
+func (q *Query) handleControlRequest(ctx context.Context, msg *types.SystemMessage) {
 	defer q.handlerWg.Done() // Runs second — ensures WaitGroup completes even on panic
 	defer func() {           // Runs first — catches panic before Done
 		if r := recover(); r != nil {
@@ -516,7 +543,7 @@ func (q *Query) handleControlRequest(msg *types.SystemMessage) {
 
 	switch subtype {
 	case "can_use_tool":
-		response, err = q.handlePermissionRequest(requestData)
+		response, err = q.handlePermissionRequest(ctx, requestData)
 	case "hook_callback":
 		response, err = q.handleHookCallback(requestData)
 	case "mcp_message":
@@ -539,23 +566,62 @@ func (q *Query) handleControlRequest(msg *types.SystemMessage) {
 	q.sendSuccessResponse(requestID, response)
 }
 
-// handlePermissionRequest handles a permission request for tool use.
-func (q *Query) handlePermissionRequest(requestData map[string]interface{}) (map[string]interface{}, error) {
+// handlePermissionRequest handles a permission request for tool use. ctx is the
+// inherited query lifecycle context; the canUseTool callback runs under a
+// timeout derived from it.
+func (q *Query) handlePermissionRequest(ctx context.Context, requestData map[string]interface{}) (map[string]interface{}, error) {
 	q.logger.Debug("handlePermissionRequest: entered", zap.Any("request_data", requestData))
 
 	if q.canUseTool == nil {
 		q.logger.Error("handlePermissionRequest: canUseTool callback is nil")
 		return nil, types.NewControlProtocolError("canUseTool callback is not provided")
 	}
-
 	q.logger.Debug("handlePermissionRequest: canUseTool callback is set")
 
+	toolName, input, suggestions, err := q.parsePermissionRequest(requestData)
+	if err != nil {
+		return nil, err
+	}
+
+	permCtx := types.ToolPermissionContext{
+		Suggestions: q.buildPermissionUpdates(suggestions),
+	}
+
+	// Call permission callback with a timeout derived from the inherited ctx.
+	callbackTimeout := 5 * time.Minute // default
+	if q.options != nil && q.options.ToolCallbackTimeout > 0 {
+		callbackTimeout = q.options.ToolCallbackTimeout
+	}
+	callbackCtx, callbackCancel := context.WithTimeout(ctx, callbackTimeout)
+	defer callbackCancel()
+
+	q.logger.Debug("handlePermissionRequest: calling canUseTool callback",
+		zap.String("tool_name", toolName),
+		zap.Duration("timeout", callbackTimeout),
+	)
+	result, err := q.invokeCanUseTool(callbackCtx, toolName, input, permCtx)
+	q.logger.Debug("handlePermissionRequest: canUseTool callback returned", zap.Any("result", result), zap.Error(err))
+	if err != nil {
+		q.logger.Error("handlePermissionRequest: canUseTool callback returned error", zap.Error(err))
+		return nil, err
+	}
+
+	return permissionResultToResponse(result, input)
+}
+
+// parsePermissionRequest extracts and validates the tool name, input map, and
+// raw permission suggestions from a can_use_tool request. A nil input is
+// normalized to an empty map (some tools, e.g. ExitPlanMode, legitimately send
+// null input) so CanUseTool is always invoked. Validation order — tool_name
+// type, input type, suggestions type, then missing tool_name — is preserved
+// from the original inline checks so error precedence is unchanged.
+func (q *Query) parsePermissionRequest(requestData map[string]interface{}) (toolName string, input map[string]interface{}, suggestions []interface{}, err error) {
 	toolName, toolNameOk := requestData["tool_name"].(string)
 	if !toolNameOk {
 		if requestData["tool_name"] != nil {
 			q.logger.Warn("handlePermissionRequest: tool_name has unexpected type",
 				zap.Any("tool_name", requestData["tool_name"]))
-			return nil, types.NewControlProtocolError("tool_name must be a string in permission request")
+			return "", nil, nil, types.NewControlProtocolError("tool_name must be a string in permission request")
 		}
 	}
 
@@ -563,17 +629,16 @@ func (q *Query) handlePermissionRequest(requestData map[string]interface{}) (map
 	if !inputOk && requestData["input"] != nil {
 		q.logger.Warn("handlePermissionRequest: input has unexpected type",
 			zap.Any("input_type", fmt.Sprintf("%T", requestData["input"])))
-		return nil, types.NewControlProtocolError("input must be a map in permission request")
+		return "", nil, nil, types.NewControlProtocolError("input must be a map in permission request")
 	}
 
-	var suggestions []interface{}
 	if raw, exists := requestData["permission_suggestions"]; exists && raw != nil {
 		var suggestionsOk bool
 		suggestions, suggestionsOk = raw.([]interface{})
 		if !suggestionsOk {
 			q.logger.Warn("handlePermissionRequest: permission_suggestions has unexpected type",
 				zap.Any("type", fmt.Sprintf("%T", raw)))
-			return nil, types.NewControlProtocolError("permission_suggestions must be an array in permission request")
+			return "", nil, nil, types.NewControlProtocolError("permission_suggestions must be an array in permission request")
 		}
 	}
 
@@ -581,7 +646,7 @@ func (q *Query) handlePermissionRequest(requestData map[string]interface{}) (map
 
 	if toolName == "" {
 		q.logger.Error("handlePermissionRequest: missing tool_name")
-		return nil, types.NewControlProtocolError("missing tool_name in permission request")
+		return "", nil, nil, types.NewControlProtocolError("missing tool_name in permission request")
 	}
 	if input == nil {
 		// Some tools (e.g. ExitPlanMode) legitimately send null input.
@@ -590,96 +655,83 @@ func (q *Query) handlePermissionRequest(requestData map[string]interface{}) (map
 		input = map[string]interface{}{}
 	}
 
-	// Build permission context
+	return toolName, input, suggestions, nil
+}
+
+// buildPermissionUpdates converts raw permission suggestion maps into typed
+// PermissionUpdate values, skipping any that are not maps or fail to round-trip
+// through JSON. It always returns a non-nil (possibly empty) slice.
+func (q *Query) buildPermissionUpdates(suggestions []interface{}) []types.PermissionUpdate {
 	permissionUpdates := make([]types.PermissionUpdate, 0)
 	for _, s := range suggestions {
-		if suggestionMap, ok := s.(map[string]interface{}); ok {
-			// Parse suggestion into PermissionUpdate
-			// This is a simplified version - production code should handle all fields
-			suggestionJSON, err := json.Marshal(suggestionMap)
-			if err != nil {
-				q.logger.Warn("handlePermissionRequest: marshal suggestion", zap.Error(err))
-				continue
-			}
-			var update types.PermissionUpdate
-			if err := json.Unmarshal(suggestionJSON, &update); err == nil {
-				permissionUpdates = append(permissionUpdates, update)
-			}
+		suggestionMap, ok := s.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		// Parse suggestion into PermissionUpdate
+		// This is a simplified version - production code should handle all fields
+		suggestionJSON, err := json.Marshal(suggestionMap)
+		if err != nil {
+			q.logger.Warn("handlePermissionRequest: marshal suggestion", zap.Error(err))
+			continue
+		}
+		var update types.PermissionUpdate
+		if err := json.Unmarshal(suggestionJSON, &update); err == nil {
+			permissionUpdates = append(permissionUpdates, update)
 		}
 	}
+	return permissionUpdates
+}
 
-	ctx := types.ToolPermissionContext{
-		Suggestions: permissionUpdates,
+// permissionResultToResponse maps a CanUseTool callback result into the control
+// protocol response map. input is the (normalized) tool input used as the
+// default updatedInput for allow results that don't override it. Value and
+// pointer result variants share the same mapping.
+func permissionResultToResponse(result interface{}, input map[string]interface{}) (map[string]interface{}, error) {
+	// Normalize pointer variants to values so each behavior is mapped once.
+	switch r := result.(type) {
+	case *types.PermissionResultAllow:
+		result = *r
+	case *types.PermissionResultDeny:
+		result = *r
 	}
 
-	// Call permission callback with a timeout.
-	callbackTimeout := 5 * time.Minute // default
-	if q.options != nil && q.options.ToolCallbackTimeout > 0 {
-		callbackTimeout = q.options.ToolCallbackTimeout
-	}
-	callbackCtx, callbackCancel := context.WithTimeout(q.ctx, callbackTimeout)
-	defer callbackCancel()
-
-	q.logger.Debug("handlePermissionRequest: calling canUseTool callback",
-		zap.String("tool_name", toolName),
-		zap.Duration("timeout", callbackTimeout),
-	)
-	result, err := q.invokeCanUseTool(callbackCtx, toolName, input, ctx)
-	q.logger.Debug("handlePermissionRequest: canUseTool callback returned", zap.Any("result", result), zap.Error(err))
-	if err != nil {
-		q.logger.Error("handlePermissionRequest: canUseTool callback returned error", zap.Error(err))
-		return nil, err
-	}
-
-	// Convert result to response format
 	response := make(map[string]interface{})
-
 	switch r := result.(type) {
 	case types.PermissionResultAllow:
-		response["behavior"] = "allow"
+		updatedInput := input
 		if r.UpdatedInput != nil {
-			response["updatedInput"] = *r.UpdatedInput
-		} else {
-			response["updatedInput"] = input
+			updatedInput = *r.UpdatedInput
 		}
-		if len(r.UpdatedPermissions) > 0 {
-			response["updatedPermissions"] = r.UpdatedPermissions
-		}
-
-	case *types.PermissionResultAllow:
-		response["behavior"] = "allow"
-		if r.UpdatedInput != nil {
-			response["updatedInput"] = *r.UpdatedInput
-		} else {
-			response["updatedInput"] = input
-		}
-		if len(r.UpdatedPermissions) > 0 {
-			response["updatedPermissions"] = r.UpdatedPermissions
-		}
-
+		applyAllowResponse(response, updatedInput, r.UpdatedPermissions)
 	case types.PermissionResultDeny:
-		response["behavior"] = "deny"
-		if r.Message != "" {
-			response["message"] = r.Message
-		}
-		if r.Interrupt {
-			response["interrupt"] = r.Interrupt
-		}
-
-	case *types.PermissionResultDeny:
-		response["behavior"] = "deny"
-		if r.Message != "" {
-			response["message"] = r.Message
-		}
-		if r.Interrupt {
-			response["interrupt"] = r.Interrupt
-		}
-
+		applyDenyResponse(response, r.Message, r.Interrupt)
 	default:
 		return nil, types.NewControlProtocolError("permission callback returned invalid type")
 	}
-
 	return response, nil
+}
+
+// applyAllowResponse writes the allow-result fields into response. updatedInput
+// is the already-resolved input (callback override or the original tool input).
+func applyAllowResponse(response, updatedInput map[string]interface{}, updatedPermissions []types.PermissionUpdate) {
+	response["behavior"] = "allow"
+	response["updatedInput"] = updatedInput
+	if len(updatedPermissions) > 0 {
+		response["updatedPermissions"] = updatedPermissions
+	}
+}
+
+// applyDenyResponse writes the deny-result fields into response, omitting an
+// empty message and a false interrupt.
+func applyDenyResponse(response map[string]interface{}, message string, interrupt bool) {
+	response["behavior"] = "deny"
+	if message != "" {
+		response["message"] = message
+	}
+	if interrupt {
+		response["interrupt"] = interrupt
+	}
 }
 
 func (q *Query) invokeCanUseTool(callbackCtx context.Context, toolName string, input map[string]interface{}, ctx types.ToolPermissionContext) (result interface{}, err error) {
