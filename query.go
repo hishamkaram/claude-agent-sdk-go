@@ -75,15 +75,9 @@ func Query(ctx context.Context, prompt string, options *types.ClaudeAgentOptions
 	}
 
 	// Find Claude CLI path
-	cliPath := ""
-	if options.CLIPath != nil {
-		cliPath = *options.CLIPath
-	} else {
-		var err error
-		cliPath, err = transport.FindCLI(ctx)
-		if err != nil {
-			return nil, err
-		}
+	cliPath, err := resolveCLIPath(ctx, options)
+	if err != nil {
+		return nil, err
 	}
 
 	// Determine working directory
@@ -93,12 +87,7 @@ func Query(ctx context.Context, prompt string, options *types.ClaudeAgentOptions
 	}
 
 	// Create transport with --print flag for non-streaming mode
-	env := make(map[string]string)
-	if options.Env != nil {
-		for k, v := range options.Env {
-			env[k] = v
-		}
-	}
+	env := copyOptionsEnv(options)
 
 	// Create logger with verbosity from options
 	verbose := options != nil && options.Verbose
@@ -170,39 +159,70 @@ func Query(ctx context.Context, prompt string, options *types.ClaudeAgentOptions
 	outputChan := make(chan types.Message, 10)
 
 	// Start goroutine to read messages and forward to output channel
-	go func() {
-		defer close(outputChan)
-		defer func() {
-			_ = queryHandler.Stop(ctx)
-			_ = transportInst.Close(ctx)
-			cleanupSessionStore()
-		}()
-
-		messagesChan := queryHandler.GetMessages(ctx)
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case msg, ok := <-messagesChan:
-				if !ok {
-					// Messages channel closed
-					return
-				}
-
-				// Forward message to output
-				select {
-				case outputChan <- msg:
-					// Check if this is a result message (end of query)
-					if _, isResult := msg.(*types.ResultMessage); isResult {
-						return
-					}
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
+	go forwardQueryMessages(ctx, queryHandler, transportInst, cleanupSessionStore, outputChan)
 
 	return outputChan, nil
+}
+
+// resolveCLIPath returns the configured CLI path, or discovers it on PATH.
+func resolveCLIPath(ctx context.Context, options *types.ClaudeAgentOptions) (string, error) {
+	if options.CLIPath != nil {
+		return *options.CLIPath, nil
+	}
+	return transport.FindCLI(ctx)
+}
+
+// copyOptionsEnv returns an independent copy of the options' environment map.
+func copyOptionsEnv(options *types.ClaudeAgentOptions) map[string]string {
+	env := make(map[string]string)
+	if options.Env != nil {
+		for k, v := range options.Env {
+			env[k] = v
+		}
+	}
+	return env
+}
+
+// forwardQueryMessages drains the query handler's messages into outputChan until
+// the result message arrives, the source channel closes, or ctx is canceled.
+// It then closes outputChan and tears down the handler, transport, and
+// session-store temp dir. All dependencies are passed in (no closure capture).
+func forwardQueryMessages(
+	ctx context.Context,
+	queryHandler *internal.Query,
+	transportInst *transport.SubprocessCLITransport,
+	cleanupSessionStore func(),
+	outputChan chan types.Message,
+) {
+	defer close(outputChan)
+	defer func() {
+		_ = queryHandler.Stop(ctx)
+		_ = transportInst.Close(ctx)
+		cleanupSessionStore()
+	}()
+
+	messagesChan := queryHandler.GetMessages(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-messagesChan:
+			if !ok {
+				// Messages channel closed
+				return
+			}
+
+			// Forward message to output
+			select {
+			case outputChan <- msg:
+				// Check if this is a result message (end of query)
+				if _, isResult := msg.(*types.ResultMessage); isResult {
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
 }
