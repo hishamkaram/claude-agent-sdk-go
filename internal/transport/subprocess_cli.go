@@ -1498,6 +1498,15 @@ func (t *SubprocessCLITransport) Health() types.TransportHealth {
 }
 
 func waitForProcDone(ctx context.Context, procDone <-chan struct{}, timeout time.Duration) bool {
+	// Prioritize an already-canceled context: the caller asked to stop waiting,
+	// so escalate deterministically. Without this, a procDone that closes
+	// concurrently (e.g. the context-monitor goroutine's Kill already reaped the
+	// process) races the ctx.Done() case in the select below — Go would pick a
+	// ready case at random, so Close() would non-deterministically report a
+	// graceful exit during a forced shutdown.
+	if ctx.Err() != nil {
+		return false
+	}
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
