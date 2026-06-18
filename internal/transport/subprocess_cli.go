@@ -291,14 +291,8 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 	}
 
 	// Validate the spawned process provides required pipes
-	if process.Stdin() == nil {
-		return types.NewCLIConnectionError("custom spawner returned nil stdin")
-	}
-	if process.Stdout() == nil {
-		return types.NewCLIConnectionError("custom spawner returned nil stdout")
-	}
-	if process.Stderr() == nil {
-		return types.NewCLIConnectionError("custom spawner returned nil stderr")
+	if err := validateSpawnedPipes(process); err != nil {
+		return err
 	}
 
 	t.customProcess = process
@@ -325,29 +319,7 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
-		waitErr := capturedProcess.Wait()
-		close(capturedProcDone) // signal Close() that Wait() is done — BEFORE acquiring mutex
-		t.drainStderr(capturedStderrDone)
-		t.mu.Lock()
-		wasReady := t.ready
-		t.ready = false
-		requested := t.shutdownRequested
-		exitCode := capturedProcess.ExitCode()
-		if waitErr != nil && t.err == nil && !requested {
-			t.err = t.newProcessErrorWithDiagnostics("subprocess exited unexpectedly", exitCode)
-		}
-		var cause error
-		if !requested {
-			cause = t.err
-		}
-		cancelFn := t.cancel // capture under lock to avoid race with Close()
-		t.mu.Unlock()
-		t.observer().OnSubprocessExit(exitCode, requested, cause)
-		if wasReady {
-			if cancelFn != nil {
-				cancelFn()
-			}
-		}
+		t.watchCustomProcessExit(capturedProcess, capturedProcDone, capturedStderrDone)
 	}()
 
 	// Launch context monitor goroutine for custom spawner (Bug C14).
@@ -357,20 +329,7 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
-		select {
-		case <-capturedCtx.Done():
-			select {
-			case <-capturedProcDone:
-				return
-			default:
-			}
-			if err := capturedProcess.Kill(); err != nil {
-				t.logger.Debug("context cancel: process kill returned error (process may have already exited)",
-					zap.Error(err))
-			}
-		case <-capturedProcDone:
-			// Process already exited — nothing to do
-		}
+		t.monitorCustomProcessCtx(capturedCtx, capturedProcess, capturedProcDone)
 	}()
 
 	// Launch message reader loop in goroutine (tracked by wg for clean shutdown).
@@ -391,6 +350,70 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 	t.logger.Debug("Transport ready for communication")
 
 	return nil
+}
+
+// validateSpawnedPipes ensures a custom-spawned process exposes the three pipes
+// the transport requires.
+func validateSpawnedPipes(process types.SpawnedProcess) error {
+	if process.Stdin() == nil {
+		return types.NewCLIConnectionError("custom spawner returned nil stdin")
+	}
+	if process.Stdout() == nil {
+		return types.NewCLIConnectionError("custom spawner returned nil stdout")
+	}
+	if process.Stderr() == nil {
+		return types.NewCLIConnectionError("custom spawner returned nil stderr")
+	}
+	return nil
+}
+
+// watchCustomProcessExit waits for a custom-spawned process to exit, then signals
+// procDone, drains stderr, records the exit cause and telemetry, and cancels the
+// transport context if the process had become ready. process.Wait() is called
+// exactly once here — this goroutine is the sole owner of procDone's close.
+func (t *SubprocessCLITransport) watchCustomProcessExit(process types.SpawnedProcess, procDone, stderrDone chan struct{}) {
+	waitErr := process.Wait()
+	close(procDone) // signal Close() that Wait() is done — BEFORE acquiring mutex
+	t.drainStderr(stderrDone)
+	t.mu.Lock()
+	wasReady := t.ready
+	t.ready = false
+	requested := t.shutdownRequested
+	exitCode := process.ExitCode()
+	if waitErr != nil && t.err == nil && !requested {
+		t.err = t.newProcessErrorWithDiagnostics("subprocess exited unexpectedly", exitCode)
+	}
+	var cause error
+	if !requested {
+		cause = t.err
+	}
+	cancelFn := t.cancel // capture under lock to avoid race with Close()
+	t.mu.Unlock()
+	t.observer().OnSubprocessExit(exitCode, requested, cause)
+	if wasReady && cancelFn != nil {
+		cancelFn()
+	}
+}
+
+// monitorCustomProcessCtx kills a custom-spawned process when ctx is canceled,
+// unblocking Wait() and the pipe readers (custom processes, unlike
+// exec.CommandContext, are not auto-killed on context cancel). It returns once
+// the process has exited (procDone closed).
+func (t *SubprocessCLITransport) monitorCustomProcessCtx(ctx context.Context, process types.SpawnedProcess, procDone chan struct{}) {
+	select {
+	case <-ctx.Done():
+		select {
+		case <-procDone:
+			return
+		default:
+		}
+		if err := process.Kill(); err != nil {
+			t.logger.Debug("context cancel: process kill returned error (process may have already exited)",
+				zap.Error(err))
+		}
+	case <-procDone:
+		// Process already exited — nothing to do
+	}
 }
 
 // connectWithExecCommand uses the default exec.Command to create the process.
@@ -646,17 +669,7 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 
 	readDone := make(chan struct{})
 	monitorDone := make(chan struct{})
-	go func() {
-		defer close(monitorDone)
-		select {
-		case <-ctx.Done():
-			_ = stdout.Close()
-		case <-procDone:
-			_ = stdout.Close()
-		case <-readDone:
-			// Read loop finished normally — nothing to do.
-		}
-	}()
+	go t.closeStdoutOnDone(ctx, stdout, procDone, readDone, monitorDone)
 
 	defer func() {
 		close(readDone)
@@ -686,32 +699,7 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 		// Read next JSON line
 		line, err := reader.ReadLine()
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				t.logger.Debug("Message reader loop stopped: EOF from CLI")
-				// Normal end of stream
-				return
-			}
-
-			// If the transport context is already canceled, read errors
-			// are expected (pipe closed during shutdown) — log at Debug.
-			// Use the passed-in ctx (not t.ctx) to avoid a data race with
-			// Connect() overwriting t.ctx under t.mu.
-			if ctx.Err() != nil {
-				t.logger.Debug("message reader loop stopped during shutdown", zap.Error(err))
-				return
-			}
-			if procDoneClosed(procDone) {
-				t.logger.Debug("message reader loop stopped after process exit", zap.Error(err))
-				return
-			}
-
-			t.logger.Error("failed to read from CLI stdout", zap.Error(err))
-			// Store error and return
-			t.OnError(types.NewJSONDecodeErrorWithCause(
-				"failed to read JSON line from subprocess",
-				string(line),
-				err,
-			))
+			t.handleStdoutReadError(ctx, line, err, procDone)
 			return
 		}
 
@@ -723,54 +711,8 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 		// Parse JSON into message
 		msg, err := types.UnmarshalMessage(line)
 		if err != nil {
-			consecutiveParseErrors++
-			t.observer().OnParseError(consecutiveParseErrors, err)
-			t.logger.Warn("failed to parse message from CLI",
-				zap.Error(err),
-				zap.Uint("consecutive_errors", consecutiveParseErrors),
-			)
-
-			// Exit after too many consecutive parse failures — the subprocess is
-			// emitting garbage and is unrecoverable. Terminate it authoritatively
-			// (reap the process, surface the error) rather than leaving a zombie.
-			if consecutiveParseErrors >= t.maxParseErrors() {
-				t.logger.Error("too many consecutive parse errors, terminating subprocess",
-					zap.Uint("consecutive_errors", consecutiveParseErrors),
-				)
-				t.observer().OnParseGiveUp(consecutiveParseErrors)
-				t.terminateOnUnrecoverableError(
-					fmt.Errorf("transport.messageReaderLoop: %d consecutive parse errors (last: %w): %w", consecutiveParseErrors, err, ErrParseGiveUp),
-				)
+			if t.handleParseError(ctx, err, &consecutiveParseErrors, procDone) {
 				return
-			}
-
-			// Store parse error but continue reading after backoff
-			t.OnError(err)
-
-			backoffFn := t.parseErrorBackoff
-			if backoffFn == nil {
-				backoffFn = defaultParseErrorBackoff
-			}
-			backoff := backoffFn(consecutiveParseErrors)
-			t.logger.Debug("parse error backoff",
-				zap.Duration("backoff", backoff),
-				zap.Uint("consecutive_errors", consecutiveParseErrors),
-			)
-			if backoff <= 0 {
-				continue
-			}
-			timer := time.NewTimer(backoff)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				t.logger.Debug("Message reader loop stopped during backoff: context canceled")
-				return
-			case <-procDone:
-				timer.Stop()
-				t.logger.Debug("Message reader loop stopped during backoff: process exited")
-				return
-			case <-timer.C:
-				// Backoff complete, continue reading
 			}
 			continue
 		}
@@ -799,6 +741,105 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 		case <-procDone:
 			return
 		}
+	}
+}
+
+// closeStdoutOnDone closes stdout when ctx is canceled or the process exits,
+// unblocking a ReadLine() blocked on a partial line. It signals monitorDone on
+// return and does nothing if the read loop finished first (readDone closed).
+func (t *SubprocessCLITransport) closeStdoutOnDone(ctx context.Context, stdout io.ReadCloser, procDone, readDone <-chan struct{}, monitorDone chan<- struct{}) {
+	defer close(monitorDone)
+	select {
+	case <-ctx.Done():
+		_ = stdout.Close()
+	case <-procDone:
+		_ = stdout.Close()
+	case <-readDone:
+		// Read loop finished normally — nothing to do.
+	}
+}
+
+// handleStdoutReadError records a stdout read error before the reader loop
+// returns. EOF and shutdown-induced errors (ctx canceled, or process already
+// exited) are expected and logged at Debug; a genuine read failure is surfaced
+// via OnError. ctx is the passed-in context (not t.ctx) to avoid a data race
+// with Connect() overwriting t.ctx under t.mu.
+func (t *SubprocessCLITransport) handleStdoutReadError(ctx context.Context, line []byte, err error, procDone <-chan struct{}) {
+	if errors.Is(err, io.EOF) {
+		t.logger.Debug("Message reader loop stopped: EOF from CLI")
+		return
+	}
+	if ctx.Err() != nil {
+		t.logger.Debug("message reader loop stopped during shutdown", zap.Error(err))
+		return
+	}
+	if procDoneClosed(procDone) {
+		t.logger.Debug("message reader loop stopped after process exit", zap.Error(err))
+		return
+	}
+	t.logger.Error("failed to read from CLI stdout", zap.Error(err))
+	t.OnError(types.NewJSONDecodeErrorWithCause(
+		"failed to read JSON line from subprocess",
+		string(line),
+		err,
+	))
+}
+
+// handleParseError records a message parse failure and reports whether the reader
+// loop should stop. It increments *consecutiveErrors, emits telemetry, and either
+// terminates the subprocess after too many consecutive failures (returns true) or
+// backs off and signals the caller to continue (returns false). A ctx or procDone
+// signal observed during the backoff also returns true.
+func (t *SubprocessCLITransport) handleParseError(ctx context.Context, err error, consecutiveErrors *uint, procDone <-chan struct{}) bool {
+	*consecutiveErrors++
+	t.observer().OnParseError(*consecutiveErrors, err)
+	t.logger.Warn("failed to parse message from CLI",
+		zap.Error(err),
+		zap.Uint("consecutive_errors", *consecutiveErrors),
+	)
+
+	// Exit after too many consecutive parse failures — the subprocess is
+	// emitting garbage and is unrecoverable. Terminate it authoritatively
+	// (reap the process, surface the error) rather than leaving a zombie.
+	if *consecutiveErrors >= t.maxParseErrors() {
+		t.logger.Error("too many consecutive parse errors, terminating subprocess",
+			zap.Uint("consecutive_errors", *consecutiveErrors),
+		)
+		t.observer().OnParseGiveUp(*consecutiveErrors)
+		t.terminateOnUnrecoverableError(
+			fmt.Errorf("transport.messageReaderLoop: %d consecutive parse errors (last: %w): %w", *consecutiveErrors, err, ErrParseGiveUp),
+		)
+		return true
+	}
+
+	// Store parse error but continue reading after backoff
+	t.OnError(err)
+
+	backoffFn := t.parseErrorBackoff
+	if backoffFn == nil {
+		backoffFn = defaultParseErrorBackoff
+	}
+	backoff := backoffFn(*consecutiveErrors)
+	t.logger.Debug("parse error backoff",
+		zap.Duration("backoff", backoff),
+		zap.Uint("consecutive_errors", *consecutiveErrors),
+	)
+	if backoff <= 0 {
+		return false
+	}
+	timer := time.NewTimer(backoff)
+	select {
+	case <-ctx.Done():
+		timer.Stop()
+		t.logger.Debug("Message reader loop stopped during backoff: context canceled")
+		return true
+	case <-procDone:
+		timer.Stop()
+		t.logger.Debug("Message reader loop stopped during backoff: process exited")
+		return true
+	case <-timer.C:
+		// Backoff complete, continue reading
+		return false
 	}
 }
 
@@ -1526,51 +1567,7 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadC
 		return
 	}
 
-	// Determine if file logging is enabled via StderrLogFile option
-	var logFile *os.File
-	if t.options != nil && t.options.StderrLogFile != nil {
-		// Resolve log file path
-		logPath := *t.options.StderrLogFile
-		if logPath == "" {
-			// Use default location
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				t.logger.Warn("readStderr: could not determine home directory, stderr logging disabled",
-					zap.Error(err))
-				logPath = ""
-			} else {
-				logPath = fmt.Sprintf("%s/.claude/agents_server/cli_stderr.log", homeDir)
-			}
-		}
-
-		if logPath != "" {
-			// Create parent directory if it doesn't exist
-			logDir := filepath.Dir(logPath)
-			if err := os.MkdirAll(logDir, 0o755); err != nil {
-				fmt.Fprintf(os.Stderr,
-					"[SDK] Failed to create stderr log directory %s: %v\n"+
-						"Stderr file logging disabled. To fix, create directory:\n"+
-						"  mkdir -p %s\n",
-					logDir, err, logDir)
-			} else {
-				// Try to open log file
-				var err error
-				logFile, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-				if err != nil {
-					fmt.Fprintf(os.Stderr,
-						"[SDK] Failed to open stderr log file %s: %v\n"+
-							"Stderr file logging disabled. Possible fixes:\n"+
-							"  1. Ensure directory exists: mkdir -p %s\n"+
-							"  2. Check file permissions: chmod 644 %s\n"+
-							"  3. Use custom path: opts.WithCustomStderrLogFile(\"/path/to/file.log\")\n",
-						logPath, err, logDir, logPath)
-				} else {
-					t.logger.Debug("stderr file logging enabled", zap.String("path", logPath))
-				}
-			}
-		}
-	}
-
+	logFile := t.openStderrLogFile()
 	// Ensure cleanup if file was opened
 	if logFile != nil {
 		defer func() {
@@ -1587,12 +1584,7 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadC
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
-		select {
-		case <-ctx.Done():
-			_ = stderr.Close()
-		case <-readDone:
-			// Read loop finished normally — nothing to do
-		}
+		t.closeStderrOnCancel(ctx, stderr, readDone)
 	}()
 
 	partial := make([]byte, 0, StderrRingSize)
@@ -1617,6 +1609,65 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadC
 			flushPartial()
 			return
 		}
+	}
+}
+
+// openStderrLogFile resolves and opens the stderr log file when StderrLogFile is
+// configured, returning the open file or nil when logging is disabled or the
+// file cannot be created. The caller owns closing the returned file. Failures to
+// determine the home directory, create the directory, or open the file disable
+// file logging (return nil); directory/open failures are reported to os.Stderr
+// as best-effort diagnostics.
+func (t *SubprocessCLITransport) openStderrLogFile() *os.File {
+	if t.options == nil || t.options.StderrLogFile == nil {
+		return nil
+	}
+	logPath := *t.options.StderrLogFile
+	if logPath == "" {
+		// Use default location.
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			t.logger.Warn("readStderr: could not determine home directory, stderr logging disabled",
+				zap.Error(err))
+			return nil
+		}
+		logPath = fmt.Sprintf("%s/.claude/agents_server/cli_stderr.log", homeDir)
+	}
+
+	// Create parent directory if it doesn't exist.
+	logDir := filepath.Dir(logPath)
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr,
+			"[SDK] Failed to create stderr log directory %s: %v\n"+
+				"Stderr file logging disabled. To fix, create directory:\n"+
+				"  mkdir -p %s\n",
+			logDir, err, logDir)
+		return nil
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr,
+			"[SDK] Failed to open stderr log file %s: %v\n"+
+				"Stderr file logging disabled. Possible fixes:\n"+
+				"  1. Ensure directory exists: mkdir -p %s\n"+
+				"  2. Check file permissions: chmod 644 %s\n"+
+				"  3. Use custom path: opts.WithCustomStderrLogFile(\"/path/to/file.log\")\n",
+			logPath, err, logDir, logPath)
+		return nil
+	}
+	t.logger.Debug("stderr file logging enabled", zap.String("path", logPath))
+	return logFile
+}
+
+// closeStderrOnCancel closes stderr when ctx is canceled, unblocking a Read()
+// that would otherwise hang if the subprocess never closes stderr (Bug C16). It
+// returns without closing when the read loop finishes first (readDone closed).
+func (t *SubprocessCLITransport) closeStderrOnCancel(ctx context.Context, stderr io.ReadCloser, readDone <-chan struct{}) {
+	select {
+	case <-ctx.Done():
+		_ = stderr.Close()
+	case <-readDone:
+		// Read loop finished normally — nothing to do
 	}
 }
 
