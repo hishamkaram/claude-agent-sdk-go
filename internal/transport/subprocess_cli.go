@@ -862,6 +862,25 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		"--verbose",
 	}
 
+	// Each helper appends its flag group in declaration order; the call order
+	// below is the canonical CLI argument order (pinned by the args oracle).
+	args = t.appendPermissionArgs(args)
+	args = t.appendSystemPromptArgs(args)
+	args = t.appendModelAndResumeArgs(args)
+	args = t.appendBudgetArgs(args)
+	args = t.appendCollectionArgs(args)
+	args = t.appendAgentAndEffortArgs(args)
+	args = t.appendSessionArgs(args)
+	args = t.appendOutputArgs(args)
+	args = t.appendSubagentArgs(args)
+	args = t.appendToolArgs(args)
+	args = t.appendMiscArgs(args)
+
+	return args
+}
+
+// appendPermissionArgs adds the permission-prompt-tool and permission-mode flags.
+func (t *SubprocessCLITransport) appendPermissionArgs(args []string) []string {
 	// Add permission prompt tool if specified
 	if t.options != nil && t.options.PermissionPromptToolName != nil {
 		args = append(args, "--permission-prompt-tool", *t.options.PermissionPromptToolName)
@@ -873,7 +892,11 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		args = append(args, "--permission-mode", string(*t.options.PermissionMode))
 		t.logger.Debug("setting permission mode", zap.String("mode", string(*t.options.PermissionMode)))
 	}
+	return args
+}
 
+// appendSystemPromptArgs adds the --system-prompt / --append-system-prompt flag.
+func (t *SubprocessCLITransport) appendSystemPromptArgs(args []string) []string {
 	// Add system prompt - always pass the flag to match Python SDK behavior
 	// When nil, pass empty string to prevent unintended Claude Code defaults
 	if t.options != nil {
@@ -898,7 +921,12 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		args = append(args, "--system-prompt", "")
 		t.logger.Debug("Setting empty system prompt (no options)")
 	}
+	return args
+}
 
+// appendModelAndResumeArgs adds model, resume, fork-session, and the permission
+// bypass safety flags.
+func (t *SubprocessCLITransport) appendModelAndResumeArgs(args []string) []string {
 	// Add model if specified
 	if t.options != nil && t.options.Model != nil {
 		args = append(args, "--model", *t.options.Model)
@@ -931,7 +959,11 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 			}
 		}
 	}
+	return args
+}
 
+// appendBudgetArgs adds the thinking-token and budget limit flags.
+func (t *SubprocessCLITransport) appendBudgetArgs(args []string) []string {
 	// Add extended thinking token limit if specified
 	if t.options != nil && t.options.MaxThinkingTokens != nil {
 		args = append(args, "--max-thinking-tokens", fmt.Sprintf("%d", *t.options.MaxThinkingTokens))
@@ -943,7 +975,12 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", *t.options.MaxBudgetUSD))
 		t.logger.Debug("setting max budget", zap.Float64("max_budget_usd", *t.options.MaxBudgetUSD))
 	}
+	return args
+}
 
+// appendCollectionArgs adds the multi-value option flags: betas, plugin dirs,
+// setting sources, agents JSON, session agent, and effort.
+func (t *SubprocessCLITransport) appendCollectionArgs(args []string) []string {
 	// Add beta feature flags if specified
 	if t.options != nil && len(t.options.Betas) > 0 {
 		for _, beta := range t.options.Betas {
@@ -974,7 +1011,11 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		args = append(args, "--setting-sources", joinStrings(sources, ","))
 		t.logger.Debug("setting sources", zap.String("sources", joinStrings(sources, ",")))
 	}
+	return args
+}
 
+// appendAgentAndEffortArgs adds the agents JSON, session agent, and effort flags.
+func (t *SubprocessCLITransport) appendAgentAndEffortArgs(args []string) []string {
 	// Add agents if specified
 	if t.options != nil && len(t.options.Agents) > 0 {
 		agentsJSONBytes, err := json.Marshal(t.options.Agents)
@@ -997,7 +1038,12 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		args = append(args, "--effort", string(*t.options.Effort))
 		t.logger.Debug("setting effort level", zap.String("effort", string(*t.options.Effort)))
 	}
+	return args
+}
 
+// appendSessionArgs adds thinking-display, fallback model, session id, and
+// session persistence.
+func (t *SubprocessCLITransport) appendSessionArgs(args []string) []string {
 	// Claude Code consumes thinking display as a CLI flag. Keep the typed
 	// settings JSON for thinking mode/budget, and pass display explicitly so
 	// summarized/omitted behavior is honored by the subprocess.
@@ -1023,7 +1069,12 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		args = append(args, "--no-session-persistence")
 		t.logger.Debug("Disabling session persistence")
 	}
+	return args
+}
 
+// appendOutputArgs adds the output-format / json-schema, settings JSON, and
+// replay-user-messages flags.
+func (t *SubprocessCLITransport) appendOutputArgs(args []string) []string {
 	// Add JSON schema output format if specified
 	if t.options != nil && t.options.OutputFormat != nil {
 		schemaJSON, err := json.Marshal(t.options.OutputFormat)
@@ -1049,7 +1100,11 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 	if t.options != nil && t.options.EnableFileCheckpointing {
 		args = append(args, "--replay-user-messages")
 	}
+	return args
+}
 
+// appendSubagentArgs adds the subagent-execution configuration flag.
+func (t *SubprocessCLITransport) appendSubagentArgs(args []string) []string {
 	// Add subagent execution configuration if specified
 	if t.options != nil && t.options.SubagentExecution != nil {
 		subagentJSON := make(map[string]interface{})
@@ -1077,7 +1132,11 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 			}
 		}
 	}
+	return args
+}
 
+// appendToolArgs adds the resume-session-at and tools flags.
+func (t *SubprocessCLITransport) appendToolArgs(args []string) []string {
 	// Add --resume-session-at flag
 	if t.options != nil && t.options.ResumeSessionAt != nil {
 		args = append(args, "--resume-session-at", *t.options.ResumeSessionAt)
@@ -1103,7 +1162,12 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 			}
 		}
 	}
+	return args
+}
 
+// appendMiscArgs adds debug-file, strict-mcp-config, task-budget, and the
+// capability-gated agent-progress-summaries flag.
+func (t *SubprocessCLITransport) appendMiscArgs(args []string) []string {
 	// Add --debug-file flag
 	if t.options != nil && t.options.DebugFile != nil {
 		args = append(args, "--debug-file", *t.options.DebugFile)
@@ -1131,7 +1195,6 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 			t.logger.Warn("Claude CLI does not support --agent-progress-summaries; skipping to avoid Connect failure")
 		}
 	}
-
 	return args
 }
 
