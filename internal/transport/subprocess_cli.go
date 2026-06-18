@@ -1214,13 +1214,11 @@ func joinStrings(strs []string, sep string) string {
 // It merges typed fields (Thinking, Sandbox, EnableFileCheckpointing) on top of
 // any user-provided Settings string. Typed fields take precedence on conflict.
 func (t *SubprocessCLITransport) buildSettingsJSON() string {
-	hasThinking := t.options.Thinking != nil
-	hasSandbox := t.options.Sandbox != nil
-	hasCheckpointing := t.options.EnableFileCheckpointing
-	hasToolConfig := t.options.ToolConfig != nil
-	hasIncludeHookEvents := t.options.IncludeHookEvents
+	// hasTypedSettings is the OR of every typed settings field; by De Morgan
+	// !hasTypedSettings equals the original "none of the typed fields set" guard.
+	hasTyped := t.hasTypedSettings()
 
-	if !hasThinking && !hasSandbox && !hasCheckpointing && !hasToolConfig && !hasIncludeHookEvents && t.options.Settings == nil {
+	if !hasTyped && t.options.Settings == nil {
 		return ""
 	}
 
@@ -1233,7 +1231,7 @@ func (t *SubprocessCLITransport) buildSettingsJSON() string {
 	}
 
 	// If no typed fields are set, just return the original settings string
-	if !hasThinking && !hasSandbox && !hasCheckpointing && !hasToolConfig && !hasIncludeHookEvents {
+	if !hasTyped {
 		if t.options.Settings != nil {
 			return *t.options.Settings
 		}
@@ -1241,21 +1239,7 @@ func (t *SubprocessCLITransport) buildSettingsJSON() string {
 	}
 
 	// Typed fields override user-provided settings
-	if hasThinking {
-		settings["thinking"] = t.options.Thinking
-	}
-	if hasSandbox {
-		settings["sandbox"] = t.options.Sandbox
-	}
-	if hasCheckpointing {
-		settings["enableFileCheckpointing"] = true
-	}
-	if hasToolConfig {
-		settings["toolConfig"] = t.options.ToolConfig
-	}
-	if hasIncludeHookEvents {
-		settings["includeHookEvents"] = true
-	}
+	t.applyTypedSettings(settings)
 
 	result, err := json.Marshal(settings)
 	if err != nil {
@@ -1263,6 +1247,36 @@ func (t *SubprocessCLITransport) buildSettingsJSON() string {
 		return ""
 	}
 	return string(result)
+}
+
+// hasTypedSettings reports whether any typed settings field (thinking, sandbox,
+// checkpointing, tool config, include-hook-events) is set.
+func (t *SubprocessCLITransport) hasTypedSettings() bool {
+	return t.options.Thinking != nil ||
+		t.options.Sandbox != nil ||
+		t.options.EnableFileCheckpointing ||
+		t.options.ToolConfig != nil ||
+		t.options.IncludeHookEvents
+}
+
+// applyTypedSettings writes the typed settings fields onto the settings map,
+// overriding any user-provided values for the same keys.
+func (t *SubprocessCLITransport) applyTypedSettings(settings map[string]interface{}) {
+	if t.options.Thinking != nil {
+		settings["thinking"] = t.options.Thinking
+	}
+	if t.options.Sandbox != nil {
+		settings["sandbox"] = t.options.Sandbox
+	}
+	if t.options.EnableFileCheckpointing {
+		settings["enableFileCheckpointing"] = true
+	}
+	if t.options.ToolConfig != nil {
+		settings["toolConfig"] = t.options.ToolConfig
+	}
+	if t.options.IncludeHookEvents {
+		settings["includeHookEvents"] = true
+	}
 }
 
 // Close terminates the subprocess and cleans up all resources.
