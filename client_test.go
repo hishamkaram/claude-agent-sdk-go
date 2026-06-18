@@ -558,6 +558,10 @@ func TestParseInitResult_InvalidCommandsType(t *testing.T) {
 	if len(result.Commands) != 0 {
 		t.Fatalf("expected 0 commands for invalid type, got %d", len(result.Commands))
 	}
+	// Contract: a non-array "commands" value leaves the field nil (untouched).
+	if result.Commands != nil {
+		t.Errorf("expected nil Commands for invalid type, got %#v", result.Commands)
+	}
 }
 
 func TestClient_SlashCommands_BeforeConnect(t *testing.T) {
@@ -713,6 +717,11 @@ func TestParseInitResult_ModelsEmptyArray(t *testing.T) {
 	if len(result.Models) != 0 {
 		t.Errorf("expected 0 models, got %d", len(result.Models))
 	}
+	// Contract: a present "models" array (even empty) yields a non-nil slice, so
+	// the field is set to [] rather than left nil.
+	if result.Models == nil {
+		t.Error("expected non-nil empty Models slice when the key is present, got nil")
+	}
 }
 
 // TestParseInitResult_ModelsInvalidType verifies graceful handling of unexpected type.
@@ -726,9 +735,10 @@ func TestParseInitResult_ModelsInvalidType(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	// Should not panic, models should be nil/empty.
-	if len(result.Models) != 0 {
-		t.Errorf("expected 0 models for invalid type, got %d", len(result.Models))
+	// Contract: a non-array "models" value leaves the field untouched (nil), not
+	// an empty slice — distinguishing absent/invalid from present-but-empty.
+	if result.Models != nil {
+		t.Errorf("expected nil Models for invalid type, got %#v", result.Models)
 	}
 }
 
