@@ -53,35 +53,42 @@ func prepareSessionStoreRuntime(ctx context.Context, options *types.ClaudeAgentO
 		return nil, fmt.Errorf("session store project dir: %w", mkErr)
 	}
 	transcriptPath := filepath.Join(projectDir, key.SessionID+".jsonl")
+	if err := writeResumeTranscript(transcriptPath, entry.Messages, key.SessionID); err != nil {
+		cleanup()
+		return nil, err
+	}
+	env["CLAUDE_CONFIG_DIR"] = configDir
+	return cleanup, nil
+}
+
+// writeResumeTranscript writes the stored session messages to transcriptPath as
+// newline-delimited JSON entries, defaulting each entry's session id to
+// fallbackSessionID. The file is closed before return on every path.
+func writeResumeTranscript(transcriptPath string, messages []types.SessionMessage, fallbackSessionID string) error {
 	f, err := os.OpenFile(transcriptPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
-		cleanup()
-		return nil, fmt.Errorf("session store transcript open: %w", err)
+		return fmt.Errorf("session store transcript open: %w", err)
 	}
-	for _, msg := range entry.Messages {
+	for _, msg := range messages {
 		line, err := json.Marshal(runtimeTranscriptEntry{
 			Type:      msg.Type,
 			UUID:      msg.UUID,
-			SessionID: coalesce(msg.SessionID, key.SessionID),
+			SessionID: coalesce(msg.SessionID, fallbackSessionID),
 			Message:   cloneRawMessage(msg.Message),
 		})
 		if err != nil {
 			_ = f.Close()
-			cleanup()
-			return nil, fmt.Errorf("session store transcript marshal: %w", err)
+			return fmt.Errorf("session store transcript marshal: %w", err)
 		}
 		if _, err := f.Write(append(line, '\n')); err != nil {
 			_ = f.Close()
-			cleanup()
-			return nil, fmt.Errorf("session store transcript write: %w", err)
+			return fmt.Errorf("session store transcript write: %w", err)
 		}
 	}
 	if err := f.Close(); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("session store transcript close: %w", err)
+		return fmt.Errorf("session store transcript close: %w", err)
 	}
-	env["CLAUDE_CONFIG_DIR"] = configDir
-	return cleanup, nil
+	return nil
 }
 
 func resolveSessionStoreKey(options *types.ClaudeAgentOptions, cwd, sessionID string) (types.SessionKey, error) {
