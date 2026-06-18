@@ -387,28 +387,7 @@ func (b *LocalTranscriptBackend) readSessionInfo(ctx context.Context, path, sess
 		if unmarshalErr := json.Unmarshal(raw, &entry); unmarshalErr != nil {
 			return malformedTranscript(path, lineNo, unmarshalErr)
 		}
-		if entry.CWD != "" && info.CWD == "" {
-			info.CWD = entry.CWD
-		}
-		if entry.GitBranch != "" && info.GitBranch == "" {
-			info.GitBranch = entry.GitBranch
-		}
-		if entry.Summary != "" {
-			info.Summary = entry.Summary
-		}
-		if entry.Timestamp != "" {
-			if millis, ok := parseTranscriptTimeMillis(entry.Timestamp); ok {
-				if info.CreatedAt == 0 || millis < info.CreatedAt {
-					info.CreatedAt = millis
-				}
-			}
-		}
-		if info.FirstPrompt == "" && isValidHistoryEntry(entry, sessionID) && entry.Type == "user" {
-			info.FirstPrompt = extractClaudeMessageText(entry.Message)
-			if info.Summary == "" {
-				info.Summary = info.FirstPrompt
-			}
-		}
+		applyTranscriptEntryToInfo(info, entry, sessionID)
 		return nil
 	})
 	if err != nil {
@@ -418,6 +397,34 @@ func (b *LocalTranscriptBackend) readSessionInfo(ctx context.Context, path, sess
 		info.CreatedAt = stat.ModTime().UnixMilli()
 	}
 	return info, nil
+}
+
+// applyTranscriptEntryToInfo merges one transcript entry into the accumulating
+// session info: first-seen CWD/GitBranch, the latest Summary, the earliest
+// timestamp, and the first user prompt (which also seeds Summary when empty).
+func applyTranscriptEntryToInfo(info *types.SDKSessionInfo, entry transcriptEntry, sessionID string) {
+	if entry.CWD != "" && info.CWD == "" {
+		info.CWD = entry.CWD
+	}
+	if entry.GitBranch != "" && info.GitBranch == "" {
+		info.GitBranch = entry.GitBranch
+	}
+	if entry.Summary != "" {
+		info.Summary = entry.Summary
+	}
+	if entry.Timestamp != "" {
+		if millis, ok := parseTranscriptTimeMillis(entry.Timestamp); ok {
+			if info.CreatedAt == 0 || millis < info.CreatedAt {
+				info.CreatedAt = millis
+			}
+		}
+	}
+	if info.FirstPrompt == "" && isValidHistoryEntry(entry, sessionID) && entry.Type == "user" {
+		info.FirstPrompt = extractClaudeMessageText(entry.Message)
+		if info.Summary == "" {
+			info.Summary = info.FirstPrompt
+		}
+	}
 }
 
 func (b *LocalTranscriptBackend) readTranscriptEntries(ctx context.Context, path, sessionID string) ([]transcriptEntry, error) {
