@@ -1,0 +1,20 @@
+{
+  "allow_pointer_default_input": "OK|{\"behavior\":\"allow\",\"updatedInput\":{\"command\":\"ls\"}}",
+  "allow_pointer_updated_input_and_permissions": "OK|{\"behavior\":\"allow\",\"updatedInput\":{\"file_path\":\"/tmp/b\"},\"updatedPermissions\":[{\"type\":\"setMode\"}]}",
+  "allow_value_default_input": "OK|{\"behavior\":\"allow\",\"updatedInput\":{\"command\":\"ls\"}}",
+  "allow_value_updated_input": "OK|{\"behavior\":\"allow\",\"updatedInput\":{\"file_path\":\"/tmp/sanitized\"}}",
+  "allow_value_updated_permissions": "OK|{\"behavior\":\"allow\",\"updatedInput\":{\"command\":\"ls\"},\"updatedPermissions\":[{\"type\":\"addRules\"}]}",
+  "deny_pointer_interrupt_only": "OK|{\"behavior\":\"deny\",\"interrupt\":true}",
+  "deny_pointer_message": "OK|{\"behavior\":\"deny\",\"message\":\"nope\"}",
+  "deny_value_message": "OK|{\"behavior\":\"deny\",\"message\":\"Access denied\"}",
+  "deny_value_message_interrupt": "OK|{\"behavior\":\"deny\",\"interrupt\":true,\"message\":\"stop\"}",
+  "err_callback_error": "ERR|boom",
+  "err_callback_nil": "ERR|canUseTool callback is not provided",
+  "err_input_wrong_type": "ERR|input must be a map in permission request",
+  "err_invalid_result_type": "ERR|permission callback returned invalid type",
+  "err_missing_tool_name": "ERR|missing tool_name in permission request",
+  "err_suggestions_wrong_type": "ERR|permission_suggestions must be an array in permission request",
+  "err_tool_name_wrong_type": "ERR|tool_name must be a string in permission request",
+  "nil_input_normalized": "OK|{\"behavior\":\"allow\",\"updatedInput\":{}}",
+  "with_suggestions_parsed": "OK|{\"behavior\":\"allow\",\"updatedInput\":{\"suggestion_count\":2}}"
+}
