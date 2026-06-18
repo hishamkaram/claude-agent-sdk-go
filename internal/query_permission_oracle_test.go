@@ -133,6 +133,19 @@ func permissionOracleCases() []permissionOracleCase {
 			requestData: map[string]interface{}{"input": map[string]interface{}{}},
 		},
 		{
+			// Precedence lock: input-type check fires BEFORE the missing-tool_name
+			// check, so an absent tool_name + malformed input yields the input
+			// error, not the missing-tool_name error.
+			name:        "err_precedence_missing_toolname_bad_input",
+			requestData: map[string]interface{}{"input": "not-a-map"},
+		},
+		{
+			// Precedence lock: suggestions-type check fires BEFORE the
+			// missing-tool_name check.
+			name:        "err_precedence_missing_toolname_bad_suggestions",
+			requestData: map[string]interface{}{"permission_suggestions": "not-an-array"},
+		},
+		{
 			name:          "err_callback_error",
 			requestData:   map[string]interface{}{"tool_name": "Bash", "input": map[string]interface{}{}},
 			callbackError: types.NewControlProtocolError("boom"),
@@ -171,7 +184,7 @@ func permissionSignature(t *testing.T, tc permissionOracleCase) string {
 	}
 	q := NewQuery(ctx, transport, opts, log.NewLogger(false), true)
 
-	resp, err := q.handlePermissionRequest(tc.requestData)
+	resp, err := q.handlePermissionRequest(ctx, tc.requestData)
 	if err != nil {
 		return "ERR|" + err.Error()
 	}

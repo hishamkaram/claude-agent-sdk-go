@@ -13,6 +13,8 @@
   "err_input_wrong_type": "ERR|input must be a map in permission request",
   "err_invalid_result_type": "ERR|permission callback returned invalid type",
   "err_missing_tool_name": "ERR|missing tool_name in permission request",
+  "err_precedence_missing_toolname_bad_input": "ERR|input must be a map in permission request",
+  "err_precedence_missing_toolname_bad_suggestions": "ERR|permission_suggestions must be an array in permission request",
   "err_suggestions_wrong_type": "ERR|permission_suggestions must be an array in permission request",
   "err_tool_name_wrong_type": "ERR|tool_name must be a string in permission request",
   "nil_input_normalized": "OK|{\"behavior\":\"allow\",\"updatedInput\":{}}",
