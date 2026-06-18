@@ -1096,87 +1096,119 @@ func parseInitResult(raw map[string]interface{}) *types.InitializeResult {
 	}
 
 	result := &types.InitializeResult{Raw: raw}
-
-	// Parse "commands" array: each element has "name", "description", "argumentHint".
-	if cmdsRaw, ok := raw["commands"]; ok {
-		if cmdsSlice, ok := cmdsRaw.([]interface{}); ok {
-			commands := make([]types.SlashCommand, 0, len(cmdsSlice))
-			for _, item := range cmdsSlice {
-				m, ok := item.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				cmd := types.SlashCommand{}
-				if name, ok := m["name"].(string); ok {
-					cmd.Name = name
-				}
-				if desc, ok := m["description"].(string); ok {
-					cmd.Description = desc
-				}
-				if hint, ok := m["argumentHint"].(string); ok {
-					cmd.ArgumentHint = hint
-				}
-				if cmd.Name != "" {
-					commands = append(commands, cmd)
-				}
-			}
-			result.Commands = commands
-		}
+	if commands := parseInitCommands(raw); commands != nil {
+		result.Commands = commands
 	}
-
-	// Parse "models" array: each element has "value", "displayName", "description".
-	if modelsRaw, ok := raw["models"]; ok {
-		if modelsSlice, ok := modelsRaw.([]interface{}); ok {
-			models := make([]types.ModelInfo, 0, len(modelsSlice))
-			for _, item := range modelsSlice {
-				m, ok := item.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				info := types.ModelInfo{}
-				if v, ok := m["value"].(string); ok {
-					info.Value = v
-				}
-				if v, ok := m["displayName"].(string); ok {
-					info.DisplayName = v
-				}
-				if v, ok := m["description"].(string); ok {
-					info.Description = v
-				}
-				if info.Value != "" {
-					models = append(models, info)
-				}
-			}
-			result.Models = models
-		}
+	if models := parseInitModels(raw); models != nil {
+		result.Models = models
 	}
-
-	// Parse "agents" array: each element has "name", "description", optional "model".
-	if agentsRaw, ok := raw["agents"]; ok {
-		if agentsSlice, ok := agentsRaw.([]interface{}); ok {
-			agents := make([]types.AgentInfo, 0, len(agentsSlice))
-			for _, item := range agentsSlice {
-				m, ok := item.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				agent := types.AgentInfo{}
-				if v, ok := m["name"].(string); ok {
-					agent.Name = v
-				}
-				if v, ok := m["description"].(string); ok {
-					agent.Description = v
-				}
-				if v, ok := m["model"].(string); ok {
-					agent.Model = v
-				}
-				if agent.Name != "" {
-					agents = append(agents, agent)
-				}
-			}
-			result.Agents = agents
-		}
+	if agents := parseInitAgents(raw); agents != nil {
+		result.Agents = agents
 	}
-
 	return result
+}
+
+// initResultSlice returns the []interface{} stored at key, or (nil, false) if
+// the key is absent or not an array — mirroring the original nested type checks
+// so callers leave their target field untouched in those cases.
+func initResultSlice(raw map[string]interface{}, key string) ([]interface{}, bool) {
+	v, ok := raw[key]
+	if !ok {
+		return nil, false
+	}
+	slice, ok := v.([]interface{})
+	if !ok {
+		return nil, false
+	}
+	return slice, true
+}
+
+// parseInitCommands parses the "commands" array; each element has "name",
+// "description", "argumentHint". Returns nil when the key is absent/not an array.
+func parseInitCommands(raw map[string]interface{}) []types.SlashCommand {
+	slice, ok := initResultSlice(raw, "commands")
+	if !ok {
+		return nil
+	}
+	commands := make([]types.SlashCommand, 0, len(slice))
+	for _, item := range slice {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		cmd := types.SlashCommand{}
+		if name, ok := m["name"].(string); ok {
+			cmd.Name = name
+		}
+		if desc, ok := m["description"].(string); ok {
+			cmd.Description = desc
+		}
+		if hint, ok := m["argumentHint"].(string); ok {
+			cmd.ArgumentHint = hint
+		}
+		if cmd.Name != "" {
+			commands = append(commands, cmd)
+		}
+	}
+	return commands
+}
+
+// parseInitModels parses the "models" array; each element has "value",
+// "displayName", "description". Returns nil when the key is absent/not an array.
+func parseInitModels(raw map[string]interface{}) []types.ModelInfo {
+	slice, ok := initResultSlice(raw, "models")
+	if !ok {
+		return nil
+	}
+	models := make([]types.ModelInfo, 0, len(slice))
+	for _, item := range slice {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		info := types.ModelInfo{}
+		if v, ok := m["value"].(string); ok {
+			info.Value = v
+		}
+		if v, ok := m["displayName"].(string); ok {
+			info.DisplayName = v
+		}
+		if v, ok := m["description"].(string); ok {
+			info.Description = v
+		}
+		if info.Value != "" {
+			models = append(models, info)
+		}
+	}
+	return models
+}
+
+// parseInitAgents parses the "agents" array; each element has "name",
+// "description", optional "model". Returns nil when the key is absent/not an array.
+func parseInitAgents(raw map[string]interface{}) []types.AgentInfo {
+	slice, ok := initResultSlice(raw, "agents")
+	if !ok {
+		return nil
+	}
+	agents := make([]types.AgentInfo, 0, len(slice))
+	for _, item := range slice {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		agent := types.AgentInfo{}
+		if v, ok := m["name"].(string); ok {
+			agent.Name = v
+		}
+		if v, ok := m["description"].(string); ok {
+			agent.Description = v
+		}
+		if v, ok := m["model"].(string); ok {
+			agent.Model = v
+		}
+		if agent.Name != "" {
+			agents = append(agents, agent)
+		}
+	}
+	return agents
 }
