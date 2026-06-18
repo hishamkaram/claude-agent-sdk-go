@@ -270,7 +270,7 @@ func TestJSONLineReader_MultipleLines(t *testing.T) {
 
 	// Next read should be EOF
 	_, err := reader.ReadLine()
-	if err != io.EOF {
+	if !errors.Is(err, io.EOF) {
 		t.Errorf("expected io.EOF, got %v", err)
 	}
 }

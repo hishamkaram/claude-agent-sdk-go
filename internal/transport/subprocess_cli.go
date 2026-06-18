@@ -170,13 +170,16 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) (err error) {
 	t.shutdownRequested = false
 	t.err = nil
 
-	// Create cancellable context
-	t.ctx, t.cancel = context.WithCancel(ctx)
+	// Create cancellable context. connCtx is a local handle on the same context
+	// stored in t.ctx; passing the local (rather than the t.ctx field) to the
+	// connect helpers keeps the inheritance from ctx statically visible.
+	connCtx, connCancel := context.WithCancel(ctx)
+	t.ctx, t.cancel = connCtx, connCancel
 
 	usesCustomSpawner := t.usesCustomSpawner()
 	wantsThinkingDisplay := t.wantsThinkingDisplay()
 	if wantsThinkingDisplay && !usesCustomSpawner {
-		t.thinkingDisplaySupported = t.detectThinkingDisplaySupport()
+		t.thinkingDisplaySupported = t.detectThinkingDisplaySupport(ctx)
 	} else {
 		t.thinkingDisplaySupported = true
 	}
@@ -187,7 +190,7 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) (err error) {
 		t.agentProgressSummariesSupported = true
 		t.subagentExecutionSupported = true
 	} else {
-		t.detectExperimentalFlagSupport()
+		t.detectExperimentalFlagSupport(ctx)
 	}
 
 	// Build command arguments
@@ -201,9 +204,11 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) (err error) {
 
 	// Check if a custom process spawner is provided
 	if t.options != nil && t.options.SpawnProcess != nil {
-		err = t.connectWithCustomSpawner(ctx, args, envMap)
+		err = t.connectWithCustomSpawner(connCtx, args, envMap)
 	} else {
-		err = t.connectWithExecCommand(args, envMap)
+		// connCtx is the cancellable child of ctx established above; pass it so the
+		// subprocess and reader goroutines are bound to the connection lifecycle.
+		err = t.connectWithExecCommand(connCtx, args, envMap)
 	}
 	if err != nil {
 		t.cancel()
@@ -224,8 +229,8 @@ func (t *SubprocessCLITransport) usesCustomSpawner() bool {
 	return t.options != nil && t.options.SpawnProcess != nil
 }
 
-func (t *SubprocessCLITransport) detectThinkingDisplaySupport() bool {
-	version, err := GetCLIVersion(t.cliPath)
+func (t *SubprocessCLITransport) detectThinkingDisplaySupport(ctx context.Context) bool {
+	version, err := GetCLIVersion(ctx, t.cliPath)
 	if err != nil {
 		t.logger.Warn("unable to determine Claude CLI thinking display support; omitting thinking display flag",
 			zap.Error(err),
@@ -247,7 +252,7 @@ func (t *SubprocessCLITransport) detectThinkingDisplaySupport() bool {
 // buildCommandArgs never emits one the CLI would reject (crashing Connect). It only
 // probes the version when a consumer actually opted into one of the flags; otherwise
 // the support fields stay false and the flags are never emitted anyway.
-func (t *SubprocessCLITransport) detectExperimentalFlagSupport() {
+func (t *SubprocessCLITransport) detectExperimentalFlagSupport(ctx context.Context) {
 	if t.options == nil {
 		return
 	}
@@ -260,7 +265,7 @@ func (t *SubprocessCLITransport) detectExperimentalFlagSupport() {
 	// confirmed, so a version-detection failure fails safe (no Connect crash).
 	t.agentProgressSummariesSupported = false
 	t.subagentExecutionSupported = false
-	version, err := GetCLIVersion(t.cliPath)
+	version, err := GetCLIVersion(ctx, t.cliPath)
 	if err != nil {
 		t.logger.Warn("unable to determine Claude CLI version; skipping experimental flags to avoid Connect failure",
 			zap.Error(err))
@@ -311,7 +316,7 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 	t.procDone = make(chan struct{})
 	t.stderrDone = make(chan struct{})
 	capturedProcess := t.customProcess
-	capturedCtx := t.ctx
+	capturedCtx := ctx
 	capturedProcDone := t.procDone
 	capturedStderrDone := t.stderrDone
 	capturedStdout := t.stdout
@@ -347,7 +352,7 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 
 	// Launch context monitor goroutine for custom spawner (Bug C14).
 	// Unlike exec.CommandContext, custom processes don't auto-kill on context cancel.
-	// This goroutine kills the process when the transport context is cancelled,
+	// This goroutine kills the process when the transport context is canceled,
 	// unblocking Wait() and the pipe readers.
 	t.wg.Add(1)
 	go func() {
@@ -389,9 +394,12 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 }
 
 // connectWithExecCommand uses the default exec.Command to create the process.
-func (t *SubprocessCLITransport) connectWithExecCommand(args []string, envMap map[string]string) error {
+// runCtx is the cancellable connection context (t.ctx, a WithCancel child of the
+// caller's ctx established in Connect); the subprocess and reader goroutines are
+// bound to it so Close can cancel them via t.cancel after this returns.
+func (t *SubprocessCLITransport) connectWithExecCommand(runCtx context.Context, args []string, envMap map[string]string) error {
 	// Create command with arguments
-	t.cmd = exec.CommandContext(t.ctx, t.cliPath, args...)
+	t.cmd = exec.CommandContext(runCtx, t.cliPath, args...)
 
 	// Set working directory if provided
 	if t.cwd != "" {
@@ -454,7 +462,7 @@ func (t *SubprocessCLITransport) connectWithExecCommand(args []string, envMap ma
 	t.procDone = make(chan struct{})
 	t.stderrDone = make(chan struct{})
 	capturedCmd := t.cmd
-	capturedCtx := t.ctx
+	capturedCtx := runCtx
 	capturedProcDone := t.procDone
 	capturedStderrDone := t.stderrDone
 	capturedStdout := t.stdout
@@ -559,7 +567,7 @@ var ErrParseGiveUp = errors.New("transport: too many consecutive parse errors, s
 //
 // Note on lifecycle cancellation: ReadLine() blocks on stdout, which cannot be
 // interrupted by context cancel directly. Since the transport owns stdout after
-// Connect(), this loop closes stdout when the context is cancelled or the
+// Connect(), this loop closes stdout when the context is canceled or the
 // captured process-done channel closes. That unblocks ReadLine() even when a
 // subprocess exits while stdout remains open with a partial line.
 //
@@ -667,7 +675,7 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 		// Check for context cancellation
 		select {
 		case <-ctx.Done():
-			t.logger.Debug("Message reader loop stopped: context cancelled")
+			t.logger.Debug("Message reader loop stopped: context canceled")
 			return
 		case <-procDone:
 			t.logger.Debug("Message reader loop stopped: process exited")
@@ -678,13 +686,13 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 		// Read next JSON line
 		line, err := reader.ReadLine()
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				t.logger.Debug("Message reader loop stopped: EOF from CLI")
 				// Normal end of stream
 				return
 			}
 
-			// If the transport context is already cancelled, read errors
+			// If the transport context is already canceled, read errors
 			// are expected (pipe closed during shutdown) — log at Debug.
 			// Use the passed-in ctx (not t.ctx) to avoid a data race with
 			// Connect() overwriting t.ctx under t.mu.
@@ -731,7 +739,7 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 				)
 				t.observer().OnParseGiveUp(consecutiveParseErrors)
 				t.terminateOnUnrecoverableError(
-					fmt.Errorf("transport.messageReaderLoop: %d consecutive parse errors (last: %v): %w", consecutiveParseErrors, err, ErrParseGiveUp),
+					fmt.Errorf("transport.messageReaderLoop: %d consecutive parse errors (last: %w): %w", consecutiveParseErrors, err, ErrParseGiveUp),
 				)
 				return
 			}
@@ -755,7 +763,7 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				t.logger.Debug("Message reader loop stopped during backoff: context cancelled")
+				t.logger.Debug("Message reader loop stopped during backoff: context canceled")
 				return
 			case <-procDone:
 				timer.Stop()
@@ -869,19 +877,20 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 	// Add system prompt - always pass the flag to match Python SDK behavior
 	// When nil, pass empty string to prevent unintended Claude Code defaults
 	if t.options != nil {
-		if t.options.SystemPrompt == nil {
+		switch prompt := t.options.SystemPrompt.(type) {
+		case nil:
 			// Default to empty system prompt when not specified
 			args = append(args, "--system-prompt", "")
 			t.logger.Debug("Setting empty system prompt (default)")
-		} else if promptStr, ok := t.options.SystemPrompt.(string); ok {
+		case string:
 			// Handle string prompt
-			args = append(args, "--system-prompt", promptStr)
-			t.logger.Debug("setting system prompt", zap.String("prompt", promptStr))
-		} else if preset, ok := t.options.SystemPrompt.(types.SystemPromptPreset); ok {
+			args = append(args, "--system-prompt", prompt)
+			t.logger.Debug("setting system prompt", zap.String("prompt", prompt))
+		case types.SystemPromptPreset:
 			// Handle preset case - append to default Claude Code prompt
-			if preset.Append != nil {
-				args = append(args, "--append-system-prompt", *preset.Append)
-				t.logger.Debug("appending to system prompt preset", zap.String("append", *preset.Append))
+			if prompt.Append != nil {
+				args = append(args, "--append-system-prompt", *prompt.Append)
+				t.logger.Debug("appending to system prompt preset", zap.String("append", *prompt.Append))
 			}
 		}
 	} else {
@@ -1057,12 +1066,13 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 
 		if len(subagentJSON) > 0 {
 			subagentJSONBytes, err := json.Marshal(subagentJSON)
-			if err != nil {
+			switch {
+			case err != nil:
 				t.logger.Warn("failed to marshal subagent execution config to JSON", zap.Error(err))
-			} else if t.subagentExecutionSupported {
+			case t.subagentExecutionSupported:
 				args = append(args, "--subagent-execution", string(subagentJSONBytes))
 				t.logger.Debug("subagent execution configuration", zap.String("config", string(subagentJSONBytes)))
-			} else {
+			default:
 				t.logger.Warn("Claude CLI does not support --subagent-execution; skipping to avoid Connect failure")
 			}
 		}
@@ -1459,7 +1469,7 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadC
 		if logPath != "" {
 			// Create parent directory if it doesn't exist
 			logDir := filepath.Dir(logPath)
-			if err := os.MkdirAll(logDir, 0755); err != nil {
+			if err := os.MkdirAll(logDir, 0o755); err != nil {
 				fmt.Fprintf(os.Stderr,
 					"[SDK] Failed to create stderr log directory %s: %v\n"+
 						"Stderr file logging disabled. To fix, create directory:\n"+
@@ -1468,7 +1478,7 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadC
 			} else {
 				// Try to open log file
 				var err error
-				logFile, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+				logFile, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 				if err != nil {
 					fmt.Fprintf(os.Stderr,
 						"[SDK] Failed to open stderr log file %s: %v\n"+
@@ -1491,9 +1501,9 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadC
 		}()
 	}
 
-	// Launch a goroutine that closes stderr when ctx is cancelled.
+	// Launch a goroutine that closes stderr when ctx is canceled.
 	// This unblocks ReadLine() if the subprocess hangs without closing stderr (Bug C16).
-	// The goroutine exits when either ctx is cancelled (close stderr) or the read loop
+	// The goroutine exits when either ctx is canceled (close stderr) or the read loop
 	// finishes (readDone closed).
 	readDone := make(chan struct{})
 	defer close(readDone)
@@ -1533,7 +1543,7 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadC
 	}
 }
 
-func (t *SubprocessCLITransport) consumeStderrChunk(tail *ringBuffer, partial []byte, chunk []byte, emit func([]byte)) []byte {
+func (t *SubprocessCLITransport) consumeStderrChunk(tail *ringBuffer, partial, chunk []byte, emit func([]byte)) []byte {
 	for len(chunk) > 0 {
 		newline := bytes.IndexByte(chunk, '\n')
 		if newline >= 0 {
@@ -1551,7 +1561,7 @@ func (t *SubprocessCLITransport) consumeStderrChunk(tail *ringBuffer, partial []
 	return partial
 }
 
-func appendStderrPartial(tail *ringBuffer, partial []byte, data []byte, emit func([]byte)) []byte {
+func appendStderrPartial(tail *ringBuffer, partial, data []byte, emit func([]byte)) []byte {
 	for len(data) > 0 {
 		room := StderrRingSize - len(partial)
 		if room == 0 {
@@ -1621,10 +1631,9 @@ func (t *SubprocessCLITransport) parseStderrError(stderrText string) {
 }
 
 // extractSessionNotFoundError checks if the stderr text contains a session not found error.
-// Returns (true, sessionID) if matched, (false, "") otherwise.
-func extractSessionNotFoundError(stderrText string) (bool, string) {
-	// Pattern: "No conversation found with session ID: <uuid>"
-	// Example: "No conversation found with session ID: 8587b432-e504-42c8-b9a7-e3fd0b4b2c60"
+// Returns (matched, id) — (true, id) when the CLI emitted the
+// "No conversation found with session ID: <uuid>" diagnostic, (false, "") otherwise.
+func extractSessionNotFoundError(stderrText string) (matched bool, id string) {
 	const pattern = "No conversation found with session ID:"
 
 	if idx := findSubstring(stderrText, pattern); idx >= 0 {
@@ -1635,7 +1644,7 @@ func extractSessionNotFoundError(stderrText string) (bool, string) {
 			remaining := stderrText[sessionIDStart:]
 			sessionID := trimWhitespace(remaining)
 			// Session ID is the first token (UUID format)
-			if len(sessionID) > 0 {
+			if sessionID != "" {
 				// Take everything up to the first whitespace or end of string
 				endIdx := 0
 				for endIdx < len(sessionID) && !isWhitespace(rune(sessionID[endIdx])) {

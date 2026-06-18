@@ -23,7 +23,7 @@ import (
 // The returned channel is read-only and will be closed when:
 //   - All messages have been received (including the final ResultMessage)
 //   - An error occurs
-//   - The context is cancelled
+//   - The context is canceled
 //
 // Error handling:
 //   - Connection errors are returned immediately
@@ -80,7 +80,7 @@ func Query(ctx context.Context, prompt string, options *types.ClaudeAgentOptions
 		cliPath = *options.CLIPath
 	} else {
 		var err error
-		cliPath, err = transport.FindCLI()
+		cliPath, err = transport.FindCLI(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -119,19 +119,19 @@ func Query(ctx context.Context, prompt string, options *types.ClaudeAgentOptions
 	transportInst := transport.NewSubprocessCLITransport(cliPath, cwd, env, logger, resumeID, options)
 
 	// Connect to CLI
-	if err := transportInst.Connect(ctx); err != nil {
+	if connectErr := transportInst.Connect(ctx); connectErr != nil {
 		cleanupSessionStore()
-		return nil, types.NewCLIConnectionErrorWithCause("failed to connect to Claude CLI", err)
+		return nil, types.NewCLIConnectionErrorWithCause("failed to connect to Claude CLI", connectErr)
 	}
 
 	// Create query handler (non-streaming mode)
 	queryHandler := internal.NewQuery(ctx, transportInst, options, logger, false)
 
 	// Start message processing
-	if err := queryHandler.Start(ctx); err != nil {
+	if startErr := queryHandler.Start(ctx); startErr != nil {
 		_ = transportInst.Close(ctx)
 		cleanupSessionStore()
-		return nil, err
+		return nil, startErr
 	}
 
 	// Use resume ID as session ID, or default if not resuming

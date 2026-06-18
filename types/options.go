@@ -637,6 +637,7 @@ func (o *ClaudeAgentOptions) WithMaxTurns(maxTurns int) *ClaudeAgentOptions {
 }
 
 // WithMaxThinkingTokens sets the maximum tokens for extended thinking.
+//
 // Deprecated: prefer WithThinking(ThinkingConfig{Type: "enabled", BudgetTokens: &n}).
 func (o *ClaudeAgentOptions) WithMaxThinkingTokens(maxTokens int) *ClaudeAgentOptions {
 	o.MaxThinkingTokens = &maxTokens

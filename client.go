@@ -122,7 +122,7 @@ func NewClient(ctx context.Context, options *types.ClaudeAgentOptions) (*Client,
 		cliPath = *options.CLIPath
 	} else {
 		var err error
-		cliPath, err = transport.FindCLI()
+		cliPath, err = transport.FindCLI(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -261,7 +261,10 @@ func (c *Client) Connect(ctx context.Context) error {
 	initRaw, err := query.Initialize(ctx)
 	if err != nil {
 		c.logger.Error("failed to initialize control protocol", zap.Error(err))
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Best-effort cleanup: derive from the caller's ctx (preserving its values)
+		// but strip cancellation so teardown still runs even when ctx is already
+		// canceled, bounded by a fresh 5s timeout.
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cleanupCancel()
 		_ = query.Stop(cleanupCtx)
 		_ = c.transport.Close(cleanupCtx)
@@ -309,7 +312,7 @@ func (c *Client) Connect(ctx context.Context) error {
 // Returns an error if:
 //   - Not connected (call Connect() first)
 //   - Write to CLI fails
-//   - Context is cancelled
+//   - Context is canceled
 //
 // Example:
 //
@@ -443,7 +446,7 @@ func (c *Client) QueryWithContent(ctx context.Context, content interface{}) erro
 // The channel is closed when:
 //   - A ResultMessage is received
 //   - An error occurs
-//   - The context is cancelled
+//   - The context is canceled
 //
 // Example:
 //

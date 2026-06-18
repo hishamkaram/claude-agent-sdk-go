@@ -1606,7 +1606,7 @@ func TestClient_Close_WaitsForReceiveGoroutines(t *testing.T) {
 			t.Logf("Close returned error (acceptable): %v", err)
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("Close() deadlocked — ReceiveResponse goroutine not cancelled or not tracked")
+		t.Fatal("Close() deadlocked — ReceiveResponse goroutine not canceled or not tracked")
 	}
 }
 

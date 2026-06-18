@@ -507,7 +507,7 @@ func TestDetectThinkingDisplaySupportIgnoresSkipVersionCheck(t *testing.T) {
 		WithThinking(types.ThinkingConfig{Type: "adaptive", Display: "summarized"})
 	transport := NewSubprocessCLITransport(cliPath, "", nil, log.NewLogger(false), "", opts)
 
-	if transport.detectThinkingDisplaySupport() {
+	if transport.detectThinkingDisplaySupport(context.Background()) {
 		t.Fatal("thinking display support should remain false for CLI 2.1.92 even when version checks are skipped")
 	}
 }
@@ -2186,7 +2186,7 @@ func keysOf(m map[string]interface{}) []string {
 // ===== Phase E: Subprocess Crash Tests (T003-T) =====
 //
 // These tests use a mockSpawnedProcess (custom spawner) to simulate subprocess crashes.
-// They verify the watcher goroutine behaviour added in T007.
+// They verify the watcher goroutine behavior added in T007.
 //
 // RED before T007: IsReady() stays true after Kill() — no watcher to clear it.
 // GREEN after T007: watcher sets ready=false; all assertions pass.
@@ -2687,7 +2687,7 @@ func TestMessageReaderLoop_ParseErrorBackoffResets(t *testing.T) {
 
 // ===== Bug C14: Context monitoring in spawned goroutines =====
 
-// TestContextCancellation_GoroutinesExit verifies that cancelling the parent
+// TestContextCancellation_GoroutinesExit verifies that canceling the parent
 // context causes all spawned goroutines to exit within 5 seconds.
 func TestContextCancellation_GoroutinesExit(t *testing.T) {
 	t.Parallel()
@@ -2962,7 +2962,7 @@ func TestMessageReaderLoop_ParseErrorCounterResetPreventsThreshold(t *testing.T)
 }
 
 // TestReadStderr_ExitsOnContextCancel verifies that the readStderr goroutine
-// exits when the context is cancelled, even if the pipe is still open.
+// exits when the context is canceled, even if the pipe is still open.
 func TestReadStderr_ExitsOnContextCancel(t *testing.T) {
 	t.Parallel()
 

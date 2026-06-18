@@ -601,8 +601,8 @@ func TestGetSessionMessagesOptions_IncludeSystemMessages(t *testing.T) {
 	}
 
 	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("failed to unmarshal to map: %v", err)
+	if unmarshalErr := json.Unmarshal(data, &raw); unmarshalErr != nil {
+		t.Fatalf("failed to unmarshal to map: %v", unmarshalErr)
 	}
 
 	if _, ok := raw["includeSystemMessages"]; !ok {

@@ -81,7 +81,7 @@ done
 	}
 
 	// Write script
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
 		return nil, fmt.Errorf("failed to write mock script: %w", err)
 	}
 
@@ -122,7 +122,7 @@ func CreateMockCLIWithMessages(t *testing.T, messages []string) (*MockCLI, error
 		}
 	}
 
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
 		return nil, fmt.Errorf("failed to write mock script: %w", err)
 	}
 

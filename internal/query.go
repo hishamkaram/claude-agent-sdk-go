@@ -63,11 +63,11 @@ type responseResult struct {
 }
 
 // NewQuery creates a new Query handler.
-func NewQuery(ctx context.Context, transport transport.Transport, opts *types.ClaudeAgentOptions, logger *log.Logger, isStreamingMode bool) *Query {
+func NewQuery(ctx context.Context, tr transport.Transport, opts *types.ClaudeAgentOptions, logger *log.Logger, isStreamingMode bool) *Query {
 	queryCtx, cancel := context.WithCancel(ctx)
 
 	q := &Query{
-		transport:       transport,
+		transport:       tr,
 		ctx:             queryCtx,
 		cancel:          cancel,
 		logger:          logger,
@@ -250,7 +250,7 @@ func (q *Query) messageLoop() {
 	for {
 		select {
 		case <-q.ctx.Done():
-			q.logger.Debug("Message loop stopped: context cancelled")
+			q.logger.Debug("Message loop stopped: context canceled")
 			return
 		case <-q.stopChan:
 			q.logger.Debug("Message loop stopped: stop signal received")
@@ -783,25 +783,33 @@ func (q *Query) handleMCPMessage(requestData map[string]interface{}) (map[string
 	}
 
 	// Route message to MCP server
-	mcpResponse, err := server.HandleMessage(message)
-	if err != nil {
-		// Return JSONRPC error response
-		messageID := message["id"]
-		return map[string]interface{}{
-			"mcp_response": map[string]interface{}{
-				"jsonrpc": "2.0",
-				"id":      messageID,
-				"error": map[string]interface{}{
-					"code":    -32603,
-					"message": err.Error(),
-				},
-			},
-		}, nil
+	mcpResponse, mcpErr := server.HandleMessage(message)
+	if mcpErr != nil {
+		// Surface the MCP failure as a JSONRPC error response (protocol-level
+		// error), not a Go transport error. The control loop expects a response
+		// map with no Go error.
+		return mcpServerErrorResponse(message["id"], mcpErr), nil
 	}
 
 	return map[string]interface{}{
 		"mcp_response": mcpResponse,
 	}, nil
+}
+
+// mcpServerErrorResponse wraps an MCP server failure as a JSONRPC internal-error
+// response payload. The failure is intentionally reported in-band (as a JSONRPC
+// error object) rather than as a Go transport error.
+func mcpServerErrorResponse(messageID interface{}, cause error) map[string]interface{} {
+	return map[string]interface{}{
+		"mcp_response": map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      messageID,
+			"error": map[string]interface{}{
+				"code":    -32603,
+				"message": cause.Error(),
+			},
+		},
+	}
 }
 
 // SendControlMessage is the exported wrapper around sendControlRequest.
@@ -894,7 +902,7 @@ func (q *Query) sendSuccessResponse(requestID string, response map[string]interf
 }
 
 // sendErrorResponse sends an error control response.
-func (q *Query) sendErrorResponse(requestID string, errorMsg string) {
+func (q *Query) sendErrorResponse(requestID, errorMsg string) {
 	controlResponse := map[string]interface{}{
 		"type": "control_response",
 		"response": map[string]interface{}{

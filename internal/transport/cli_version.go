@@ -111,14 +111,16 @@ func ParseSemanticVersion(versionStr string) (SemanticVersion, error) {
 	}, nil
 }
 
-// GetCLIVersion retrieves the version of the Claude CLI binary
-func GetCLIVersion(cliPath string) (SemanticVersion, error) {
-	// Create context with timeout to prevent hanging
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// GetCLIVersion retrieves the version of the Claude CLI binary. The caller's
+// ctx bounds the `claude --version` subprocess; a 5s timeout is layered on top
+// so a hung CLI cannot block indefinitely even when ctx has no deadline.
+func GetCLIVersion(ctx context.Context, cliPath string) (SemanticVersion, error) {
+	// Layer a hard timeout on the caller's context to prevent hanging.
+	versionCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	// Run: claude --version
-	cmd := exec.CommandContext(ctx, cliPath, "--version")
+	cmd := exec.CommandContext(versionCtx, cliPath, "--version")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -132,6 +134,18 @@ func GetCLIVersion(cliPath string) (SemanticVersion, error) {
 	// Parse version from output
 	versionStr := strings.TrimSpace(stdout.String())
 	return ParseSemanticVersion(versionStr)
+}
+
+// tryGetCLIVersion returns the parsed CLI version and true when it can be
+// determined. When the version cannot be determined (older CLIs without
+// `--version`, parse failures, timeouts), it returns false so callers can apply
+// a backwards-compatible "accept" policy without inspecting the discovery error.
+func tryGetCLIVersion(ctx context.Context, cliPath string) (SemanticVersion, bool) {
+	version, err := GetCLIVersion(ctx, cliPath)
+	if err != nil {
+		return SemanticVersion{}, false
+	}
+	return version, true
 }
 
 // SupportsThinkingDisplay reports whether the parsed Claude CLI version accepts
@@ -163,19 +177,20 @@ func SupportsSubagentExecution(_ SemanticVersion) bool {
 	return false
 }
 
-// CheckCLIVersion verifies that the CLI version meets minimum requirements
-// Returns nil if version is acceptable, or an error if not
-func CheckCLIVersion(cliPath string) error {
+// CheckCLIVersion verifies that the CLI version meets minimum requirements.
+// Returns nil if version is acceptable, or an error if not. The caller's ctx
+// bounds the version-probe subprocess.
+func CheckCLIVersion(ctx context.Context, cliPath string) error {
 	// Check if version checking is disabled via environment variable
 	if os.Getenv("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK") != "" {
 		return nil
 	}
 
-	// Get the CLI version
-	version, err := GetCLIVersion(cliPath)
-	if err != nil {
-		// If we can't determine the version, warn but don't fail
-		// (for backwards compatibility with older CLIs that might not have --version)
+	// Get the CLI version. If we can't determine it, accept the CLI rather than
+	// fail — older CLIs that predate `--version` must keep working (backwards
+	// compatibility). The discovery error is intentionally non-fatal here.
+	version, ok := tryGetCLIVersion(ctx, cliPath)
+	if !ok {
 		return nil
 	}
 

@@ -128,7 +128,7 @@ func TestAllErrorTypes_Constructor_Error_Is_Unwrap_As(t *testing.T) {
 			if !ok {
 				t.Fatal("error does not implement Unwrap()")
 			}
-			if unwrapper.Unwrap() != cause {
+			if !errors.Is(unwrapper.Unwrap(), cause) {
 				t.Errorf("Unwrap() = %v, want %v", unwrapper.Unwrap(), cause)
 			}
 
@@ -278,7 +278,7 @@ func TestJSONDecodeErrorWithCause_RawAndCause(t *testing.T) {
 	if !strings.Contains(got, "unexpected token") {
 		t.Errorf("Error() missing cause, got %q", got)
 	}
-	if err.Unwrap() != cause {
+	if !errors.Is(err.Unwrap(), cause) {
 		t.Errorf("Unwrap() = %v, want %v", err.Unwrap(), cause)
 	}
 }
@@ -296,7 +296,7 @@ func TestMessageParseErrorWithCause(t *testing.T) {
 	if !strings.Contains(got, "missing field") {
 		t.Errorf("Error() missing cause, got %q", got)
 	}
-	if err.Unwrap() != cause {
+	if !errors.Is(err.Unwrap(), cause) {
 		t.Errorf("Unwrap() = %v, want %v", err.Unwrap(), cause)
 	}
 }
@@ -497,7 +497,7 @@ func TestValidationError_WithAndWithoutCause(t *testing.T) {
 		if !strings.Contains(err.Error(), "empty") {
 			t.Errorf("Error() = %q, missing cause", err.Error())
 		}
-		if err.Unwrap() != cause {
+		if !errors.Is(err.Unwrap(), cause) {
 			t.Errorf("Unwrap() = %v, want %v", err.Unwrap(), cause)
 		}
 	})
@@ -547,7 +547,7 @@ func TestCLIConnectionError_Display(t *testing.T) {
 		if !strings.Contains(err.Error(), "timeout") {
 			t.Errorf("Error() = %q, missing cause", err.Error())
 		}
-		if err.Unwrap() != cause {
+		if !errors.Is(err.Unwrap(), cause) {
 			t.Errorf("Unwrap() = %v, want %v", err.Unwrap(), cause)
 		}
 	})

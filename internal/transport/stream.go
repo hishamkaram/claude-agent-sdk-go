@@ -2,6 +2,7 @@ package transport
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 
@@ -46,7 +47,7 @@ func (r *JSONLineReader) ReadLine() ([]byte, error) {
 	if !r.scanner.Scan() {
 		if err := r.scanner.Err(); err != nil {
 			// Check if it's a buffer overflow error
-			if err == bufio.ErrTooLong {
+			if errors.Is(err, bufio.ErrTooLong) {
 				return nil, types.NewJSONDecodeErrorWithRaw(
 					"JSON line exceeded maximum buffer size",
 					"",

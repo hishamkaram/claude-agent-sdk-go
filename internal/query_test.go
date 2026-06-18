@@ -1311,7 +1311,7 @@ func (m *mockMCPServer) Version() string {
 
 // TestQuery_CanUseTool_Timeout verifies that the canUseTool callback is called with
 // a context that has a timeout derived from ToolCallbackTimeout, and that a slow
-// callback is cancelled when the timeout expires.
+// callback is canceled when the timeout expires.
 func TestQuery_CanUseTool_Timeout(t *testing.T) {
 	t.Parallel()
 
@@ -1921,7 +1921,7 @@ func TestHandleControlRequest_CanUseTool_PanicSendsErrorResponse(t *testing.T) {
 }
 
 // TestHandleControlResponse_NonBlockingSend verifies that sending a response to
-// a channel whose receiver has already exited (context cancelled) does not block.
+// a channel whose receiver has already exited (context canceled) does not block.
 func TestHandleControlResponse_NonBlockingSend(t *testing.T) {
 	t.Parallel()
 

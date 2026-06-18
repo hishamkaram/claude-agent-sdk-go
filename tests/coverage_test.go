@@ -72,7 +72,6 @@ func parseCoverageFile(path string) ([]Coverage, error) {
 
 // parseCoverageOutput parses the output of go tool cover.
 func parseCoverageOutput(output string) []Coverage {
-	var result []Coverage
 	packageCoverage := make(map[string]*Coverage)
 
 	lines := strings.Split(output, "\n")
@@ -118,6 +117,7 @@ func parseCoverageOutput(output string) []Coverage {
 	}
 
 	// Calculate percentages
+	result := make([]Coverage, 0, len(packageCoverage))
 	for _, cov := range packageCoverage {
 		if cov.Statements > 0 {
 			cov.Percentage = float64(cov.Covered) / float64(cov.Statements) * 100

@@ -48,9 +48,9 @@ func prepareSessionStoreRuntime(ctx context.Context, options *types.ClaudeAgentO
 	}
 	cleanup := func() { _ = os.RemoveAll(configDir) }
 	projectDir := filepath.Join(configDir, "projects", key.ProjectKey)
-	if err := os.MkdirAll(projectDir, 0o700); err != nil {
+	if mkErr := os.MkdirAll(projectDir, 0o700); mkErr != nil {
 		cleanup()
-		return nil, fmt.Errorf("session store project dir: %w", err)
+		return nil, fmt.Errorf("session store project dir: %w", mkErr)
 	}
 	transcriptPath := filepath.Join(projectDir, key.SessionID+".jsonl")
 	f, err := os.OpenFile(transcriptPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)

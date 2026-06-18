@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"os/user"
@@ -48,7 +49,7 @@ var commonCLIInstallLocations = []string{
 // (unless CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK is set).
 //
 // Returns the path to the CLI binary or a CLINotFoundError if not found.
-func FindCLI() (string, error) {
+func FindCLI(ctx context.Context) (string, error) {
 	findCLIState.mu.Lock()
 	if findCLIState.cachedPath != "" {
 		path := findCLIState.cachedPath
@@ -65,7 +66,7 @@ func FindCLI() (string, error) {
 	findCLIState.inFlight = flight
 	findCLIState.mu.Unlock()
 
-	path, err := findCLIUncached()
+	path, err := findCLIUncached(ctx)
 
 	findCLIState.mu.Lock()
 	flight.path = path
@@ -80,12 +81,12 @@ func FindCLI() (string, error) {
 	return path, err
 }
 
-func findCLIUncached() (string, error) {
+func findCLIUncached(ctx context.Context) (string, error) {
 	// First, try to find in PATH
 	if cliPath, err := exec.LookPath("claude"); err == nil {
 		// Check version before returning
-		if err := CheckCLIVersion(cliPath); err != nil {
-			return "", err
+		if verErr := CheckCLIVersion(ctx, cliPath); verErr != nil {
+			return "", verErr
 		}
 		return cliPath, nil
 	}
@@ -95,8 +96,8 @@ func findCLIUncached() (string, error) {
 		expandedPath := expandHome(location)
 		if _, err := os.Stat(expandedPath); err == nil {
 			// Check version before returning
-			if err := CheckCLIVersion(expandedPath); err != nil {
-				return "", err
+			if verErr := CheckCLIVersion(ctx, expandedPath); verErr != nil {
+				return "", verErr
 			}
 			return expandedPath, nil
 		}

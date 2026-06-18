@@ -145,11 +145,12 @@ func (s *SDKMCPServer) handleCallTool(message map[string]interface{}) (map[strin
 		return s.errorResponse(message, -32603, "Tool not found: "+toolName), nil
 	}
 
-	// Call the tool handler
+	// Call the tool handler. A handler failure is reported in-band as a JSONRPC
+	// error response (not a Go transport error), so the returned Go error is nil.
 	ctx := context.Background()
-	result, err := tool.Handler(ctx, args)
-	if err != nil {
-		return s.errorResponse(message, -32603, "Tool execution failed: "+err.Error()), nil
+	result, handlerErr := tool.Handler(ctx, args)
+	if handlerErr != nil {
+		return s.toolExecutionErrorResponse(message, handlerErr), nil
 	}
 
 	// Format the result as content blocks
@@ -208,6 +209,13 @@ func (s *SDKMCPServer) formatResult(result any) []map[string]interface{} {
 	}
 
 	return contentBlocks
+}
+
+// toolExecutionErrorResponse wraps a tool-handler failure as a JSON-RPC
+// internal-error response. The handler error is reported in-band rather than as
+// a Go transport error.
+func (s *SDKMCPServer) toolExecutionErrorResponse(message map[string]interface{}, cause error) map[string]interface{} {
+	return s.errorResponse(message, -32603, "Tool execution failed: "+cause.Error())
 }
 
 // errorResponse creates a JSON-RPC error response.

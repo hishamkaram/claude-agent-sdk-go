@@ -85,7 +85,7 @@ func GetSessionInfo(ctx context.Context, sessionID string, opts *types.GetSessio
 }
 
 // RenameSession is unsupported by the read-only history backend.
-func RenameSession(ctx context.Context, sessionID string, title string, opts *types.RenameSessionOptions) error {
+func RenameSession(ctx context.Context, sessionID, title string, opts *types.RenameSessionOptions) error {
 	if sessionID == "" {
 		return fmt.Errorf("RenameSession: sessionID: %w", types.ErrEmptyParameter)
 	}
@@ -96,7 +96,7 @@ func RenameSession(ctx context.Context, sessionID string, title string, opts *ty
 }
 
 // TagSession is unsupported by the read-only history backend.
-func TagSession(ctx context.Context, sessionID string, tag string, opts *types.TagSessionOptions) error {
+func TagSession(ctx context.Context, sessionID, tag string, opts *types.TagSessionOptions) error {
 	if sessionID == "" {
 		return fmt.Errorf("TagSession: sessionID: %w", types.ErrEmptyParameter)
 	}

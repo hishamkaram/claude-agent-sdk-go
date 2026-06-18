@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sync"
@@ -51,17 +52,17 @@ func TestFindCLI_InPATH(t *testing.T) {
 	// Set PATH so only our temp dir is searched.
 	t.Setenv("PATH", tmpDir)
 
-	got, err := FindCLI()
+	got, err := FindCLI(context.Background())
 	if err != nil {
-		t.Fatalf("FindCLI() unexpected error: %v", err)
+		t.Fatalf("FindCLI(context.Background()) unexpected error: %v", err)
 	}
 
 	if got == "" {
-		t.Fatal("FindCLI() returned empty path")
+		t.Fatal("FindCLI(context.Background()) returned empty path")
 	}
 
 	if got != claudePath {
-		t.Errorf("FindCLI() = %q, want %q", got, claudePath)
+		t.Errorf("FindCLI(context.Background()) = %q, want %q", got, claudePath)
 	}
 }
 
@@ -86,13 +87,13 @@ func TestFindCLI_NotFound(t *testing.T) {
 	// Set HOME to an empty temp dir so common-location stat calls all fail.
 	t.Setenv("HOME", t.TempDir())
 
-	_, err := FindCLI()
+	_, err := FindCLI(context.Background())
 	if err == nil {
-		t.Fatal("FindCLI() expected error when CLI is not installed, got nil")
+		t.Fatal("FindCLI(context.Background()) expected error when CLI is not installed, got nil")
 	}
 
 	if !types.IsCLINotFoundError(err) {
-		t.Errorf("FindCLI() error type = %T, want *types.CLINotFoundError", err)
+		t.Errorf("FindCLI(context.Background()) error type = %T, want *types.CLINotFoundError", err)
 	}
 }
 
@@ -134,7 +135,7 @@ exit 0
 		go func() {
 			defer wg.Done()
 			<-start
-			results[i].path, results[i].err = FindCLI()
+			results[i].path, results[i].err = FindCLI(context.Background())
 		}()
 	}
 
@@ -143,10 +144,10 @@ exit 0
 
 	for i, result := range results {
 		if result.err != nil {
-			t.Fatalf("FindCLI() caller %d unexpected error: %v", i, result.err)
+			t.Fatalf("FindCLI(context.Background()) caller %d unexpected error: %v", i, result.err)
 		}
 		if result.path != claudePath {
-			t.Fatalf("FindCLI() caller %d = %q, want %q", i, result.path, claudePath)
+			t.Fatalf("FindCLI(context.Background()) caller %d = %q, want %q", i, result.path, claudePath)
 		}
 	}
 
@@ -158,12 +159,12 @@ exit 0
 		t.Fatalf("version check count after concurrent calls = %d, want 1", got)
 	}
 
-	got, err := FindCLI()
+	got, err := FindCLI(context.Background())
 	if err != nil {
-		t.Fatalf("FindCLI() after cache unexpected error: %v", err)
+		t.Fatalf("FindCLI(context.Background()) after cache unexpected error: %v", err)
 	}
 	if got != claudePath {
-		t.Fatalf("FindCLI() after cache = %q, want %q", got, claudePath)
+		t.Fatalf("FindCLI(context.Background()) after cache = %q, want %q", got, claudePath)
 	}
 
 	data, err = os.ReadFile(countPath)
@@ -183,28 +184,28 @@ func TestFindCLI_FailedLookupIsNotCached(t *testing.T) {
 	t.Setenv("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK", "1")
 	t.Setenv("PATH", t.TempDir())
 
-	_, err := FindCLI()
+	_, err := FindCLI(context.Background())
 	if err == nil {
-		t.Fatal("FindCLI() expected initial lookup error, got nil")
+		t.Fatal("FindCLI(context.Background()) expected initial lookup error, got nil")
 	}
 	if !types.IsCLINotFoundError(err) {
-		t.Fatalf("FindCLI() initial error type = %T, want *types.CLINotFoundError", err)
+		t.Fatalf("FindCLI(context.Background()) initial error type = %T, want *types.CLINotFoundError", err)
 	}
 
 	tmpDir := t.TempDir()
 	claudePath := filepath.Join(tmpDir, "claude")
-	if err := os.WriteFile(claudePath, []byte("#!/bin/sh\necho mock"), 0755); err != nil {
-		t.Fatalf("failed to create mock binary: %v", err)
+	if writeErr := os.WriteFile(claudePath, []byte("#!/bin/sh\necho mock"), 0755); writeErr != nil {
+		t.Fatalf("failed to create mock binary: %v", writeErr)
 	}
 
 	t.Setenv("PATH", tmpDir)
 
-	got, err := FindCLI()
+	got, err := FindCLI(context.Background())
 	if err != nil {
-		t.Fatalf("FindCLI() after PATH update unexpected error: %v", err)
+		t.Fatalf("FindCLI(context.Background()) after PATH update unexpected error: %v", err)
 	}
 	if got != claudePath {
-		t.Fatalf("FindCLI() after PATH update = %q, want %q", got, claudePath)
+		t.Fatalf("FindCLI(context.Background()) after PATH update = %q, want %q", got, claudePath)
 	}
 }
 

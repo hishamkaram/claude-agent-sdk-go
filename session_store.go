@@ -46,11 +46,11 @@ func (b *SessionStoreBackend) ListSessions(ctx context.Context, opts *types.List
 			return nil, err
 		}
 		infos := make([]types.SDKSessionInfo, 0, len(entries))
-		for _, entry := range entries {
-			if !isValidUUID(entry.SessionID) {
+		for i := range entries {
+			if !isValidUUID(entries[i].SessionID) {
 				continue
 			}
-			infos = append(infos, sessionStoreListEntryInfo(entry))
+			infos = append(infos, sessionStoreListEntryInfo(entries[i]))
 		}
 		return infos, nil
 	}
@@ -136,7 +136,7 @@ func (b *SessionStoreBackend) ListSubagents(ctx context.Context, sessionID strin
 	return nil, types.NewUnsupportedSessionStoreOperationError("ListSubagents")
 }
 
-func (b *SessionStoreBackend) GetSubagentMessages(ctx context.Context, sessionID string, subagentID string, opts *types.GetSubagentMessagesOptions) ([]types.SessionMessage, error) {
+func (b *SessionStoreBackend) GetSubagentMessages(ctx context.Context, sessionID, subagentID string, opts *types.GetSubagentMessagesOptions) ([]types.SessionMessage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -336,7 +337,7 @@ func TestSendControlMessage_ContextCancelled(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error after context cancellation")
 		}
-		if err != context.Canceled {
+		if !errors.Is(err, context.Canceled) {
 			t.Errorf("expected context.Canceled, got %v", err)
 		}
 	case <-time.After(2 * time.Second):

@@ -466,6 +466,12 @@ func TestAgentDefinitionWithExecutionControl(t *testing.T) {
 			ExecutionMode: &mode,
 		}
 
+		if agent.Description != "Test agent" {
+			t.Errorf("expected Description %q, got %q", "Test agent", agent.Description)
+		}
+		if agent.Prompt != "Test prompt" {
+			t.Errorf("expected Prompt %q, got %q", "Test prompt", agent.Prompt)
+		}
 		if agent.ExecutionMode == nil {
 			t.Fatal("ExecutionMode should not be nil")
 		}
@@ -483,6 +489,12 @@ func TestAgentDefinitionWithExecutionControl(t *testing.T) {
 			Timeout:     &timeout,
 		}
 
+		if agent.Description != "Test agent" {
+			t.Errorf("expected Description %q, got %q", "Test agent", agent.Description)
+		}
+		if agent.Prompt != "Test prompt" {
+			t.Errorf("expected Prompt %q, got %q", "Test prompt", agent.Prompt)
+		}
 		if agent.Timeout == nil {
 			t.Fatal("Timeout should not be nil")
 		}
@@ -500,6 +512,12 @@ func TestAgentDefinitionWithExecutionControl(t *testing.T) {
 			MaxTurns:    &maxTurns,
 		}
 
+		if agent.Description != "Test agent" {
+			t.Errorf("expected Description %q, got %q", "Test agent", agent.Description)
+		}
+		if agent.Prompt != "Test prompt" {
+			t.Errorf("expected Prompt %q, got %q", "Test prompt", agent.Prompt)
+		}
 		if agent.MaxTurns == nil {
 			t.Fatal("MaxTurns should not be nil")
 		}
@@ -520,6 +538,18 @@ func TestAgentDefinitionWithExecutionControl(t *testing.T) {
 			ExecutionMode: &mode,
 			Timeout:       &timeout,
 			MaxTurns:      &maxTurns,
+		}
+
+		if agent.Description != "Full agent" {
+			t.Errorf("expected Description %q, got %q", "Full agent", agent.Description)
+		}
+
+		if agent.Prompt != "Full prompt" {
+			t.Errorf("expected Prompt %q, got %q", "Full prompt", agent.Prompt)
+		}
+
+		if len(agent.Tools) != 2 || agent.Tools[0] != "Read" || agent.Tools[1] != "Write" {
+			t.Errorf("expected Tools [Read Write], got %v", agent.Tools)
 		}
 
 		if agent.ExecutionMode == nil || *agent.ExecutionMode != SubagentExecutionModeSequential {
@@ -893,8 +923,8 @@ func TestSandboxConfig_JSONRoundtrip(t *testing.T) {
 			}
 
 			var got SandboxConfig
-			if err := json.Unmarshal(data, &got); err != nil {
-				t.Fatalf("Unmarshal() error = %v", err)
+			if unmarshalErr := json.Unmarshal(data, &got); unmarshalErr != nil {
+				t.Fatalf("Unmarshal() error = %v", unmarshalErr)
 			}
 
 			// Compare using JSON round-trip: marshal both and compare bytes.
