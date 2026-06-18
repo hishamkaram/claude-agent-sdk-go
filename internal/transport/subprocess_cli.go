@@ -979,7 +979,7 @@ func (t *SubprocessCLITransport) appendBudgetArgs(args []string) []string {
 }
 
 // appendCollectionArgs adds the multi-value option flags: betas, plugin dirs,
-// setting sources, agents JSON, session agent, and effort.
+// and setting sources.
 func (t *SubprocessCLITransport) appendCollectionArgs(args []string) []string {
 	// Add beta feature flags if specified
 	if t.options != nil && len(t.options.Betas) > 0 {
