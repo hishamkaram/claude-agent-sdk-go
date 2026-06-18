@@ -478,35 +478,43 @@ func (c *Client) ReceiveResponse(ctx context.Context) <-chan types.Message {
 		messagesChan := c.query.GetMessages(ctx)
 		c.mu.Unlock()
 
-		for {
+		c.forwardResponseMessages(ctx, messagesChan, outputChan)
+	}()
+
+	return outputChan
+}
+
+// forwardResponseMessages drains messagesChan into outputChan until the result
+// message arrives, the source closes, or the caller's ctx or the client's ctx is
+// canceled. messagesChan is captured under c.mu by the caller before this runs;
+// c.ctx is the immutable client context. The caller owns close(outputChan).
+func (c *Client) forwardResponseMessages(ctx context.Context, messagesChan <-chan types.Message, outputChan chan types.Message) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.ctx.Done():
+			return
+		case msg, ok := <-messagesChan:
+			if !ok {
+				// Messages channel closed
+				return
+			}
+
+			// Forward message to output
 			select {
+			case outputChan <- msg:
+				// Check if this is a result message (end of response)
+				if _, isResult := msg.(*types.ResultMessage); isResult {
+					return
+				}
 			case <-ctx.Done():
 				return
 			case <-c.ctx.Done():
 				return
-			case msg, ok := <-messagesChan:
-				if !ok {
-					// Messages channel closed
-					return
-				}
-
-				// Forward message to output
-				select {
-				case outputChan <- msg:
-					// Check if this is a result message (end of response)
-					if _, isResult := msg.(*types.ResultMessage); isResult {
-						return
-					}
-				case <-ctx.Done():
-					return
-				case <-c.ctx.Done():
-					return
-				}
 			}
 		}
-	}()
-
-	return outputChan
+	}
 }
 
 // Close gracefully terminates the Claude session and cleans up resources.
