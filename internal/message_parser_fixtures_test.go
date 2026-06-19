@@ -26,19 +26,6 @@ var (
 		"parent_tool_use_id": "parent_456"
 	}`)
 
-	//nolint:unused // fixture retained for future test cases
-	userMessageWithToolResult = []byte(`{
-		"type": "user",
-		"content": [
-			{
-				"type": "tool_result",
-				"tool_use_id": "toolu_789",
-				"content": "42",
-				"is_error": false
-			}
-		]
-	}`)
-
 	// Assistant messages
 	assistantMessageText = []byte(`{
 		"type": "assistant",
@@ -326,9 +313,6 @@ var (
 		`{"type": "thinking", "thinking": "Second block", "signature": "sig_2"}`,
 		`{"type": "tool_use", "id": "tool_3", "name": "test", "input": {}}`,
 	}
-
-	//nolint:unused // fixture retained for future test cases
-	emptyContentBlocks = []string{}
 
 	// User message variants for comprehensive testing
 	userMessageOnlyText = []byte(`{
