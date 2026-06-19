@@ -45,7 +45,7 @@ func TestFindCLI_InPATH(t *testing.T) {
 	// Create a temporary directory with a mock claude binary.
 	tmpDir := t.TempDir()
 	claudePath := filepath.Join(tmpDir, "claude")
-	if err := os.WriteFile(claudePath, []byte("#!/bin/sh\necho mock"), 0755); err != nil {
+	if err := os.WriteFile(claudePath, []byte("#!/bin/sh\necho mock"), 0o755); err != nil {
 		t.Fatalf("failed to create mock binary: %v", err)
 	}
 
@@ -115,7 +115,7 @@ if [ "$1" = "--version" ]; then
 fi
 exit 0
 `
-	if err := os.WriteFile(claudePath, []byte(script), 0755); err != nil {
+	if err := os.WriteFile(claudePath, []byte(script), 0o755); err != nil {
 		t.Fatalf("failed to create mock binary: %v", err)
 	}
 
@@ -194,7 +194,7 @@ func TestFindCLI_FailedLookupIsNotCached(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	claudePath := filepath.Join(tmpDir, "claude")
-	if writeErr := os.WriteFile(claudePath, []byte("#!/bin/sh\necho mock"), 0755); writeErr != nil {
+	if writeErr := os.WriteFile(claudePath, []byte("#!/bin/sh\necho mock"), 0o755); writeErr != nil {
 		t.Fatalf("failed to create mock binary: %v", writeErr)
 	}
 

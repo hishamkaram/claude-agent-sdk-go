@@ -7,16 +7,18 @@ import (
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
-type SessionKey = types.SessionKey
-type SessionStoreEntry = types.SessionStoreEntry
-type SessionStoreListEntry = types.SessionStoreListEntry
-type SessionSummaryEntry = types.SessionSummaryEntry
-type SessionStore = types.SessionStore
-type SessionStoreLister = types.SessionStoreLister
-type SessionStoreSummaryLister = types.SessionStoreSummaryLister
-type SessionStoreSubkeyLister = types.SessionStoreSubkeyLister
-type SessionStoreDeleter = types.SessionStoreDeleter
-type UnsupportedSessionStoreOperationError = types.UnsupportedSessionStoreOperationError
+type (
+	SessionKey                            = types.SessionKey
+	SessionStoreEntry                     = types.SessionStoreEntry
+	SessionStoreListEntry                 = types.SessionStoreListEntry
+	SessionSummaryEntry                   = types.SessionSummaryEntry
+	SessionStore                          = types.SessionStore
+	SessionStoreLister                    = types.SessionStoreLister
+	SessionStoreSummaryLister             = types.SessionStoreSummaryLister
+	SessionStoreSubkeyLister              = types.SessionStoreSubkeyLister
+	SessionStoreDeleter                   = types.SessionStoreDeleter
+	UnsupportedSessionStoreOperationError = types.UnsupportedSessionStoreOperationError
+)
 
 // SessionStoreBackend adapts an official-style SessionStore to HistoryBackend.
 type SessionStoreBackend struct {

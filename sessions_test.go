@@ -53,7 +53,7 @@ func TestListSessions_WithOptions(t *testing.T) {
 	script := `#!/bin/sh
 echo '[]'
 `
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("failed to write test script: %v", err)
 	}
 

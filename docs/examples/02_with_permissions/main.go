@@ -20,7 +20,8 @@ import (
 func checkPermission(ctx context.Context,
 	toolName string,
 	input map[string]interface{},
-	permCtx types.ToolPermissionContext) (interface{}, error) {
+	permCtx types.ToolPermissionContext,
+) (interface{}, error) {
 	/*
 		Permission callback that controls tool access.
 		Returns PermissionResultAllow or PermissionResultDeny to grant or restrict tool use.

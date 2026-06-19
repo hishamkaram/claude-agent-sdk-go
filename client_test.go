@@ -38,12 +38,14 @@ func (m *clientTestTransport) Close(_ context.Context) error {
 	}
 	return nil
 }
+
 func (m *clientTestTransport) Write(_ context.Context, data string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.writtenData = append(m.writtenData, data)
 	return nil
 }
+
 func (m *clientTestTransport) ReadMessages(_ context.Context) <-chan types.Message {
 	return m.messagesChan
 }

@@ -49,7 +49,7 @@ func TestFindCLI(t *testing.T) {
 				_ = f.Close()
 
 				// Make it executable
-				if err := os.Chmod(claudePath, 0755); err != nil {
+				if err := os.Chmod(claudePath, 0o755); err != nil {
 					t.Fatalf("Failed to chmod mock binary: %v", err)
 				}
 
@@ -484,7 +484,7 @@ func FindMockCLI(t *testing.T) (string, error) {
 		return "", types.NewCLINotFoundError("sh not found")
 	}
 	scriptPath := filepath.Join(t.TempDir(), "mock-claude")
-	f, err := os.OpenFile(scriptPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	f, err := os.OpenFile(scriptPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return "", types.NewCLINotFoundError("failed to create mock CLI: " + err.Error())
 	}
@@ -495,7 +495,7 @@ func FindMockCLI(t *testing.T) (string, error) {
 	if err := f.Close(); err != nil {
 		return "", types.NewCLINotFoundError("failed to close mock CLI: " + err.Error())
 	}
-	if err := os.Chmod(scriptPath, 0755); err != nil {
+	if err := os.Chmod(scriptPath, 0o755); err != nil {
 		return "", types.NewCLINotFoundError("failed to chmod mock CLI: " + err.Error())
 	}
 	return scriptPath, nil

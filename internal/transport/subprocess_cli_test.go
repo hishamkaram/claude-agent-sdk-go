@@ -2087,6 +2087,7 @@ func (m *mockSpawnedProcessNilPipe) Stdin() io.WriteCloser {
 	}
 	return &mockWriteCloser{buf: &bytes.Buffer{}}
 }
+
 func (m *mockSpawnedProcessNilPipe) Stdout() io.ReadCloser {
 	if m.nilStdout {
 		return nil
@@ -2094,6 +2095,7 @@ func (m *mockSpawnedProcessNilPipe) Stdout() io.ReadCloser {
 	r, _ := io.Pipe()
 	return r
 }
+
 func (m *mockSpawnedProcessNilPipe) Stderr() io.ReadCloser {
 	if m.nilStderr {
 		return nil
