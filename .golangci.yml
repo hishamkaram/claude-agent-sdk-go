@@ -29,6 +29,7 @@ linters:
     - prealloc
     - unconvert
     - unparam
+    - nolintlint
     - gocyclo
     - gocognit
   settings:
@@ -36,6 +37,10 @@ linters:
       min-complexity: 15
     gocognit:
       min-complexity: 20
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
     govet:
       enable-all: true
       disable:

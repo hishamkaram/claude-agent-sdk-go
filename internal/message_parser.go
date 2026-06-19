@@ -81,7 +81,6 @@ func ParseContentBlocks(blocks []json.RawMessage) ([]types.ContentBlock, error) 
 }
 
 // parseUserMessage parses a user message from JSON bytes.
-// nolint:unused
 func parseUserMessage(data []byte) (*types.UserMessage, error) {
 	var msg types.UserMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -95,7 +94,6 @@ func parseUserMessage(data []byte) (*types.UserMessage, error) {
 }
 
 // parseAssistantMessage parses an assistant message from JSON bytes.
-// nolint:unused
 func parseAssistantMessage(data []byte) (*types.AssistantMessage, error) {
 	var msg types.AssistantMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -109,7 +107,6 @@ func parseAssistantMessage(data []byte) (*types.AssistantMessage, error) {
 }
 
 // parseSystemMessage parses a system message from JSON bytes.
-// nolint:unused
 func parseSystemMessage(data []byte) (*types.SystemMessage, error) {
 	var msg types.SystemMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -123,7 +120,6 @@ func parseSystemMessage(data []byte) (*types.SystemMessage, error) {
 }
 
 // parseResultMessage parses a result message from JSON bytes.
-// nolint:unused
 func parseResultMessage(data []byte) (*types.ResultMessage, error) {
 	var msg types.ResultMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -137,7 +133,6 @@ func parseResultMessage(data []byte) (*types.ResultMessage, error) {
 }
 
 // parseStreamEvent parses a stream event from JSON bytes.
-// nolint:unused
 func parseStreamEvent(data []byte) (*types.StreamEvent, error) {
 	var msg types.StreamEvent
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -151,7 +146,6 @@ func parseStreamEvent(data []byte) (*types.StreamEvent, error) {
 }
 
 // parseTextBlock parses a text block from JSON bytes.
-// nolint:unused
 func parseTextBlock(data []byte) (*types.TextBlock, error) {
 	var block types.TextBlock
 	if err := json.Unmarshal(data, &block); err != nil {
@@ -165,7 +159,6 @@ func parseTextBlock(data []byte) (*types.TextBlock, error) {
 }
 
 // parseToolUseBlock parses a tool use block from JSON bytes.
-// nolint:unused
 func parseToolUseBlock(data []byte) (*types.ToolUseBlock, error) {
 	var block types.ToolUseBlock
 	if err := json.Unmarshal(data, &block); err != nil {
@@ -179,7 +172,6 @@ func parseToolUseBlock(data []byte) (*types.ToolUseBlock, error) {
 }
 
 // parseToolResultBlock parses a tool result block from JSON bytes.
-// nolint:unused
 func parseToolResultBlock(data []byte) (*types.ToolResultBlock, error) {
 	var block types.ToolResultBlock
 	if err := json.Unmarshal(data, &block); err != nil {
@@ -193,7 +185,6 @@ func parseToolResultBlock(data []byte) (*types.ToolResultBlock, error) {
 }
 
 // parseThinkingBlock parses a thinking block from JSON bytes.
-// nolint:unused
 func parseThinkingBlock(data []byte) (*types.ThinkingBlock, error) {
 	var block types.ThinkingBlock
 	if err := json.Unmarshal(data, &block); err != nil {

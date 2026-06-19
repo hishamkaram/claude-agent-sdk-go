@@ -1006,7 +1006,6 @@ func (q *Query) AddMCPServer(name string, server types.MCPServer) {
 }
 
 // matchesToolName checks if a tool name matches a matcher pattern.
-// nolint:unused
 func matchesToolName(toolName string, pattern *string) bool {
 	if pattern == nil || *pattern == "" {
 		return true // No pattern means match all
