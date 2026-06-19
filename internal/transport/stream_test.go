@@ -38,7 +38,7 @@ func TestJSONLineReaderReadLine_EOF(t *testing.T) {
 			// Keep reading until we get EOF
 			for {
 				line, err := reader.ReadLine()
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					break
 				}
 				if err != nil {

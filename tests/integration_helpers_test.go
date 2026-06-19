@@ -166,11 +166,11 @@ func safetyNetClaudeConfigFile(t *testing.T, name string) {
 
 	t.Cleanup(func() {
 		if existed {
-			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 				t.Errorf("restore %s parent: %v", path, err)
 				return
 			}
-			if err := os.WriteFile(path, data, 0600); err != nil {
+			if err := os.WriteFile(path, data, 0o600); err != nil {
 				t.Errorf("restore %s: %v", path, err)
 			}
 			return

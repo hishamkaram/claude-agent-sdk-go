@@ -12,9 +12,15 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatalf("with_plugins example failed: %v", err)
+	}
+}
+
+func run() error {
 	// Check for required environment variable
 	if os.Getenv("CLAUDE_API_KEY") == "" {
-		log.Fatal("CLAUDE_API_KEY environment variable must be set")
+		return fmt.Errorf("CLAUDE_API_KEY environment variable must be set")
 	}
 
 	// Create options with a local plugin
@@ -42,7 +48,7 @@ func main() {
 	fmt.Println()
 	messages, err := sdk.Query(ctx, "Please use the /greet command from the demo plugin", options)
 	if err != nil {
-		log.Fatalf("Query failed: %v", err)
+		return fmt.Errorf("query failed: %w", err)
 	}
 
 	// Stream messages
@@ -58,10 +64,11 @@ func main() {
 
 		case *types.AssistantMessage:
 			for _, block := range m.Content {
-				if textBlock, ok := block.(*types.TextBlock); ok {
-					fmt.Printf("[Assistant] %s\n", textBlock.Text)
-				} else if toolUseBlock, ok := block.(*types.ToolUseBlock); ok {
-					fmt.Printf("[Tool Use] %s (id: %s)\n", toolUseBlock.Name, toolUseBlock.ID)
+				switch b := block.(type) {
+				case *types.TextBlock:
+					fmt.Printf("[Assistant] %s\n", b.Text)
+				case *types.ToolUseBlock:
+					fmt.Printf("[Tool Use] %s (id: %s)\n", b.Name, b.ID)
 				}
 			}
 
@@ -75,4 +82,6 @@ func main() {
 			fmt.Printf("Result: %s\n", m.Subtype)
 		}
 	}
+
+	return nil
 }

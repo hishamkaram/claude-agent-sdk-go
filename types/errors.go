@@ -167,12 +167,12 @@ func NewJSONDecodeError(message string) *JSONDecodeError {
 }
 
 // NewJSONDecodeErrorWithRaw creates a new JSONDecodeError with the given message and raw JSON.
-func NewJSONDecodeErrorWithRaw(message string, raw string) *JSONDecodeError {
+func NewJSONDecodeErrorWithRaw(message, raw string) *JSONDecodeError {
 	return &JSONDecodeError{Message: message, Raw: raw}
 }
 
 // NewJSONDecodeErrorWithCause creates a new JSONDecodeError with the given message, raw JSON, and cause.
-func NewJSONDecodeErrorWithCause(message string, raw string, cause error) *JSONDecodeError {
+func NewJSONDecodeErrorWithCause(message, raw string, cause error) *JSONDecodeError {
 	return &JSONDecodeError{Message: message, Raw: raw, Cause: cause}
 }
 
@@ -214,12 +214,12 @@ func NewMessageParseError(message string) *MessageParseError {
 }
 
 // NewMessageParseErrorWithType creates a new MessageParseError with the given message and message type.
-func NewMessageParseErrorWithType(message string, messageType string) *MessageParseError {
+func NewMessageParseErrorWithType(message, messageType string) *MessageParseError {
 	return &MessageParseError{Message: message, MessageType: messageType}
 }
 
 // NewMessageParseErrorWithCause creates a new MessageParseError with the given message, message type, and cause.
-func NewMessageParseErrorWithCause(message string, messageType string, cause error) *MessageParseError {
+func NewMessageParseErrorWithCause(message, messageType string, cause error) *MessageParseError {
 	return &MessageParseError{Message: message, MessageType: messageType, Cause: cause}
 }
 
@@ -302,12 +302,12 @@ func NewPermissionDeniedError(message string) *PermissionDeniedError {
 }
 
 // NewPermissionDeniedErrorWithTool creates a new PermissionDeniedError with the given message and tool name.
-func NewPermissionDeniedErrorWithTool(message string, toolName string) *PermissionDeniedError {
+func NewPermissionDeniedErrorWithTool(message, toolName string) *PermissionDeniedError {
 	return &PermissionDeniedError{Message: message, ToolName: toolName}
 }
 
 // NewPermissionDeniedErrorWithReason creates a new PermissionDeniedError with the given message, tool name, and reason.
-func NewPermissionDeniedErrorWithReason(message string, toolName string, reason string) *PermissionDeniedError {
+func NewPermissionDeniedErrorWithReason(message, toolName, reason string) *PermissionDeniedError {
 	return &PermissionDeniedError{Message: message, ToolName: toolName, Reason: reason}
 }
 

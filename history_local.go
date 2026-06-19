@@ -111,12 +111,12 @@ func (b *LocalTranscriptBackend) GetSessionMessages(ctx context.Context, session
 		return nil, err
 	}
 	messages := make([]types.SessionMessage, 0, len(chain))
-	for _, entry := range chain {
+	for i := range chain {
 		messages = append(messages, types.SessionMessage{
-			Type:      entry.Type,
-			UUID:      entry.UUID,
+			Type:      chain[i].Type,
+			UUID:      chain[i].UUID,
 			SessionID: sessionID,
-			Message:   cloneRaw(entry.Message),
+			Message:   cloneRaw(chain[i].Message),
 		})
 	}
 	return applyMessageWindow(messages, getSessionMessagesOffset(opts), getSessionMessagesLimit(opts)), nil
@@ -139,8 +139,8 @@ func (b *LocalTranscriptBackend) ListSubagents(ctx context.Context, sessionID st
 		if err != nil {
 			return err
 		}
-		if err := ctx.Err(); err != nil {
-			return err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
 		}
 		if d.IsDir() || path == parentPath || filepath.Ext(path) != ".jsonl" {
 			return nil
@@ -167,7 +167,7 @@ func (b *LocalTranscriptBackend) ListSubagents(ctx context.Context, sessionID st
 	return applySubagentWindow(out, listSubagentsOffset(opts), listSubagentsLimit(opts)), nil
 }
 
-func (b *LocalTranscriptBackend) GetSubagentMessages(ctx context.Context, sessionID string, subagentID string, opts *types.GetSubagentMessagesOptions) ([]types.SessionMessage, error) {
+func (b *LocalTranscriptBackend) GetSubagentMessages(ctx context.Context, sessionID, subagentID string, opts *types.GetSubagentMessagesOptions) ([]types.SessionMessage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -186,8 +186,8 @@ func (b *LocalTranscriptBackend) GetSubagentMessages(ctx context.Context, sessio
 	}
 	projectDir := filepath.Dir(parentPath)
 	path := filepath.Join(projectDir, filepath.FromSlash(subagentID)+".jsonl")
-	if err := ensurePathUnder(projectDir, path); err != nil {
-		return nil, err
+	if pathErr := ensurePathUnder(projectDir, path); pathErr != nil {
+		return nil, pathErr
 	}
 	entries, err := b.readTranscriptEntries(ctx, path, sessionID)
 	if err != nil {
@@ -201,12 +201,12 @@ func (b *LocalTranscriptBackend) GetSubagentMessages(ctx context.Context, sessio
 		return nil, err
 	}
 	messages := make([]types.SessionMessage, 0, len(chain))
-	for _, entry := range chain {
+	for i := range chain {
 		messages = append(messages, types.SessionMessage{
-			Type:      entry.Type,
-			UUID:      entry.UUID,
+			Type:      chain[i].Type,
+			UUID:      chain[i].UUID,
 			SessionID: sessionID,
-			Message:   cloneRaw(entry.Message),
+			Message:   cloneRaw(chain[i].Message),
 		})
 	}
 	return applyMessageWindow(messages, getSubagentMessagesOffset(opts), getSubagentMessagesLimit(opts)), nil
@@ -237,8 +237,8 @@ func ClaudeProjectKey(cwd string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if real, realErr := filepath.EvalSymlinks(abs); realErr == nil {
-		abs = real
+	if resolved, realErr := filepath.EvalSymlinks(abs); realErr == nil {
+		abs = resolved
 	}
 	normalized := norm.NFC.String(filepath.Clean(abs))
 	var b strings.Builder
@@ -322,9 +322,9 @@ func (b *LocalTranscriptBackend) sessionTranscriptPaths(ctx context.Context, cwd
 		return nil, err
 	}
 	if cwd != "" {
-		projectDir, err := b.projectDirForCWD(cwd)
-		if err != nil {
-			return nil, err
+		projectDir, cwdErr := b.projectDirForCWD(cwd)
+		if cwdErr != nil {
+			return nil, cwdErr
 		}
 		return listJSONLFiles(ctx, projectsDir, projectDir)
 	}
@@ -380,35 +380,14 @@ func (b *LocalTranscriptBackend) readSessionInfo(ctx context.Context, path, sess
 	}
 
 	err = b.scanTranscript(path, func(lineNo int, raw []byte) error {
-		if err := ctx.Err(); err != nil {
-			return err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
 		}
 		var entry transcriptEntry
-		if err := json.Unmarshal(raw, &entry); err != nil {
-			return malformedTranscript(path, lineNo, err)
+		if unmarshalErr := json.Unmarshal(raw, &entry); unmarshalErr != nil {
+			return malformedTranscript(path, lineNo, unmarshalErr)
 		}
-		if entry.CWD != "" && info.CWD == "" {
-			info.CWD = entry.CWD
-		}
-		if entry.GitBranch != "" && info.GitBranch == "" {
-			info.GitBranch = entry.GitBranch
-		}
-		if entry.Summary != "" {
-			info.Summary = entry.Summary
-		}
-		if entry.Timestamp != "" {
-			if millis, ok := parseTranscriptTimeMillis(entry.Timestamp); ok {
-				if info.CreatedAt == 0 || millis < info.CreatedAt {
-					info.CreatedAt = millis
-				}
-			}
-		}
-		if info.FirstPrompt == "" && isValidHistoryEntry(entry, sessionID) && entry.Type == "user" {
-			info.FirstPrompt = extractClaudeMessageText(entry.Message)
-			if info.Summary == "" {
-				info.Summary = info.FirstPrompt
-			}
-		}
+		applyTranscriptEntryToInfo(info, entry, sessionID)
 		return nil
 	})
 	if err != nil {
@@ -418,6 +397,34 @@ func (b *LocalTranscriptBackend) readSessionInfo(ctx context.Context, path, sess
 		info.CreatedAt = stat.ModTime().UnixMilli()
 	}
 	return info, nil
+}
+
+// applyTranscriptEntryToInfo merges one transcript entry into the accumulating
+// session info: first-seen CWD/GitBranch, the latest Summary, the earliest
+// timestamp, and the first user prompt (which also seeds Summary when empty).
+func applyTranscriptEntryToInfo(info *types.SDKSessionInfo, entry transcriptEntry, sessionID string) {
+	if entry.CWD != "" && info.CWD == "" {
+		info.CWD = entry.CWD
+	}
+	if entry.GitBranch != "" && info.GitBranch == "" {
+		info.GitBranch = entry.GitBranch
+	}
+	if entry.Summary != "" {
+		info.Summary = entry.Summary
+	}
+	if entry.Timestamp != "" {
+		if millis, ok := parseTranscriptTimeMillis(entry.Timestamp); ok {
+			if info.CreatedAt == 0 || millis < info.CreatedAt {
+				info.CreatedAt = millis
+			}
+		}
+	}
+	if info.FirstPrompt == "" && isValidHistoryEntry(entry, sessionID) && entry.Type == "user" {
+		info.FirstPrompt = extractClaudeMessageText(entry.Message)
+		if info.Summary == "" {
+			info.Summary = info.FirstPrompt
+		}
+	}
 }
 
 func (b *LocalTranscriptBackend) readTranscriptEntries(ctx context.Context, path, sessionID string) ([]transcriptEntry, error) {
@@ -480,11 +487,11 @@ func buildParentChain(entries []transcriptEntry) ([]transcriptEntry, error) {
 		return nil, nil
 	}
 	byUUID := make(map[string]transcriptEntry, len(entries))
-	for _, entry := range entries {
-		if _, exists := byUUID[entry.UUID]; exists {
-			return nil, fmt.Errorf("%w: duplicate uuid %q", types.ErrMalformedTranscript, entry.UUID)
+	for i := range entries {
+		if _, exists := byUUID[entries[i].UUID]; exists {
+			return nil, fmt.Errorf("%w: duplicate uuid %q", types.ErrMalformedTranscript, entries[i].UUID)
 		}
-		byUUID[entry.UUID] = entry
+		byUUID[entries[i].UUID] = entries[i]
 	}
 
 	leaf := entries[len(entries)-1]
@@ -612,14 +619,14 @@ func resolvedPath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
-		return real, nil
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved, nil
 	}
 	return abs, nil
 }
 
 func malformedTranscript(path string, lineNo int, cause error) error {
-	return fmt.Errorf("%w: %s:%d: %v", types.ErrMalformedTranscript, path, lineNo, cause)
+	return fmt.Errorf("%w: %s:%d: %w", types.ErrMalformedTranscript, path, lineNo, cause)
 }
 
 func parseTranscriptTimeMillis(value string) (int64, bool) {

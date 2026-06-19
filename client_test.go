@@ -38,12 +38,14 @@ func (m *clientTestTransport) Close(_ context.Context) error {
 	}
 	return nil
 }
+
 func (m *clientTestTransport) Write(_ context.Context, data string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.writtenData = append(m.writtenData, data)
 	return nil
 }
+
 func (m *clientTestTransport) ReadMessages(_ context.Context) <-chan types.Message {
 	return m.messagesChan
 }
@@ -389,14 +391,19 @@ func TestClient_MultipleQueries(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
+	// Long-lived connection context covers NewClient + Connect + Close. Each
+	// query gets its OWN timeout below: the previous single 60s budget shared
+	// across three sequential live queries flaked when the real API was slow on
+	// a later query (an early slow response starved the last one). Per-query
+	// budgets remove that cross-query coupling.
+	connCtx, connCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer connCancel()
 
 	opts := types.NewClaudeAgentOptions().
 		WithModel("claude-3-5-sonnet-latest").
 		WithPermissionMode(types.PermissionModeBypassPermissions)
 
-	client, err := NewClient(ctx, opts)
+	client, err := NewClient(connCtx, opts)
 	if err != nil {
 		if types.IsCLINotFoundError(err) {
 			t.Skip("Claude CLI not installed")
@@ -404,10 +411,10 @@ func TestClient_MultipleQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		_ = client.Close(ctx)
+		_ = client.Close(connCtx)
 	}()
 
-	if err := client.Connect(ctx); err != nil {
+	if err := client.Connect(connCtx); err != nil {
 		if types.IsCLIConnectionError(err) {
 			t.Skip("Could not connect to Claude CLI")
 		}
@@ -422,18 +429,25 @@ func TestClient_MultipleQueries(t *testing.T) {
 	}
 
 	for i, prompt := range queries {
-		if err := client.Query(ctx, prompt); err != nil {
+		// Per-query deadline so a slow earlier query cannot starve a later one.
+		qCtx, qCancel := context.WithTimeout(connCtx, 90*time.Second)
+
+		if err := client.Query(qCtx, prompt); err != nil {
+			qCancel()
 			t.Fatalf("Query %d failed: %v", i+1, err)
 		}
 
 		// Receive response
 		gotResult := false
-		for msg := range client.ReceiveResponse(ctx) {
+		for msg := range client.ReceiveResponse(qCtx) {
 			if _, ok := msg.(*types.ResultMessage); ok {
 				gotResult = true
 				break
 			}
 		}
+		// Cancel after the cycle to release the ReceiveResponse forwarding
+		// goroutine (we break early on the ResultMessage).
+		qCancel()
 
 		if !gotResult {
 			t.Fatalf("Query %d did not receive ResultMessage", i+1)
@@ -557,6 +571,10 @@ func TestParseInitResult_InvalidCommandsType(t *testing.T) {
 	}
 	if len(result.Commands) != 0 {
 		t.Fatalf("expected 0 commands for invalid type, got %d", len(result.Commands))
+	}
+	// Contract: a non-array "commands" value leaves the field nil (untouched).
+	if result.Commands != nil {
+		t.Errorf("expected nil Commands for invalid type, got %#v", result.Commands)
 	}
 }
 
@@ -713,6 +731,11 @@ func TestParseInitResult_ModelsEmptyArray(t *testing.T) {
 	if len(result.Models) != 0 {
 		t.Errorf("expected 0 models, got %d", len(result.Models))
 	}
+	// Contract: a present "models" array (even empty) yields a non-nil slice, so
+	// the field is set to [] rather than left nil.
+	if result.Models == nil {
+		t.Error("expected non-nil empty Models slice when the key is present, got nil")
+	}
 }
 
 // TestParseInitResult_ModelsInvalidType verifies graceful handling of unexpected type.
@@ -726,9 +749,10 @@ func TestParseInitResult_ModelsInvalidType(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	// Should not panic, models should be nil/empty.
-	if len(result.Models) != 0 {
-		t.Errorf("expected 0 models for invalid type, got %d", len(result.Models))
+	// Contract: a non-array "models" value leaves the field untouched (nil), not
+	// an empty slice — distinguishing absent/invalid from present-but-empty.
+	if result.Models != nil {
+		t.Errorf("expected nil Models for invalid type, got %#v", result.Models)
 	}
 }
 
@@ -1606,7 +1630,7 @@ func TestClient_Close_WaitsForReceiveGoroutines(t *testing.T) {
 			t.Logf("Close returned error (acceptable): %v", err)
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("Close() deadlocked — ReceiveResponse goroutine not cancelled or not tracked")
+		t.Fatal("Close() deadlocked — ReceiveResponse goroutine not canceled or not tracked")
 	}
 }
 

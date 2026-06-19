@@ -15,6 +15,15 @@ import (
 // InteractiveClient demonstrates the interactive Client for multi-turn conversations.
 // This allows back-and-forth conversation with Claude while maintaining session state.
 func main() {
+	if err := run(); err != nil {
+		log.Fatalf("%v", err)
+	}
+}
+
+// run wires up the client and drives the interactive session. It returns an error
+// instead of calling log.Fatalf mid-flow so the deferred client.Close always runs
+// (log.Fatalf would os.Exit and skip pending defers).
+func run() error {
 	ctx := context.Background()
 
 	// Create options for the interactive client
@@ -23,13 +32,13 @@ func main() {
 	// Create client
 	client, err := claude.NewClient(ctx, opts)
 	if err != nil {
-		log.Fatalf("Failed to create client: %v", err)
+		return fmt.Errorf("create client: %w", err)
 	}
 
 	// Connect to Claude
 	fmt.Println("Connecting to Claude....")
 	if err := client.Connect(ctx); err != nil {
-		log.Fatalf("Failed to connect: %v", err)
+		return fmt.Errorf("connect: %w", err)
 	}
 	defer func() {
 		_ = client.Close(ctx)
@@ -38,7 +47,18 @@ func main() {
 	fmt.Println("Connected! Type your questions (press Ctrl+C to exit)")
 	fmt.Println("---")
 
-	// Interactive loop
+	if err := interactiveLoop(ctx, client); err != nil {
+		return err
+	}
+
+	fmt.Println("\nGoodbye!")
+	return nil
+}
+
+// interactiveLoop reads prompts from stdin and streams Claude's responses until EOF
+// (Ctrl+D) or a read error. EOF ends the loop cleanly; any other read error is
+// returned to the caller.
+func interactiveLoop(ctx context.Context, client *claude.Client) error {
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		// Read user input
@@ -46,9 +66,9 @@ func main() {
 		input, err := reader.ReadString('\n')
 		if err != nil {
 			if strings.Contains(err.Error(), "EOF") {
-				break
+				return nil
 			}
-			log.Fatalf("Error reading input: %v", err)
+			return fmt.Errorf("read input: %w", err)
 		}
 
 		prompt := strings.TrimSpace(input)
@@ -63,29 +83,31 @@ func main() {
 		}
 
 		// Receive and print responses
-		foundResponse := false
-		for msg := range client.ReceiveResponse(ctx) {
-			msgType := msg.GetMessageType()
+		printResponses(ctx, client)
+	}
+}
 
-			switch msgType {
-			case "assistant":
-				if !foundResponse {
-					fmt.Print("Claude: ")
-					foundResponse = true
-				}
-				if assistantMsg, ok := msg.(*types.AssistantMessage); ok {
-					for _, block := range assistantMsg.Content {
-						if textBlock, ok := block.(*types.TextBlock); ok {
-							fmt.Print(textBlock.Text)
-						}
+// printResponses streams one response turn to stdout, prefixing the first
+// assistant chunk with "Claude: " and emitting blank lines after the result.
+func printResponses(ctx context.Context, client *claude.Client) {
+	foundResponse := false
+	for msg := range client.ReceiveResponse(ctx) {
+		switch msg.GetMessageType() {
+		case "assistant":
+			if !foundResponse {
+				fmt.Print("Claude: ")
+				foundResponse = true
+			}
+			if assistantMsg, ok := msg.(*types.AssistantMessage); ok {
+				for _, block := range assistantMsg.Content {
+					if textBlock, ok := block.(*types.TextBlock); ok {
+						fmt.Print(textBlock.Text)
 					}
 				}
-			case "result":
-				fmt.Println()
-				fmt.Println()
 			}
+		case "result":
+			fmt.Println()
+			fmt.Println()
 		}
 	}
-
-	fmt.Println("\nGoodbye!")
 }

@@ -180,7 +180,7 @@ func TestRouteMessage_LogsBackpressureWhenMessagesChannelFull(t *testing.T) {
 	overflow := &types.AssistantMessage{Type: "assistant"}
 	routeErr := make(chan error, 1)
 	go func() {
-		routeErr <- query.routeMessage(overflow)
+		routeErr <- query.routeMessage(ctx, overflow)
 	}()
 
 	deadline := time.After(2 * time.Second)
@@ -257,7 +257,7 @@ func TestRouteMessageSessionStoreAppendErrorEmitsSystemMessage(t *testing.T) {
 	query := NewQuery(ctx, newMockTransport(), opts, log.NewLogger(false), true)
 
 	msg := &types.UserMessage{Type: "user", Content: "hello", SessionID: "session-1"}
-	if err := query.routeMessage(msg); err != nil {
+	if err := query.routeMessage(ctx, msg); err != nil {
 		t.Fatalf("routeMessage: %v", err)
 	}
 	first := <-query.messagesChan
@@ -787,7 +787,7 @@ func TestHandlePermissionRequest(t *testing.T) {
 			logger := log.NewLogger(false) // Non-verbose for tests
 			query := NewQuery(ctx, transport, opts, logger, true)
 
-			result, err := query.handlePermissionRequest(tt.requestData)
+			result, err := query.handlePermissionRequest(ctx, tt.requestData)
 			if tt.expectedError && err == nil {
 				t.Error("expected error but got none")
 			}
@@ -1277,11 +1277,10 @@ func TestCallbackTimeouts(t *testing.T) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
 
-	// Replace query context with timeout context
-	query.ctx = timeoutCtx
-
-	// This should timeout
-	_, err := query.handlePermissionRequest(requestData)
+	// This should timeout: the 100ms deadline is carried by the parent context
+	// passed to handlePermissionRequest (the callback timeout defaults to 5m,
+	// so the parent's shorter deadline is what fires).
+	_, err := query.handlePermissionRequest(timeoutCtx, requestData)
 	if err == nil {
 		t.Error("expected timeout error")
 	}
@@ -1311,7 +1310,7 @@ func (m *mockMCPServer) Version() string {
 
 // TestQuery_CanUseTool_Timeout verifies that the canUseTool callback is called with
 // a context that has a timeout derived from ToolCallbackTimeout, and that a slow
-// callback is cancelled when the timeout expires.
+// callback is canceled when the timeout expires.
 func TestQuery_CanUseTool_Timeout(t *testing.T) {
 	t.Parallel()
 
@@ -1368,7 +1367,7 @@ func TestQuery_CanUseTool_Timeout(t *testing.T) {
 				"input":     map[string]interface{}{"command": "ls"},
 			}
 
-			result, err := query.handlePermissionRequest(requestData)
+			result, err := query.handlePermissionRequest(ctx, requestData)
 
 			if tt.expectTimeout {
 				if err == nil {
@@ -1463,7 +1462,7 @@ func TestQuery_HandlePermissionRequest_TypeAssertionOk(t *testing.T) {
 			logger := log.NewLogger(false)
 			query := NewQuery(ctx, transport, opts, logger, true)
 
-			_, err := query.handlePermissionRequest(tt.requestData)
+			_, err := query.handlePermissionRequest(ctx, tt.requestData)
 			if tt.expectError {
 				if err == nil {
 					t.Fatal("expected error but got nil")
@@ -1921,7 +1920,7 @@ func TestHandleControlRequest_CanUseTool_PanicSendsErrorResponse(t *testing.T) {
 }
 
 // TestHandleControlResponse_NonBlockingSend verifies that sending a response to
-// a channel whose receiver has already exited (context cancelled) does not block.
+// a channel whose receiver has already exited (context canceled) does not block.
 func TestHandleControlResponse_NonBlockingSend(t *testing.T) {
 	t.Parallel()
 

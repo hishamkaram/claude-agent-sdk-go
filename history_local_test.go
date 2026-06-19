@@ -175,11 +175,11 @@ func TestLocalTranscriptBackendClaudeConfigDirOverride(t *testing.T) {
 		t.Fatalf("ClaudeProjectKey: %v", err)
 	}
 	projectDir := filepath.Join(configDir, "projects", key)
-	if err := os.MkdirAll(projectDir, 0o700); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
+	if mkErr := os.MkdirAll(projectDir, 0o700); mkErr != nil {
+		t.Fatalf("MkdirAll: %v", mkErr)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, fixtureSessionID+".jsonl"), []byte(`{"type":"user","uuid":"`+fixtureUser1+`","sessionId":"`+fixtureSessionID+`","cwd":"`+cwd+`","message":{"role":"user","content":"from env"}}`+"\n"), 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
+	if writeErr := os.WriteFile(filepath.Join(projectDir, fixtureSessionID+".jsonl"), []byte(`{"type":"user","uuid":"`+fixtureUser1+`","sessionId":"`+fixtureSessionID+`","cwd":"`+cwd+`","message":{"role":"user","content":"from env"}}`+"\n"), 0o600); writeErr != nil {
+		t.Fatalf("WriteFile: %v", writeErr)
 	}
 	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
 

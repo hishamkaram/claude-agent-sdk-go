@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -48,7 +49,7 @@ func TestFindCLI(t *testing.T) {
 				_ = f.Close()
 
 				// Make it executable
-				if err := os.Chmod(claudePath, 0755); err != nil {
+				if err := os.Chmod(claudePath, 0o755); err != nil {
 					t.Fatalf("Failed to chmod mock binary: %v", err)
 				}
 
@@ -74,23 +75,23 @@ func TestFindCLI(t *testing.T) {
 			cleanup := tt.setup()
 			defer cleanup()
 
-			path, err := FindCLI()
+			path, err := FindCLI(context.Background())
 
 			if tt.wantError {
 				if err == nil {
-					t.Errorf("FindCLI() expected error, got nil (found path: %s, PATH=%s, HOME=%s)", path, os.Getenv("PATH"), os.Getenv("HOME"))
+					t.Errorf("FindCLI(context.Background()) expected error, got nil (found path: %s, PATH=%s, HOME=%s)", path, os.Getenv("PATH"), os.Getenv("HOME"))
 				}
 				var cliNotFoundErr *types.CLINotFoundError
 				if err != nil && !types.IsCLINotFoundError(err) {
-					t.Errorf("FindCLI() error type = %T, want *types.CLINotFoundError", err)
+					t.Errorf("FindCLI(context.Background()) error type = %T, want *types.CLINotFoundError", err)
 				}
 				_ = cliNotFoundErr
 			} else {
 				if err != nil {
-					t.Errorf("FindCLI() unexpected error: %v", err)
+					t.Errorf("FindCLI(context.Background()) unexpected error: %v", err)
 				}
 				if path == "" {
-					t.Errorf("FindCLI() returned empty path")
+					t.Errorf("FindCLI(context.Background()) returned empty path")
 				}
 			}
 		})
@@ -194,7 +195,7 @@ func TestJSONLineReader(t *testing.T) {
 			var got []string
 			for {
 				line, err := reader.ReadLine()
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					break
 				}
 				if err != nil {
@@ -483,7 +484,7 @@ func FindMockCLI(t *testing.T) (string, error) {
 		return "", types.NewCLINotFoundError("sh not found")
 	}
 	scriptPath := filepath.Join(t.TempDir(), "mock-claude")
-	f, err := os.OpenFile(scriptPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	f, err := os.OpenFile(scriptPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return "", types.NewCLINotFoundError("failed to create mock CLI: " + err.Error())
 	}
@@ -494,7 +495,7 @@ func FindMockCLI(t *testing.T) (string, error) {
 	if err := f.Close(); err != nil {
 		return "", types.NewCLINotFoundError("failed to close mock CLI: " + err.Error())
 	}
-	if err := os.Chmod(scriptPath, 0755); err != nil {
+	if err := os.Chmod(scriptPath, 0o755); err != nil {
 		return "", types.NewCLINotFoundError("failed to chmod mock CLI: " + err.Error())
 	}
 	return scriptPath, nil
@@ -515,7 +516,7 @@ func BenchmarkJSONLineReader(b *testing.B) {
 		reader := NewJSONLineReader(strings.NewReader(input))
 		for {
 			_, err := reader.ReadLine()
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			if err != nil {
@@ -552,7 +553,7 @@ func TestIntegrationSubprocessCLI(t *testing.T) {
 	}
 
 	// Try to find Claude CLI
-	cliPath, err := FindCLI()
+	cliPath, err := FindCLI(context.Background())
 	if err != nil {
 		t.Skipf("Claude CLI not found, skipping integration test: %v", err)
 	}
@@ -564,8 +565,8 @@ func TestIntegrationSubprocessCLI(t *testing.T) {
 	defer cancel()
 
 	// Connect to CLI
-	if err := transport.Connect(ctx); err != nil {
-		t.Fatalf("Connect() failed: %v", err)
+	if connectErr := transport.Connect(ctx); connectErr != nil {
+		t.Fatalf("Connect() failed: %v", connectErr)
 	}
 	defer func() {
 		_ = transport.Close(ctx)
@@ -696,7 +697,8 @@ func TestParseStderrError(t *testing.T) {
 	}
 
 	// Check session ID is in the error
-	if sessionErr, ok := err.(*types.SessionNotFoundError); ok {
+	var sessionErr *types.SessionNotFoundError
+	if errors.As(err, &sessionErr) {
 		if sessionErr.SessionID != "8587b432-e504-42c8-b9a7-e3fd0b4b2c60" {
 			t.Errorf("SessionNotFoundError.SessionID = %q, want %q",
 				sessionErr.SessionID, "8587b432-e504-42c8-b9a7-e3fd0b4b2c60")
@@ -1061,11 +1063,14 @@ func TestBuildCommandArgs_Plugins(t *testing.T) {
 // TestBuildCommandArgs_PluginsWithOtherOptions tests plugins work with other options
 func TestBuildCommandArgs_PluginsWithOtherOptions(t *testing.T) {
 	t.Parallel()
+	maxThinkingTokens := 1000
 	opts := types.NewClaudeAgentOptions().
 		WithLocalPlugin("./my-plugin").
 		WithModel("claude-3-5-sonnet-20241022").
-		WithMaxThinkingTokens(1000).
 		WithSystemPrompt("You are a helpful assistant")
+	// Set the legacy max-thinking-tokens field directly (the builder is deprecated)
+	// to keep asserting that the --max-thinking-tokens flag is still emitted.
+	opts.MaxThinkingTokens = &maxThinkingTokens
 
 	logger := log.NewLogger(false)
 	transport := NewSubprocessCLITransport(
@@ -1201,10 +1206,13 @@ func TestBuildCommandArgs_Betas(t *testing.T) {
 	})
 
 	t.Run("betas with other options", func(t *testing.T) {
+		maxThinkingTokens := 5000
 		opts := types.NewClaudeAgentOptions().
 			WithBeta("context-1m-2025-08-07").
-			WithModel("claude-3-5-sonnet-20241022").
-			WithMaxThinkingTokens(5000)
+			WithModel("claude-3-5-sonnet-20241022")
+		// Set the legacy max-thinking-tokens field directly (the builder is
+		// deprecated) to keep asserting that --max-thinking-tokens is emitted.
+		opts.MaxThinkingTokens = &maxThinkingTokens
 
 		logger := log.NewLogger(false)
 		transport := NewSubprocessCLITransport(

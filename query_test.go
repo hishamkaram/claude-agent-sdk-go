@@ -70,7 +70,7 @@ func TestQuery_ContextCancellation(t *testing.T) {
 		return
 	}
 
-	// If we got a channel, it should close quickly due to cancelled context
+	// If we got a channel, it should close quickly due to canceled context
 	timeout := time.After(1 * time.Second)
 	for {
 		select {

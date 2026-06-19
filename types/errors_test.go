@@ -19,7 +19,7 @@ func TestCLINotFoundError(t *testing.T) {
 	t.Run("error with cause", func(t *testing.T) {
 		cause := errors.New("path not found")
 		err := NewCLINotFoundErrorWithCause("CLI not found", cause)
-		if err.Unwrap() != cause {
+		if !errors.Is(err.Unwrap(), cause) {
 			t.Error("expected unwrap to return cause")
 		}
 	})
@@ -159,7 +159,7 @@ func TestSessionNotFoundError(t *testing.T) {
 		sessionID := "8587b432-e504-42c8-b9a7-e3fd0b4b2c60"
 		cause := errors.New("CLI process exited")
 		err := NewSessionNotFoundErrorWithCause(sessionID, "session not found", cause)
-		if err.Unwrap() != cause {
+		if !errors.Is(err.Unwrap(), cause) {
 			t.Error("expected unwrap to return cause")
 		}
 	})

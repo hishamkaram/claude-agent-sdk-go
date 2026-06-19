@@ -1,0 +1,110 @@
+[
+  [
+    "subtype:compact_boundary",
+    "*types.CompactBoundaryMessage | {\"type\":\"system\",\"subtype\":\"compact_boundary\",\"compact_metadata\":{\"trigger\":\"\",\"pre_tokens\":0},\"uuid\":\"\",\"session_id\":\"\"}"
+  ],
+  [
+    "subtype:files_persisted",
+    "*types.FilesPersistedEvent | {\"type\":\"system\",\"subtype\":\"files_persisted\",\"files\":null,\"failed\":null,\"processed_at\":\"\",\"uuid\":\"\",\"session_id\":\"\"}"
+  ],
+  [
+    "subtype:hook_progress",
+    "*types.HookProgressMessage | {\"type\":\"system\",\"subtype\":\"hook_progress\",\"hook_id\":\"\",\"hook_name\":\"\",\"hook_event\":\"\",\"stdout\":\"\",\"stderr\":\"\",\"output\":\"\",\"uuid\":\"\",\"session_id\":\"\"}"
+  ],
+  [
+    "subtype:hook_response",
+    "*types.HookResponseMessage | {\"type\":\"system\",\"subtype\":\"hook_response\",\"hook_id\":\"\",\"hook_name\":\"\",\"hook_event\":\"\",\"output\":\"\",\"stdout\":\"\",\"stderr\":\"\",\"outcome\":\"\",\"uuid\":\"\",\"session_id\":\"\"}"
+  ],
+  [
+    "subtype:hook_started",
+    "*types.HookStartedMessage | {\"type\":\"system\",\"subtype\":\"hook_started\",\"hook_id\":\"\",\"hook_name\":\"\",\"hook_event\":\"\",\"uuid\":\"\",\"session_id\":\"\"}"
+  ],
+  [
+    "subtype:no_subtype_default",
+    "*types.SystemMessage | {\"type\":\"system\"}"
+  ],
+  [
+    "subtype:status",
+    "*types.StatusMessage | {\"type\":\"system\",\"subtype\":\"status\",\"uuid\":\"\",\"session_id\":\"\"}"
+  ],
+  [
+    "subtype:task_notification",
+    "*types.TaskNotificationMessage | {\"type\":\"system\",\"subtype\":\"task_notification\",\"task_id\":\"\",\"status\":\"\",\"output_file\":\"\",\"summary\":\"\",\"uuid\":\"\",\"session_id\":\"\"}"
+  ],
+  [
+    "subtype:task_progress",
+    "*types.TaskProgressMessage | {\"type\":\"system\",\"subtype\":\"task_progress\",\"task_id\":\"\",\"description\":\"\",\"usage\":{\"total_tokens\":0,\"tool_uses\":0,\"duration_ms\":0},\"uuid\":\"\",\"session_id\":\"\"}"
+  ],
+  [
+    "subtype:task_started",
+    "*types.TaskStartedMessage | {\"type\":\"system\",\"subtype\":\"task_started\",\"task_id\":\"\",\"description\":\"\",\"uuid\":\"\",\"session_id\":\"\"}"
+  ],
+  [
+    "subtype:unknown_subtype",
+    "*types.SystemMessage | {\"type\":\"system\",\"subtype\":\"some_future_subtype\"}"
+  ],
+  [
+    "type:assistant",
+    "*types.AssistantMessage | {\"type\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"model\":\"\"}"
+  ],
+  [
+    "type:auth_status",
+    "*types.AuthStatusMessage | {\"type\":\"auth_status\",\"isAuthenticating\":false,\"output\":null,\"uuid\":\"\",\"session_id\":\"\"}"
+  ],
+  [
+    "type:control_request",
+    "*types.SystemMessage | {\"type\":\"control_request\",\"request_id\":\"r1\"}"
+  ],
+  [
+    "type:control_response",
+    "*types.SystemMessage | {\"type\":\"control_response\",\"request_id\":\"r1\"}"
+  ],
+  [
+    "type:empty_type",
+    "ERR: missing or empty type field"
+  ],
+  [
+    "type:malformed",
+    "ERR: failed to determine message type (raw: {not json): invalid character 'n' looking for beginning of object key string"
+  ],
+  [
+    "type:missing_type",
+    "ERR: missing or empty type field"
+  ],
+  [
+    "type:prompt_suggestion",
+    "*types.PromptSuggestionMessage | {\"type\":\"prompt_suggestion\",\"suggestion\":\"\",\"uuid\":\"\",\"session_id\":\"\"}"
+  ],
+  [
+    "type:rate_limit_event",
+    "*types.RateLimitEvent | {\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"\"},\"uuid\":\"\",\"session_id\":\"\"}"
+  ],
+  [
+    "type:result",
+    "*types.ResultMessage | {\"type\":\"result\",\"subtype\":\"success\",\"duration_ms\":0,\"duration_api_ms\":0,\"is_error\":false,\"num_turns\":0,\"session_id\":\"s1\"}"
+  ],
+  [
+    "type:stream_event",
+    "*types.StreamEvent | {\"type\":\"stream_event\",\"uuid\":\"\",\"session_id\":\"\",\"event\":{\"type\":\"x\"}}"
+  ],
+  [
+    "type:system_no_subtype",
+    "*types.SystemMessage | {\"type\":\"system\"}"
+  ],
+  [
+    "type:tool_progress",
+    "*types.ToolProgressMessage | {\"type\":\"tool_progress\",\"tool_use_id\":\"\",\"tool_name\":\"\",\"elapsed_time_seconds\":0,\"uuid\":\"\",\"session_id\":\"\"}"
+  ],
+  [
+    "type:tool_use_summary",
+    "*types.ToolUseSummaryMessage | {\"type\":\"tool_use_summary\",\"summary\":\"\",\"preceding_tool_use_ids\":null,\"uuid\":\"\",\"session_id\":\"\"}"
+  ],
+  [
+    "type:unknown_type",
+    "*types.UnknownMessage | {\"type\":\"some_future_type\"}"
+  ],
+  [
+    "type:user",
+    "*types.UserMessage | {\"type\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}"
+  ]
+]

@@ -7,16 +7,18 @@ import (
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
-type SessionKey = types.SessionKey
-type SessionStoreEntry = types.SessionStoreEntry
-type SessionStoreListEntry = types.SessionStoreListEntry
-type SessionSummaryEntry = types.SessionSummaryEntry
-type SessionStore = types.SessionStore
-type SessionStoreLister = types.SessionStoreLister
-type SessionStoreSummaryLister = types.SessionStoreSummaryLister
-type SessionStoreSubkeyLister = types.SessionStoreSubkeyLister
-type SessionStoreDeleter = types.SessionStoreDeleter
-type UnsupportedSessionStoreOperationError = types.UnsupportedSessionStoreOperationError
+type (
+	SessionKey                            = types.SessionKey
+	SessionStoreEntry                     = types.SessionStoreEntry
+	SessionStoreListEntry                 = types.SessionStoreListEntry
+	SessionSummaryEntry                   = types.SessionSummaryEntry
+	SessionStore                          = types.SessionStore
+	SessionStoreLister                    = types.SessionStoreLister
+	SessionStoreSummaryLister             = types.SessionStoreSummaryLister
+	SessionStoreSubkeyLister              = types.SessionStoreSubkeyLister
+	SessionStoreDeleter                   = types.SessionStoreDeleter
+	UnsupportedSessionStoreOperationError = types.UnsupportedSessionStoreOperationError
+)
 
 // SessionStoreBackend adapts an official-style SessionStore to HistoryBackend.
 type SessionStoreBackend struct {
@@ -46,11 +48,11 @@ func (b *SessionStoreBackend) ListSessions(ctx context.Context, opts *types.List
 			return nil, err
 		}
 		infos := make([]types.SDKSessionInfo, 0, len(entries))
-		for _, entry := range entries {
-			if !isValidUUID(entry.SessionID) {
+		for i := range entries {
+			if !isValidUUID(entries[i].SessionID) {
 				continue
 			}
-			infos = append(infos, sessionStoreListEntryInfo(entry))
+			infos = append(infos, sessionStoreListEntryInfo(entries[i]))
 		}
 		return infos, nil
 	}
@@ -136,7 +138,7 @@ func (b *SessionStoreBackend) ListSubagents(ctx context.Context, sessionID strin
 	return nil, types.NewUnsupportedSessionStoreOperationError("ListSubagents")
 }
 
-func (b *SessionStoreBackend) GetSubagentMessages(ctx context.Context, sessionID string, subagentID string, opts *types.GetSubagentMessagesOptions) ([]types.SessionMessage, error) {
+func (b *SessionStoreBackend) GetSubagentMessages(ctx context.Context, sessionID, subagentID string, opts *types.GetSubagentMessagesOptions) ([]types.SessionMessage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

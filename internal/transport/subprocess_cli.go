@@ -170,13 +170,16 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) (err error) {
 	t.shutdownRequested = false
 	t.err = nil
 
-	// Create cancellable context
-	t.ctx, t.cancel = context.WithCancel(ctx)
+	// Create cancellable context. connCtx is a local handle on the same context
+	// stored in t.ctx; passing the local (rather than the t.ctx field) to the
+	// connect helpers keeps the inheritance from ctx statically visible.
+	connCtx, connCancel := context.WithCancel(ctx)
+	t.ctx, t.cancel = connCtx, connCancel
 
 	usesCustomSpawner := t.usesCustomSpawner()
 	wantsThinkingDisplay := t.wantsThinkingDisplay()
 	if wantsThinkingDisplay && !usesCustomSpawner {
-		t.thinkingDisplaySupported = t.detectThinkingDisplaySupport()
+		t.thinkingDisplaySupported = t.detectThinkingDisplaySupport(ctx)
 	} else {
 		t.thinkingDisplaySupported = true
 	}
@@ -187,7 +190,7 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) (err error) {
 		t.agentProgressSummariesSupported = true
 		t.subagentExecutionSupported = true
 	} else {
-		t.detectExperimentalFlagSupport()
+		t.detectExperimentalFlagSupport(ctx)
 	}
 
 	// Build command arguments
@@ -201,9 +204,11 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) (err error) {
 
 	// Check if a custom process spawner is provided
 	if t.options != nil && t.options.SpawnProcess != nil {
-		err = t.connectWithCustomSpawner(ctx, args, envMap)
+		err = t.connectWithCustomSpawner(connCtx, args, envMap)
 	} else {
-		err = t.connectWithExecCommand(args, envMap)
+		// connCtx is the cancellable child of ctx established above; pass it so the
+		// subprocess and reader goroutines are bound to the connection lifecycle.
+		err = t.connectWithExecCommand(connCtx, args, envMap)
 	}
 	if err != nil {
 		t.cancel()
@@ -224,8 +229,8 @@ func (t *SubprocessCLITransport) usesCustomSpawner() bool {
 	return t.options != nil && t.options.SpawnProcess != nil
 }
 
-func (t *SubprocessCLITransport) detectThinkingDisplaySupport() bool {
-	version, err := GetCLIVersion(t.cliPath)
+func (t *SubprocessCLITransport) detectThinkingDisplaySupport(ctx context.Context) bool {
+	version, err := GetCLIVersion(ctx, t.cliPath)
 	if err != nil {
 		t.logger.Warn("unable to determine Claude CLI thinking display support; omitting thinking display flag",
 			zap.Error(err),
@@ -247,7 +252,7 @@ func (t *SubprocessCLITransport) detectThinkingDisplaySupport() bool {
 // buildCommandArgs never emits one the CLI would reject (crashing Connect). It only
 // probes the version when a consumer actually opted into one of the flags; otherwise
 // the support fields stay false and the flags are never emitted anyway.
-func (t *SubprocessCLITransport) detectExperimentalFlagSupport() {
+func (t *SubprocessCLITransport) detectExperimentalFlagSupport(ctx context.Context) {
 	if t.options == nil {
 		return
 	}
@@ -260,7 +265,7 @@ func (t *SubprocessCLITransport) detectExperimentalFlagSupport() {
 	// confirmed, so a version-detection failure fails safe (no Connect crash).
 	t.agentProgressSummariesSupported = false
 	t.subagentExecutionSupported = false
-	version, err := GetCLIVersion(t.cliPath)
+	version, err := GetCLIVersion(ctx, t.cliPath)
 	if err != nil {
 		t.logger.Warn("unable to determine Claude CLI version; skipping experimental flags to avoid Connect failure",
 			zap.Error(err))
@@ -286,14 +291,8 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 	}
 
 	// Validate the spawned process provides required pipes
-	if process.Stdin() == nil {
-		return types.NewCLIConnectionError("custom spawner returned nil stdin")
-	}
-	if process.Stdout() == nil {
-		return types.NewCLIConnectionError("custom spawner returned nil stdout")
-	}
-	if process.Stderr() == nil {
-		return types.NewCLIConnectionError("custom spawner returned nil stderr")
+	if err := validateSpawnedPipes(process); err != nil {
+		return err
 	}
 
 	t.customProcess = process
@@ -311,7 +310,7 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 	t.procDone = make(chan struct{})
 	t.stderrDone = make(chan struct{})
 	capturedProcess := t.customProcess
-	capturedCtx := t.ctx
+	capturedCtx := ctx
 	capturedProcDone := t.procDone
 	capturedStderrDone := t.stderrDone
 	capturedStdout := t.stdout
@@ -320,52 +319,17 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
-		waitErr := capturedProcess.Wait()
-		close(capturedProcDone) // signal Close() that Wait() is done — BEFORE acquiring mutex
-		t.drainStderr(capturedStderrDone)
-		t.mu.Lock()
-		wasReady := t.ready
-		t.ready = false
-		requested := t.shutdownRequested
-		exitCode := capturedProcess.ExitCode()
-		if waitErr != nil && t.err == nil && !requested {
-			t.err = t.newProcessErrorWithDiagnostics("subprocess exited unexpectedly", exitCode)
-		}
-		var cause error
-		if !requested {
-			cause = t.err
-		}
-		cancelFn := t.cancel // capture under lock to avoid race with Close()
-		t.mu.Unlock()
-		t.observer().OnSubprocessExit(exitCode, requested, cause)
-		if wasReady {
-			if cancelFn != nil {
-				cancelFn()
-			}
-		}
+		t.watchCustomProcessExit(capturedProcess, capturedProcDone, capturedStderrDone)
 	}()
 
 	// Launch context monitor goroutine for custom spawner (Bug C14).
 	// Unlike exec.CommandContext, custom processes don't auto-kill on context cancel.
-	// This goroutine kills the process when the transport context is cancelled,
+	// This goroutine kills the process when the transport context is canceled,
 	// unblocking Wait() and the pipe readers.
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
-		select {
-		case <-capturedCtx.Done():
-			select {
-			case <-capturedProcDone:
-				return
-			default:
-			}
-			if err := capturedProcess.Kill(); err != nil {
-				t.logger.Debug("context cancel: process kill returned error (process may have already exited)",
-					zap.Error(err))
-			}
-		case <-capturedProcDone:
-			// Process already exited — nothing to do
-		}
+		t.monitorCustomProcessCtx(capturedCtx, capturedProcess, capturedProcDone)
 	}()
 
 	// Launch message reader loop in goroutine (tracked by wg for clean shutdown).
@@ -388,10 +352,77 @@ func (t *SubprocessCLITransport) connectWithCustomSpawner(ctx context.Context, a
 	return nil
 }
 
+// validateSpawnedPipes ensures a custom-spawned process exposes the three pipes
+// the transport requires.
+func validateSpawnedPipes(process types.SpawnedProcess) error {
+	if process.Stdin() == nil {
+		return types.NewCLIConnectionError("custom spawner returned nil stdin")
+	}
+	if process.Stdout() == nil {
+		return types.NewCLIConnectionError("custom spawner returned nil stdout")
+	}
+	if process.Stderr() == nil {
+		return types.NewCLIConnectionError("custom spawner returned nil stderr")
+	}
+	return nil
+}
+
+// watchCustomProcessExit waits for a custom-spawned process to exit, then signals
+// procDone, drains stderr, records the exit cause and telemetry, and cancels the
+// transport context if the process had become ready. process.Wait() is called
+// exactly once here — this goroutine is the sole owner of procDone's close.
+func (t *SubprocessCLITransport) watchCustomProcessExit(process types.SpawnedProcess, procDone, stderrDone chan struct{}) {
+	waitErr := process.Wait()
+	close(procDone) // signal Close() that Wait() is done — BEFORE acquiring mutex
+	t.drainStderr(stderrDone)
+	t.mu.Lock()
+	wasReady := t.ready
+	t.ready = false
+	requested := t.shutdownRequested
+	exitCode := process.ExitCode()
+	if waitErr != nil && t.err == nil && !requested {
+		t.err = t.newProcessErrorWithDiagnostics("subprocess exited unexpectedly", exitCode)
+	}
+	var cause error
+	if !requested {
+		cause = t.err
+	}
+	cancelFn := t.cancel // capture under lock to avoid race with Close()
+	t.mu.Unlock()
+	t.observer().OnSubprocessExit(exitCode, requested, cause)
+	if wasReady && cancelFn != nil {
+		cancelFn()
+	}
+}
+
+// monitorCustomProcessCtx kills a custom-spawned process when ctx is canceled,
+// unblocking Wait() and the pipe readers (custom processes, unlike
+// exec.CommandContext, are not auto-killed on context cancel). It returns once
+// the process has exited (procDone closed).
+func (t *SubprocessCLITransport) monitorCustomProcessCtx(ctx context.Context, process types.SpawnedProcess, procDone chan struct{}) {
+	select {
+	case <-ctx.Done():
+		select {
+		case <-procDone:
+			return
+		default:
+		}
+		if err := process.Kill(); err != nil {
+			t.logger.Debug("context cancel: process kill returned error (process may have already exited)",
+				zap.Error(err))
+		}
+	case <-procDone:
+		// Process already exited — nothing to do
+	}
+}
+
 // connectWithExecCommand uses the default exec.Command to create the process.
-func (t *SubprocessCLITransport) connectWithExecCommand(args []string, envMap map[string]string) error {
+// runCtx is the cancellable connection context (t.ctx, a WithCancel child of the
+// caller's ctx established in Connect); the subprocess and reader goroutines are
+// bound to it so Close can cancel them via t.cancel after this returns.
+func (t *SubprocessCLITransport) connectWithExecCommand(runCtx context.Context, args []string, envMap map[string]string) error {
 	// Create command with arguments
-	t.cmd = exec.CommandContext(t.ctx, t.cliPath, args...)
+	t.cmd = exec.CommandContext(runCtx, t.cliPath, args...)
 
 	// Set working directory if provided
 	if t.cwd != "" {
@@ -454,7 +485,7 @@ func (t *SubprocessCLITransport) connectWithExecCommand(args []string, envMap ma
 	t.procDone = make(chan struct{})
 	t.stderrDone = make(chan struct{})
 	capturedCmd := t.cmd
-	capturedCtx := t.ctx
+	capturedCtx := runCtx
 	capturedProcDone := t.procDone
 	capturedStderrDone := t.stderrDone
 	capturedStdout := t.stdout
@@ -559,7 +590,7 @@ var ErrParseGiveUp = errors.New("transport: too many consecutive parse errors, s
 //
 // Note on lifecycle cancellation: ReadLine() blocks on stdout, which cannot be
 // interrupted by context cancel directly. Since the transport owns stdout after
-// Connect(), this loop closes stdout when the context is cancelled or the
+// Connect(), this loop closes stdout when the context is canceled or the
 // captured process-done channel closes. That unblocks ReadLine() even when a
 // subprocess exits while stdout remains open with a partial line.
 //
@@ -638,17 +669,7 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 
 	readDone := make(chan struct{})
 	monitorDone := make(chan struct{})
-	go func() {
-		defer close(monitorDone)
-		select {
-		case <-ctx.Done():
-			_ = stdout.Close()
-		case <-procDone:
-			_ = stdout.Close()
-		case <-readDone:
-			// Read loop finished normally — nothing to do.
-		}
-	}()
+	go t.closeStdoutOnDone(ctx, stdout, procDone, readDone, monitorDone)
 
 	defer func() {
 		close(readDone)
@@ -667,7 +688,7 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 		// Check for context cancellation
 		select {
 		case <-ctx.Done():
-			t.logger.Debug("Message reader loop stopped: context cancelled")
+			t.logger.Debug("Message reader loop stopped: context canceled")
 			return
 		case <-procDone:
 			t.logger.Debug("Message reader loop stopped: process exited")
@@ -678,32 +699,7 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 		// Read next JSON line
 		line, err := reader.ReadLine()
 		if err != nil {
-			if err == io.EOF {
-				t.logger.Debug("Message reader loop stopped: EOF from CLI")
-				// Normal end of stream
-				return
-			}
-
-			// If the transport context is already cancelled, read errors
-			// are expected (pipe closed during shutdown) — log at Debug.
-			// Use the passed-in ctx (not t.ctx) to avoid a data race with
-			// Connect() overwriting t.ctx under t.mu.
-			if ctx.Err() != nil {
-				t.logger.Debug("message reader loop stopped during shutdown", zap.Error(err))
-				return
-			}
-			if procDoneClosed(procDone) {
-				t.logger.Debug("message reader loop stopped after process exit", zap.Error(err))
-				return
-			}
-
-			t.logger.Error("failed to read from CLI stdout", zap.Error(err))
-			// Store error and return
-			t.OnError(types.NewJSONDecodeErrorWithCause(
-				"failed to read JSON line from subprocess",
-				string(line),
-				err,
-			))
+			t.handleStdoutReadError(ctx, line, err, procDone)
 			return
 		}
 
@@ -715,54 +711,8 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 		// Parse JSON into message
 		msg, err := types.UnmarshalMessage(line)
 		if err != nil {
-			consecutiveParseErrors++
-			t.observer().OnParseError(consecutiveParseErrors, err)
-			t.logger.Warn("failed to parse message from CLI",
-				zap.Error(err),
-				zap.Uint("consecutive_errors", consecutiveParseErrors),
-			)
-
-			// Exit after too many consecutive parse failures — the subprocess is
-			// emitting garbage and is unrecoverable. Terminate it authoritatively
-			// (reap the process, surface the error) rather than leaving a zombie.
-			if consecutiveParseErrors >= t.maxParseErrors() {
-				t.logger.Error("too many consecutive parse errors, terminating subprocess",
-					zap.Uint("consecutive_errors", consecutiveParseErrors),
-				)
-				t.observer().OnParseGiveUp(consecutiveParseErrors)
-				t.terminateOnUnrecoverableError(
-					fmt.Errorf("transport.messageReaderLoop: %d consecutive parse errors (last: %v): %w", consecutiveParseErrors, err, ErrParseGiveUp),
-				)
+			if t.handleParseError(ctx, err, &consecutiveParseErrors, procDone) {
 				return
-			}
-
-			// Store parse error but continue reading after backoff
-			t.OnError(err)
-
-			backoffFn := t.parseErrorBackoff
-			if backoffFn == nil {
-				backoffFn = defaultParseErrorBackoff
-			}
-			backoff := backoffFn(consecutiveParseErrors)
-			t.logger.Debug("parse error backoff",
-				zap.Duration("backoff", backoff),
-				zap.Uint("consecutive_errors", consecutiveParseErrors),
-			)
-			if backoff <= 0 {
-				continue
-			}
-			timer := time.NewTimer(backoff)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				t.logger.Debug("Message reader loop stopped during backoff: context cancelled")
-				return
-			case <-procDone:
-				timer.Stop()
-				t.logger.Debug("Message reader loop stopped during backoff: process exited")
-				return
-			case <-timer.C:
-				// Backoff complete, continue reading
 			}
 			continue
 		}
@@ -791,6 +741,105 @@ func (t *SubprocessCLITransport) messageReaderLoop(ctx context.Context, stdout i
 		case <-procDone:
 			return
 		}
+	}
+}
+
+// closeStdoutOnDone closes stdout when ctx is canceled or the process exits,
+// unblocking a ReadLine() blocked on a partial line. It signals monitorDone on
+// return and does nothing if the read loop finished first (readDone closed).
+func (t *SubprocessCLITransport) closeStdoutOnDone(ctx context.Context, stdout io.ReadCloser, procDone, readDone <-chan struct{}, monitorDone chan<- struct{}) {
+	defer close(monitorDone)
+	select {
+	case <-ctx.Done():
+		_ = stdout.Close()
+	case <-procDone:
+		_ = stdout.Close()
+	case <-readDone:
+		// Read loop finished normally — nothing to do.
+	}
+}
+
+// handleStdoutReadError records a stdout read error before the reader loop
+// returns. EOF and shutdown-induced errors (ctx canceled, or process already
+// exited) are expected and logged at Debug; a genuine read failure is surfaced
+// via OnError. ctx is the passed-in context (not t.ctx) to avoid a data race
+// with Connect() overwriting t.ctx under t.mu.
+func (t *SubprocessCLITransport) handleStdoutReadError(ctx context.Context, line []byte, err error, procDone <-chan struct{}) {
+	if errors.Is(err, io.EOF) {
+		t.logger.Debug("Message reader loop stopped: EOF from CLI")
+		return
+	}
+	if ctx.Err() != nil {
+		t.logger.Debug("message reader loop stopped during shutdown", zap.Error(err))
+		return
+	}
+	if procDoneClosed(procDone) {
+		t.logger.Debug("message reader loop stopped after process exit", zap.Error(err))
+		return
+	}
+	t.logger.Error("failed to read from CLI stdout", zap.Error(err))
+	t.OnError(types.NewJSONDecodeErrorWithCause(
+		"failed to read JSON line from subprocess",
+		string(line),
+		err,
+	))
+}
+
+// handleParseError records a message parse failure and reports whether the reader
+// loop should stop. It increments *consecutiveErrors, emits telemetry, and either
+// terminates the subprocess after too many consecutive failures (returns true) or
+// backs off and signals the caller to continue (returns false). A ctx or procDone
+// signal observed during the backoff also returns true.
+func (t *SubprocessCLITransport) handleParseError(ctx context.Context, err error, consecutiveErrors *uint, procDone <-chan struct{}) bool {
+	*consecutiveErrors++
+	t.observer().OnParseError(*consecutiveErrors, err)
+	t.logger.Warn("failed to parse message from CLI",
+		zap.Error(err),
+		zap.Uint("consecutive_errors", *consecutiveErrors),
+	)
+
+	// Exit after too many consecutive parse failures — the subprocess is
+	// emitting garbage and is unrecoverable. Terminate it authoritatively
+	// (reap the process, surface the error) rather than leaving a zombie.
+	if *consecutiveErrors >= t.maxParseErrors() {
+		t.logger.Error("too many consecutive parse errors, terminating subprocess",
+			zap.Uint("consecutive_errors", *consecutiveErrors),
+		)
+		t.observer().OnParseGiveUp(*consecutiveErrors)
+		t.terminateOnUnrecoverableError(
+			fmt.Errorf("transport.messageReaderLoop: %d consecutive parse errors (last: %w): %w", *consecutiveErrors, err, ErrParseGiveUp),
+		)
+		return true
+	}
+
+	// Store parse error but continue reading after backoff
+	t.OnError(err)
+
+	backoffFn := t.parseErrorBackoff
+	if backoffFn == nil {
+		backoffFn = defaultParseErrorBackoff
+	}
+	backoff := backoffFn(*consecutiveErrors)
+	t.logger.Debug("parse error backoff",
+		zap.Duration("backoff", backoff),
+		zap.Uint("consecutive_errors", *consecutiveErrors),
+	)
+	if backoff <= 0 {
+		return false
+	}
+	timer := time.NewTimer(backoff)
+	select {
+	case <-ctx.Done():
+		timer.Stop()
+		t.logger.Debug("Message reader loop stopped during backoff: context canceled")
+		return true
+	case <-procDone:
+		timer.Stop()
+		t.logger.Debug("Message reader loop stopped during backoff: process exited")
+		return true
+	case <-timer.C:
+		// Backoff complete, continue reading
+		return false
 	}
 }
 
@@ -854,6 +903,25 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		"--verbose",
 	}
 
+	// Each helper appends its flag group in declaration order; the call order
+	// below is the canonical CLI argument order (pinned by the args oracle).
+	args = t.appendPermissionArgs(args)
+	args = t.appendSystemPromptArgs(args)
+	args = t.appendModelAndResumeArgs(args)
+	args = t.appendBudgetArgs(args)
+	args = t.appendCollectionArgs(args)
+	args = t.appendAgentAndEffortArgs(args)
+	args = t.appendSessionArgs(args)
+	args = t.appendOutputArgs(args)
+	args = t.appendSubagentArgs(args)
+	args = t.appendToolArgs(args)
+	args = t.appendMiscArgs(args)
+
+	return args
+}
+
+// appendPermissionArgs adds the permission-prompt-tool and permission-mode flags.
+func (t *SubprocessCLITransport) appendPermissionArgs(args []string) []string {
 	// Add permission prompt tool if specified
 	if t.options != nil && t.options.PermissionPromptToolName != nil {
 		args = append(args, "--permission-prompt-tool", *t.options.PermissionPromptToolName)
@@ -865,23 +933,28 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		args = append(args, "--permission-mode", string(*t.options.PermissionMode))
 		t.logger.Debug("setting permission mode", zap.String("mode", string(*t.options.PermissionMode)))
 	}
+	return args
+}
 
+// appendSystemPromptArgs adds the --system-prompt / --append-system-prompt flag.
+func (t *SubprocessCLITransport) appendSystemPromptArgs(args []string) []string {
 	// Add system prompt - always pass the flag to match Python SDK behavior
 	// When nil, pass empty string to prevent unintended Claude Code defaults
 	if t.options != nil {
-		if t.options.SystemPrompt == nil {
+		switch prompt := t.options.SystemPrompt.(type) {
+		case nil:
 			// Default to empty system prompt when not specified
 			args = append(args, "--system-prompt", "")
 			t.logger.Debug("Setting empty system prompt (default)")
-		} else if promptStr, ok := t.options.SystemPrompt.(string); ok {
+		case string:
 			// Handle string prompt
-			args = append(args, "--system-prompt", promptStr)
-			t.logger.Debug("setting system prompt", zap.String("prompt", promptStr))
-		} else if preset, ok := t.options.SystemPrompt.(types.SystemPromptPreset); ok {
+			args = append(args, "--system-prompt", prompt)
+			t.logger.Debug("setting system prompt", zap.String("prompt", prompt))
+		case types.SystemPromptPreset:
 			// Handle preset case - append to default Claude Code prompt
-			if preset.Append != nil {
-				args = append(args, "--append-system-prompt", *preset.Append)
-				t.logger.Debug("appending to system prompt preset", zap.String("append", *preset.Append))
+			if prompt.Append != nil {
+				args = append(args, "--append-system-prompt", *prompt.Append)
+				t.logger.Debug("appending to system prompt preset", zap.String("append", *prompt.Append))
 			}
 		}
 	} else {
@@ -889,7 +962,12 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		args = append(args, "--system-prompt", "")
 		t.logger.Debug("Setting empty system prompt (no options)")
 	}
+	return args
+}
 
+// appendModelAndResumeArgs adds model, resume, fork-session, and the permission
+// bypass safety flags.
+func (t *SubprocessCLITransport) appendModelAndResumeArgs(args []string) []string {
 	// Add model if specified
 	if t.options != nil && t.options.Model != nil {
 		args = append(args, "--model", *t.options.Model)
@@ -922,7 +1000,11 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 			}
 		}
 	}
+	return args
+}
 
+// appendBudgetArgs adds the thinking-token and budget limit flags.
+func (t *SubprocessCLITransport) appendBudgetArgs(args []string) []string {
 	// Add extended thinking token limit if specified
 	if t.options != nil && t.options.MaxThinkingTokens != nil {
 		args = append(args, "--max-thinking-tokens", fmt.Sprintf("%d", *t.options.MaxThinkingTokens))
@@ -934,7 +1016,12 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", *t.options.MaxBudgetUSD))
 		t.logger.Debug("setting max budget", zap.Float64("max_budget_usd", *t.options.MaxBudgetUSD))
 	}
+	return args
+}
 
+// appendCollectionArgs adds the multi-value option flags: betas, plugin dirs,
+// and setting sources.
+func (t *SubprocessCLITransport) appendCollectionArgs(args []string) []string {
 	// Add beta feature flags if specified
 	if t.options != nil && len(t.options.Betas) > 0 {
 		for _, beta := range t.options.Betas {
@@ -965,7 +1052,11 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		args = append(args, "--setting-sources", joinStrings(sources, ","))
 		t.logger.Debug("setting sources", zap.String("sources", joinStrings(sources, ",")))
 	}
+	return args
+}
 
+// appendAgentAndEffortArgs adds the agents JSON, session agent, and effort flags.
+func (t *SubprocessCLITransport) appendAgentAndEffortArgs(args []string) []string {
 	// Add agents if specified
 	if t.options != nil && len(t.options.Agents) > 0 {
 		agentsJSONBytes, err := json.Marshal(t.options.Agents)
@@ -988,7 +1079,12 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		args = append(args, "--effort", string(*t.options.Effort))
 		t.logger.Debug("setting effort level", zap.String("effort", string(*t.options.Effort)))
 	}
+	return args
+}
 
+// appendSessionArgs adds thinking-display, fallback model, session id, and
+// session persistence.
+func (t *SubprocessCLITransport) appendSessionArgs(args []string) []string {
 	// Claude Code consumes thinking display as a CLI flag. Keep the typed
 	// settings JSON for thinking mode/budget, and pass display explicitly so
 	// summarized/omitted behavior is honored by the subprocess.
@@ -1014,7 +1110,12 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		args = append(args, "--no-session-persistence")
 		t.logger.Debug("Disabling session persistence")
 	}
+	return args
+}
 
+// appendOutputArgs adds the output-format / json-schema, settings JSON, and
+// replay-user-messages flags.
+func (t *SubprocessCLITransport) appendOutputArgs(args []string) []string {
 	// Add JSON schema output format if specified
 	if t.options != nil && t.options.OutputFormat != nil {
 		schemaJSON, err := json.Marshal(t.options.OutputFormat)
@@ -1040,7 +1141,11 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 	if t.options != nil && t.options.EnableFileCheckpointing {
 		args = append(args, "--replay-user-messages")
 	}
+	return args
+}
 
+// appendSubagentArgs adds the subagent-execution configuration flag.
+func (t *SubprocessCLITransport) appendSubagentArgs(args []string) []string {
 	// Add subagent execution configuration if specified
 	if t.options != nil && t.options.SubagentExecution != nil {
 		subagentJSON := make(map[string]interface{})
@@ -1057,17 +1162,22 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 
 		if len(subagentJSON) > 0 {
 			subagentJSONBytes, err := json.Marshal(subagentJSON)
-			if err != nil {
+			switch {
+			case err != nil:
 				t.logger.Warn("failed to marshal subagent execution config to JSON", zap.Error(err))
-			} else if t.subagentExecutionSupported {
+			case t.subagentExecutionSupported:
 				args = append(args, "--subagent-execution", string(subagentJSONBytes))
 				t.logger.Debug("subagent execution configuration", zap.String("config", string(subagentJSONBytes)))
-			} else {
+			default:
 				t.logger.Warn("Claude CLI does not support --subagent-execution; skipping to avoid Connect failure")
 			}
 		}
 	}
+	return args
+}
 
+// appendToolArgs adds the resume-session-at and tools flags.
+func (t *SubprocessCLITransport) appendToolArgs(args []string) []string {
 	// Add --resume-session-at flag
 	if t.options != nil && t.options.ResumeSessionAt != nil {
 		args = append(args, "--resume-session-at", *t.options.ResumeSessionAt)
@@ -1093,7 +1203,12 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 			}
 		}
 	}
+	return args
+}
 
+// appendMiscArgs adds debug-file, strict-mcp-config, task-budget, and the
+// capability-gated agent-progress-summaries flag.
+func (t *SubprocessCLITransport) appendMiscArgs(args []string) []string {
 	// Add --debug-file flag
 	if t.options != nil && t.options.DebugFile != nil {
 		args = append(args, "--debug-file", *t.options.DebugFile)
@@ -1121,7 +1236,6 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 			t.logger.Warn("Claude CLI does not support --agent-progress-summaries; skipping to avoid Connect failure")
 		}
 	}
-
 	return args
 }
 
@@ -1141,13 +1255,11 @@ func joinStrings(strs []string, sep string) string {
 // It merges typed fields (Thinking, Sandbox, EnableFileCheckpointing) on top of
 // any user-provided Settings string. Typed fields take precedence on conflict.
 func (t *SubprocessCLITransport) buildSettingsJSON() string {
-	hasThinking := t.options.Thinking != nil
-	hasSandbox := t.options.Sandbox != nil
-	hasCheckpointing := t.options.EnableFileCheckpointing
-	hasToolConfig := t.options.ToolConfig != nil
-	hasIncludeHookEvents := t.options.IncludeHookEvents
+	// hasTypedSettings is the OR of every typed settings field; by De Morgan
+	// !hasTypedSettings equals the original "none of the typed fields set" guard.
+	hasTyped := t.hasTypedSettings()
 
-	if !hasThinking && !hasSandbox && !hasCheckpointing && !hasToolConfig && !hasIncludeHookEvents && t.options.Settings == nil {
+	if !hasTyped && t.options.Settings == nil {
 		return ""
 	}
 
@@ -1160,7 +1272,7 @@ func (t *SubprocessCLITransport) buildSettingsJSON() string {
 	}
 
 	// If no typed fields are set, just return the original settings string
-	if !hasThinking && !hasSandbox && !hasCheckpointing && !hasToolConfig && !hasIncludeHookEvents {
+	if !hasTyped {
 		if t.options.Settings != nil {
 			return *t.options.Settings
 		}
@@ -1168,21 +1280,7 @@ func (t *SubprocessCLITransport) buildSettingsJSON() string {
 	}
 
 	// Typed fields override user-provided settings
-	if hasThinking {
-		settings["thinking"] = t.options.Thinking
-	}
-	if hasSandbox {
-		settings["sandbox"] = t.options.Sandbox
-	}
-	if hasCheckpointing {
-		settings["enableFileCheckpointing"] = true
-	}
-	if hasToolConfig {
-		settings["toolConfig"] = t.options.ToolConfig
-	}
-	if hasIncludeHookEvents {
-		settings["includeHookEvents"] = true
-	}
+	t.applyTypedSettings(settings)
 
 	result, err := json.Marshal(settings)
 	if err != nil {
@@ -1190,6 +1288,36 @@ func (t *SubprocessCLITransport) buildSettingsJSON() string {
 		return ""
 	}
 	return string(result)
+}
+
+// hasTypedSettings reports whether any typed settings field (thinking, sandbox,
+// checkpointing, tool config, include-hook-events) is set.
+func (t *SubprocessCLITransport) hasTypedSettings() bool {
+	return t.options.Thinking != nil ||
+		t.options.Sandbox != nil ||
+		t.options.EnableFileCheckpointing ||
+		t.options.ToolConfig != nil ||
+		t.options.IncludeHookEvents
+}
+
+// applyTypedSettings writes the typed settings fields onto the settings map,
+// overriding any user-provided values for the same keys.
+func (t *SubprocessCLITransport) applyTypedSettings(settings map[string]interface{}) {
+	if t.options.Thinking != nil {
+		settings["thinking"] = t.options.Thinking
+	}
+	if t.options.Sandbox != nil {
+		settings["sandbox"] = t.options.Sandbox
+	}
+	if t.options.EnableFileCheckpointing {
+		settings["enableFileCheckpointing"] = true
+	}
+	if t.options.ToolConfig != nil {
+		settings["toolConfig"] = t.options.ToolConfig
+	}
+	if t.options.IncludeHookEvents {
+		settings["includeHookEvents"] = true
+	}
 }
 
 // Close terminates the subprocess and cleans up all resources.
@@ -1370,6 +1498,15 @@ func (t *SubprocessCLITransport) Health() types.TransportHealth {
 }
 
 func waitForProcDone(ctx context.Context, procDone <-chan struct{}, timeout time.Duration) bool {
+	// Prioritize an already-canceled context: the caller asked to stop waiting,
+	// so escalate deterministically. Without this, a procDone that closes
+	// concurrently (e.g. the context-monitor goroutine's Kill already reaped the
+	// process) races the ctx.Done() case in the select below — Go would pick a
+	// ready case at random, so Close() would non-deterministically report a
+	// graceful exit during a forced shutdown.
+	if ctx.Err() != nil {
+		return false
+	}
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
@@ -1439,51 +1576,7 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadC
 		return
 	}
 
-	// Determine if file logging is enabled via StderrLogFile option
-	var logFile *os.File
-	if t.options != nil && t.options.StderrLogFile != nil {
-		// Resolve log file path
-		logPath := *t.options.StderrLogFile
-		if logPath == "" {
-			// Use default location
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				t.logger.Warn("readStderr: could not determine home directory, stderr logging disabled",
-					zap.Error(err))
-				logPath = ""
-			} else {
-				logPath = fmt.Sprintf("%s/.claude/agents_server/cli_stderr.log", homeDir)
-			}
-		}
-
-		if logPath != "" {
-			// Create parent directory if it doesn't exist
-			logDir := filepath.Dir(logPath)
-			if err := os.MkdirAll(logDir, 0755); err != nil {
-				fmt.Fprintf(os.Stderr,
-					"[SDK] Failed to create stderr log directory %s: %v\n"+
-						"Stderr file logging disabled. To fix, create directory:\n"+
-						"  mkdir -p %s\n",
-					logDir, err, logDir)
-			} else {
-				// Try to open log file
-				var err error
-				logFile, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-				if err != nil {
-					fmt.Fprintf(os.Stderr,
-						"[SDK] Failed to open stderr log file %s: %v\n"+
-							"Stderr file logging disabled. Possible fixes:\n"+
-							"  1. Ensure directory exists: mkdir -p %s\n"+
-							"  2. Check file permissions: chmod 644 %s\n"+
-							"  3. Use custom path: opts.WithCustomStderrLogFile(\"/path/to/file.log\")\n",
-						logPath, err, logDir, logPath)
-				} else {
-					t.logger.Debug("stderr file logging enabled", zap.String("path", logPath))
-				}
-			}
-		}
-	}
-
+	logFile := t.openStderrLogFile()
 	// Ensure cleanup if file was opened
 	if logFile != nil {
 		defer func() {
@@ -1491,21 +1584,16 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadC
 		}()
 	}
 
-	// Launch a goroutine that closes stderr when ctx is cancelled.
+	// Launch a goroutine that closes stderr when ctx is canceled.
 	// This unblocks ReadLine() if the subprocess hangs without closing stderr (Bug C16).
-	// The goroutine exits when either ctx is cancelled (close stderr) or the read loop
+	// The goroutine exits when either ctx is canceled (close stderr) or the read loop
 	// finishes (readDone closed).
 	readDone := make(chan struct{})
 	defer close(readDone)
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
-		select {
-		case <-ctx.Done():
-			_ = stderr.Close()
-		case <-readDone:
-			// Read loop finished normally — nothing to do
-		}
+		t.closeStderrOnCancel(ctx, stderr, readDone)
 	}()
 
 	partial := make([]byte, 0, StderrRingSize)
@@ -1533,7 +1621,66 @@ func (t *SubprocessCLITransport) readStderr(ctx context.Context, stderr io.ReadC
 	}
 }
 
-func (t *SubprocessCLITransport) consumeStderrChunk(tail *ringBuffer, partial []byte, chunk []byte, emit func([]byte)) []byte {
+// openStderrLogFile resolves and opens the stderr log file when StderrLogFile is
+// configured, returning the open file or nil when logging is disabled or the
+// file cannot be created. The caller owns closing the returned file. Failures to
+// determine the home directory, create the directory, or open the file disable
+// file logging (return nil); directory/open failures are reported to os.Stderr
+// as best-effort diagnostics.
+func (t *SubprocessCLITransport) openStderrLogFile() *os.File {
+	if t.options == nil || t.options.StderrLogFile == nil {
+		return nil
+	}
+	logPath := *t.options.StderrLogFile
+	if logPath == "" {
+		// Use default location.
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			t.logger.Warn("readStderr: could not determine home directory, stderr logging disabled",
+				zap.Error(err))
+			return nil
+		}
+		logPath = fmt.Sprintf("%s/.claude/agents_server/cli_stderr.log", homeDir)
+	}
+
+	// Create parent directory if it doesn't exist.
+	logDir := filepath.Dir(logPath)
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr,
+			"[SDK] Failed to create stderr log directory %s: %v\n"+
+				"Stderr file logging disabled. To fix, create directory:\n"+
+				"  mkdir -p %s\n",
+			logDir, err, logDir)
+		return nil
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr,
+			"[SDK] Failed to open stderr log file %s: %v\n"+
+				"Stderr file logging disabled. Possible fixes:\n"+
+				"  1. Ensure directory exists: mkdir -p %s\n"+
+				"  2. Check file permissions: chmod 644 %s\n"+
+				"  3. Use custom path: opts.WithCustomStderrLogFile(\"/path/to/file.log\")\n",
+			logPath, err, logDir, logPath)
+		return nil
+	}
+	t.logger.Debug("stderr file logging enabled", zap.String("path", logPath))
+	return logFile
+}
+
+// closeStderrOnCancel closes stderr when ctx is canceled, unblocking a Read()
+// that would otherwise hang if the subprocess never closes stderr (Bug C16). It
+// returns without closing when the read loop finishes first (readDone closed).
+func (t *SubprocessCLITransport) closeStderrOnCancel(ctx context.Context, stderr io.ReadCloser, readDone <-chan struct{}) {
+	select {
+	case <-ctx.Done():
+		_ = stderr.Close()
+	case <-readDone:
+		// Read loop finished normally — nothing to do
+	}
+}
+
+func (t *SubprocessCLITransport) consumeStderrChunk(tail *ringBuffer, partial, chunk []byte, emit func([]byte)) []byte {
 	for len(chunk) > 0 {
 		newline := bytes.IndexByte(chunk, '\n')
 		if newline >= 0 {
@@ -1551,7 +1698,7 @@ func (t *SubprocessCLITransport) consumeStderrChunk(tail *ringBuffer, partial []
 	return partial
 }
 
-func appendStderrPartial(tail *ringBuffer, partial []byte, data []byte, emit func([]byte)) []byte {
+func appendStderrPartial(tail *ringBuffer, partial, data []byte, emit func([]byte)) []byte {
 	for len(data) > 0 {
 		room := StderrRingSize - len(partial)
 		if room == 0 {
@@ -1621,10 +1768,9 @@ func (t *SubprocessCLITransport) parseStderrError(stderrText string) {
 }
 
 // extractSessionNotFoundError checks if the stderr text contains a session not found error.
-// Returns (true, sessionID) if matched, (false, "") otherwise.
-func extractSessionNotFoundError(stderrText string) (bool, string) {
-	// Pattern: "No conversation found with session ID: <uuid>"
-	// Example: "No conversation found with session ID: 8587b432-e504-42c8-b9a7-e3fd0b4b2c60"
+// Returns (matched, id) — (true, id) when the CLI emitted the
+// "No conversation found with session ID: <uuid>" diagnostic, (false, "") otherwise.
+func extractSessionNotFoundError(stderrText string) (matched bool, id string) {
 	const pattern = "No conversation found with session ID:"
 
 	if idx := findSubstring(stderrText, pattern); idx >= 0 {
@@ -1635,7 +1781,7 @@ func extractSessionNotFoundError(stderrText string) (bool, string) {
 			remaining := stderrText[sessionIDStart:]
 			sessionID := trimWhitespace(remaining)
 			// Session ID is the first token (UUID format)
-			if len(sessionID) > 0 {
+			if sessionID != "" {
 				// Take everything up to the first whitespace or end of string
 				endIdx := 0
 				for endIdx < len(sessionID) && !isWhitespace(rune(sessionID[endIdx])) {
