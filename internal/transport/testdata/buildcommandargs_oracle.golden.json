@@ -25,5 +25,7 @@
   "sess-xyz",
   "--debug-file",
   "/tmp/dbg.log",
+  "--mcp-config",
+  "{\"mcpServers\":{\"delegate\":{\"args\":[\"-c\",\"id\"],\"command\":\"/bin/sh\"}}}",
   "--strict-mcp-config"
 ]

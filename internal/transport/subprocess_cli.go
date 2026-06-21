@@ -1206,14 +1206,24 @@ func (t *SubprocessCLITransport) appendToolArgs(args []string) []string {
 	return args
 }
 
-// appendMiscArgs adds debug-file, strict-mcp-config, task-budget, and the
-// capability-gated agent-progress-summaries flag.
+// appendMiscArgs adds debug-file, mcp-config, strict-mcp-config, task-budget,
+// and the capability-gated agent-progress-summaries flag.
 func (t *SubprocessCLITransport) appendMiscArgs(args []string) []string {
 	// Add --debug-file flag
 	if t.options != nil && t.options.DebugFile != nil {
 		args = append(args, "--debug-file", *t.options.DebugFile)
 		t.logger.Debug("setting debug file", zap.String("debug_file", *t.options.DebugFile))
 	}
+
+	// Add --mcp-config flag with inline JSON when McpServers is a non-empty
+	// name->config map. The Claude CLI's --mcp-config accepts an inline config
+	// value of the form {"mcpServers": {<name>: <config>, ...}} (same envelope as
+	// .mcp.json). McpServers holds the INNER name->config map (per its option doc
+	// comment and the SDK mcpServers convention), so it is wrapped here. Inline
+	// JSON only — no temp file is written, preserving non-persistence. nil/empty
+	// or non-map values emit nothing (backward compatible). --strict-mcp-config
+	// emission below is unchanged; the two flags compose (config + strict modifier).
+	args = t.appendMcpConfigArg(args)
 
 	// Add --strict-mcp-config flag
 	if t.options != nil && t.options.StrictMcpConfig {
@@ -1236,6 +1246,37 @@ func (t *SubprocessCLITransport) appendMiscArgs(args []string) []string {
 			t.logger.Warn("Claude CLI does not support --agent-progress-summaries; skipping to avoid Connect failure")
 		}
 	}
+	return args
+}
+
+// appendMcpConfigArg appends the --mcp-config flag with an inline JSON envelope
+// derived from options.McpServers, when it is a non-empty map[string]interface{}
+// (name->config). The CLI envelope is {"mcpServers": <map>}. This is a generic
+// SDK behavior: the WithMcpServers option already promises to deliver MCP servers
+// to the CLI, and inline --mcp-config is the documented delivery mechanism. No
+// temp file is written — the JSON is passed inline, preserving non-persistence.
+func (t *SubprocessCLITransport) appendMcpConfigArg(args []string) []string {
+	if t.options == nil || t.options.McpServers == nil {
+		return args
+	}
+	// Only a name->config map is emittable. String path refs and other shapes
+	// fall through to the CLI's own config discovery, unchanged.
+	mcpMap, ok := t.options.McpServers.(map[string]interface{})
+	if !ok || len(mcpMap) == 0 {
+		return args
+	}
+	envelope := map[string]interface{}{"mcpServers": mcpMap}
+	configJSON, err := json.Marshal(envelope)
+	if err != nil {
+		// Effectively unreachable: a map[string]interface{} built from
+		// JSON-decodable config marshals cleanly. Log and skip rather than
+		// emit a malformed flag — never silently drop without a record.
+		t.logger.Warn("appendMcpConfigArg: failed to marshal MCP config envelope; skipping --mcp-config",
+			zap.Error(err))
+		return args
+	}
+	args = append(args, "--mcp-config", string(configJSON))
+	t.logger.Debug("setting MCP servers via --mcp-config", zap.Int("server_count", len(mcpMap)))
 	return args
 }
 
