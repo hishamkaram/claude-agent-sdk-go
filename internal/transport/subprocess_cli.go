@@ -196,8 +196,11 @@ func (t *SubprocessCLITransport) Connect(ctx context.Context) (err error) {
 	// Build command arguments
 	args := t.buildCommandArgs()
 
-	// Log the full command for debugging
-	t.logger.Debug("Claude CLI command", zap.String("cli_path", t.cliPath), zap.Strings("args", args))
+	// Log the command for debugging. Redact sensitive flag VALUES (inline
+	// --mcp-config JSON, delegate --sock path) — defense-in-depth so they
+	// never land in a Debug args dump. The actual spawned argv (args) is
+	// unchanged; redactArgsForLog returns a copy and never mutates args.
+	t.logger.Debug("Claude CLI command", zap.String("cli_path", t.cliPath), zap.Strings("args", redactArgsForLog(args)))
 
 	// Build environment variables map
 	envMap := t.buildEnvMap()
