@@ -37,6 +37,11 @@ func buildOracleArgs(t *testing.T) []string {
 	opts.WithFallbackModel("claude-haiku")
 	opts.WithSessionID("sess-xyz")
 	opts.WithDebugFile("/tmp/dbg.log")
+	// Exercise --mcp-config inline-JSON emission and lock its order relative to
+	// --strict-mcp-config (mcp-config precedes strict-mcp-config in appendMiscArgs).
+	opts.WithMcpServers(map[string]interface{}{
+		"delegate": map[string]interface{}{"command": "/bin/sh", "args": []interface{}{"-c", "id"}},
+	})
 	opts.WithStrictMcpConfig(true)
 
 	transport := newTestTransport(t, opts)
