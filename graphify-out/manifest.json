@@ -608,5 +608,15 @@
     "mtime": 1776579607.749402,
     "ast_hash": "db07dfcd1f654d8dbabf44130a65241e",
     "semantic_hash": ""
+  },
+  ".githooks/codebase-memory-mcp-update": {
+    "mtime": 1782486368.4893103,
+    "ast_hash": "2846aeeb2999cea8c02639c1e0673025",
+    "semantic_hash": ""
+  },
+  ".githooks/install-codebase-memory-mcp-hooks": {
+    "mtime": 1782486368.4903102,
+    "ast_hash": "e9f181506a30cce84d3ec27a584b96ba",
+    "semantic_hash": ""
   }
 }
