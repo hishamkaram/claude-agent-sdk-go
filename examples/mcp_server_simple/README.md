@@ -139,7 +139,7 @@ For more complex MCP servers with:
 - Real-time bidirectional communication
 - Multiple protocol versions
 
-See the `mcp_server_advanced` example or implement the `MCPServer` interface directly.
+Implement the `MCPServer` interface directly when the factory abstraction is not enough.
 
 ## Related Documentation
 
