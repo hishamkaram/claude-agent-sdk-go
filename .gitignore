@@ -46,3 +46,9 @@ claude_docs/
 
 # Repo-local dev tools (lefthook, etc.) — installed by `make hooks`
 /.bin/
+
+# Graphify local/cache artifacts
+graphify-out/cost.json
+graphify-out/cache/
+graphify-out/.rebuild.lock
+graphify-out/.pending_changes
