@@ -6,8 +6,7 @@ baselines for the SDK's message parser. Analogous to codex-agent-sdk-go's
 
 ## Regenerating fixtures
 
-A future Pass 3 task adds a `CLAUDE_SDK_PROBE=1` mode that writes each
-method's raw CLI response to this directory. Until that task lands, this
+Probe regeneration is not implemented in this repo yet. Until it lands, this
 directory is intentionally empty except for this README.
 
 When implemented, the regen flow will be:

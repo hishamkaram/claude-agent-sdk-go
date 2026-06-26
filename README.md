@@ -16,7 +16,7 @@ Claude Code exposes a powerful subprocess protocol over JSON lines, but consumin
 | **Typed Go API** | Work with `Message`, `ContentBlock`, and `HookEvent` structs instead of parsing raw JSON. The compiler catches protocol mismatches before runtime. |
 | **23 hook event callbacks** | Intercept tool use, permission requests, session lifecycle, notifications, and more — all with strongly-typed input/output structs and a consistent callback pattern. |
 | **One-shot and interactive modes** | `Query()` for fire-and-forget prompts that return a channel of messages. `Client` for multi-turn conversations with session persistence, resume, and fork. |
-| **Zero external runtime deps** | Only `golang.org/x/net` at build time. No CGO, no gRPC, no framework overhead. |
+| **Small dependency surface** | Uses stdlib subprocesses with focused support libraries for logging, text handling, and leak-aware tests. No CGO, no gRPC, no framework runtime. |
 
 ## Prerequisites
 
@@ -209,9 +209,10 @@ See `tests/coverage_matrix.md` for the per-method coverage table.
 - `make test` runs in `-short` mode (no Claude CLI needed); `make test-all` spawns real Claude processes and requires authentication
 - `v0.2.0` is retracted in go.mod — do not use that version
 - Two experimental option fields intentionally remain available for
-  forward-compatible callers even though the current `claude` CLI (2.1.132)
-  rejects the emitted flags; setting either will cause `Connect()` to fail with
-  an unknown-flag error. Surfaced by `TestFlags_UnsupportedFlagsAreDocumented`:
+  forward-compatible callers even though the recorded Claude CLI compatibility
+  target 2.1.132 rejects the emitted flags; setting either will cause
+  `Connect()` to fail with an unknown-flag error. Surfaced by
+  `TestFlags_UnsupportedFlagsAreDocumented`:
   - `WithAgentProgressSummaries` → `--agent-progress-summaries`
   - `WithSubagentExecution` → `--subagent-execution`
 

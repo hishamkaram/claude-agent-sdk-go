@@ -1,288 +1,83 @@
 # Test Suite Documentation
 
-This directory contains comprehensive integration tests, benchmarks, and test utilities for the Claude Agent SDK Go port.
+This directory contains the Claude Agent SDK's real-CLI integration suite, mock-CLI plumbing tests, benchmarks, coverage helpers, and fixture guidance.
 
-## Test Files
+## Test Layout
 
-### integration_test.go
-End-to-end integration tests that verify the full stack works correctly.
-
-**Query Integration Tests:**
-- `TestQueryIntegration_SimplePrompt` - Full end-to-end query with mock CLI
-- `TestQueryIntegration_WithOptions` - Query with all options configured
-- `TestQueryIntegration_ErrorHandling` - Error scenarios (empty prompt, invalid CLI path)
-- `TestQueryIntegration_ContextCancellation` - Cancellation mid-stream
-
-**Client Integration Tests:**
-- `TestClientIntegration_FullSession` - Complete client workflow (connect, query, receive, close)
-- `TestClientIntegration_MultipleQueries` - Multiple query/response cycles
-- `TestClientIntegration_WithPermissions` - Permission callback integration
-- `TestClientIntegration_WithHooks` - Hook callback integration
-
-**Protocol Tests:**
-- `TestControlProtocol_FullFlow` - Permission + hook + MCP flow (requires real CLI)
-- `TestStreamingWithControlMessages` - Mixed normal and control messages
-- `TestRealCLIIntegration` - Integration with actual Claude CLI (requires API key)
-
-### benchmarks_test.go
-Performance benchmarks for critical paths.
-
-**Query Benchmarks:**
-- `BenchmarkQuery_SimpleMessage` - Basic query performance
-- `BenchmarkQuery_WithAllocation` - Query with allocation tracking
-
-**Client Benchmarks:**
-- `BenchmarkClient_QueryCycle` - Complete client query cycle
-- `BenchmarkClient_Create` - Client creation overhead
-- `BenchmarkClient_Connect` - Client connection overhead
-
-**Message Parsing Benchmarks:**
-- `BenchmarkMessageParsing` - Sequential message parsing
-- `BenchmarkMessageParsing_Parallel` - Parallel message parsing
-- `BenchmarkContentBlockParsing` - Content block parsing
-
-**Utility Benchmarks:**
-- `BenchmarkOptionsBuilder` - Options builder pattern
-- `BenchmarkContextCreation` - Context creation overhead
-- `BenchmarkChannelOperations` - Channel send/receive
-- `BenchmarkMemoryAllocation` - Memory allocation patterns
-- `BenchmarkParseJSON` - Raw JSON parsing
-- `BenchmarkErrorCreation` - Error creation
-- `BenchmarkErrorWrapping` - Error wrapping
-
-### coverage_test.go
-Test coverage reporting and validation.
-
-**Coverage Tests:**
-- `TestCoverageReport` - Generates and prints coverage statistics
-- `TestCoverageHTML` - Generates HTML coverage report
-
-**Coverage Targets:**
-- Public API: >85% coverage
-- Internal packages: >80% coverage
-
-### test_helpers.go
-Test utilities and helper functions.
-
-**Mock CLI Helpers:**
-- `CreateMockCLI(behavior)` - Creates temporary mock CLI subprocess
-- `CreateMockCLIWithMessages(messages)` - Creates mock CLI with predefined output
-- `FindRealCLI()` - Locates actual Claude CLI for integration tests
-
-**Assertion Helpers:**
-- `AssertMessageType(msg, expected)` - Checks message type
-- `AssertMessageContent(msg, expectedText)` - Checks message content
-- `AssertNoGoroutineLeaks()` - Detects goroutine leaks
-
-**Collection Helpers:**
-- `CollectMessages(ctx, messages, timeout)` - Collects all messages with timeout
-- `CollectMessagesUntilResult()` - Collects until ResultMessage
-
-**Test Utilities:**
-- `RequireAPIKey()` - Skips test if CLAUDE_API_KEY not set
-- `CreateTestContext(timeout)` - Creates context with timeout
-- `MarshalJSON(v)` / `UnmarshalJSON(data, v)` - JSON helpers
-- `WithTimeout(timeout, fn)` - Runs function with timeout
+| File or pattern | Purpose |
+|-----------------|---------|
+| `integration_test.go`, build-tagged `integration_*_test.go` files except `integration_mock_test.go` | Real Claude CLI tests behind the `integration` Go build tag. These use `requireClaude`, `requireAuth`, and `requireRunTurns` guards from `integration_helpers_test.go`. |
+| `coldstart_realcli_integration_test.go`, `observer_realcli_integration_test.go` | Real-CLI latency and observer behavior suites behind the same `integration` tag. |
+| `integration_mock_test.go` | Shell-script fake CLI tests. These skip under `-short`, so `make test` excludes them and `make test-all` includes them. |
+| `benchmarks_test.go` | Benchmarks for query/client flows, message parsing, options, channels, JSON, and error paths. |
+| `coverage_test.go` | Text and HTML coverage report helpers. |
+| `test_helpers.go` | Mock CLI creation, message collection, assertion helpers, timeouts, CLI discovery, auth guards, and goroutine leak checks. |
+| `coverage_matrix.md` | Real-CLI public-surface coverage matrix and follow-up notes. |
+| `fixtures/` | Reserved for redacted real-CLI wire-shape baselines. |
 
 ## Running Tests
 
-### All Tests
+Run commands from the repository root.
+
 ```bash
-# Run all tests
-go test ./...
+# Fast unit loop; no Claude CLI required.
+make test
 
-# Run with coverage
-go test -cover ./...
-```
+# Unit tests plus mock-CLI tests and real-CLI integration tests.
+make test-all
 
-### Integration Tests Only
-```bash
-# Run integration tests
-go test -v ./tests/...
+# Real-CLI no-quota subset. Turn-driving tests skip unless CLAUDE_SDK_RUN_TURNS=1.
+make test-integration
 
-# Skip long-running tests
-go test -short ./tests/...
-```
+# Full real-CLI suite, including tests that drive model turns and spend tokens.
+CLAUDE_SDK_RUN_TURNS=1 make test-integration-quota
 
-### Benchmarks
-```bash
-# Run all benchmarks
-go test -bench=. ./tests/...
+# Raw integration command used by the Makefile target.
+go test -tags=integration -race -count=1 -p 1 ./tests/... -timeout=300s
 
-# Run specific benchmark
-go test -bench=BenchmarkQuery ./tests/...
+# Five-count stability check before shipping a new real-CLI test.
+go test -tags=integration -race -count=5 -p 1 ./tests/... -timeout=1800s
 
-# With memory profiling
+# Benchmarks.
+make bench
 go test -bench=. -benchmem ./tests/...
-```
 
-### Coverage Reports
-```bash
-# Generate text coverage report
+# Coverage report.
+make coverage
 go test -run TestCoverageReport ./tests/...
-
-# Generate HTML coverage report
-go test -run TestCoverageHTML ./tests/...
-open coverage.html
 ```
 
-### Real CLI Integration Tests
-These tests require the actual Claude CLI and API key:
+## Environment Gates
 
-```bash
-# Set API key
-export CLAUDE_API_KEY=your_api_key
+Real-CLI tests skip rather than fail when required local state is missing:
 
-# Run real CLI tests
-go test -v -run TestRealCLIIntegration ./tests/...
-go test -v -run TestControlProtocol_FullFlow ./tests/...
-```
+| Variable or state | Purpose |
+|-------------------|---------|
+| `CLAUDE_CLI_PATH` | Optional absolute path override for the `claude` binary. |
+| `ANTHROPIC_API_KEY`, `CLAUDE_API_KEY`, or `~/.claude/.credentials.json` | Auth source checked by `requireAuth`. |
+| `CLAUDE_SDK_RUN_TURNS=1` | Opts into tests that drive a full model turn and spend tokens. |
 
-## Test Design Principles
+`CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK=1` is available to skip CLI version validation in SDK setup, but it does not bypass the test auth or run-turn guards above.
 
-### 1. Mock CLI for Speed
-Most integration tests use mock CLI subprocess to avoid network calls and ensure fast, deterministic tests.
+## Design Principles
 
-### 2. Goroutine Leak Detection
-Each integration test includes goroutine leak detection to catch resource cleanup issues:
-```go
-checkGoroutines := AssertNoGoroutineLeaks(t)
-defer checkGoroutines()
-```
-
-### 3. Context Timeouts
-All tests use contexts with timeouts to prevent hanging:
-```go
-ctx, cancel := CreateTestContext(t, 30*time.Second)
-defer cancel()
-```
-
-### 4. Graceful Degradation
-Tests gracefully handle missing dependencies (Claude CLI, API key) by skipping rather than failing.
-
-### 5. Parallel Execution
-Tests are designed to run in parallel when possible using `t.Parallel()`.
-
-## Test Coverage
-
-### Current Coverage
-- **Public API:** >85% (target)
-- **Internal packages:** >80% (target)
-- **Overall:** >85% (target)
-
-### Coverage by Package
-```
-github.com/hishamkaram/claude-agent-sdk-go            - Public API
-github.com/hishamkaram/claude-agent-sdk-go/internal   - Core logic
-github.com/hishamkaram/claude-agent-sdk-go/internal/transport - Transport layer
-github.com/hishamkaram/claude-agent-sdk-go/internal/types - Type definitions
-```
-
-## Mock CLI Behavior
-
-The mock CLI helper supports different behaviors:
-
-### echo
-Simple echo behavior - reads stdin and writes to stdout
-```go
-mockCLI, _ := CreateMockCLI(t, "echo")
-```
-
-### simple-response
-Returns predefined messages
-```go
-mockCLI, _ := CreateMockCLI(t, "simple-response")
-```
-
-### control-response
-Returns control protocol responses
-```go
-mockCLI, _ := CreateMockCLI(t, "control-response")
-```
-
-### Custom messages
-Specify exact messages to output
-```go
-messages := []string{
-    `{"type":"assistant","content":[{"type":"text","text":"Hello"}],"model":"claude-3"}`,
-    `{"type":"result","output":"success"}`,
-}
-mockCLI, _ := CreateMockCLIWithMessages(t, messages)
-```
-
-## Continuous Integration
-
-Tests are designed to run in CI/CD pipelines:
-
-```yaml
-# Example GitHub Actions
-- name: Run Tests
-  run: go test -short -cover ./...
-
-- name: Run Benchmarks
-  run: go test -bench=. -benchtime=100ms ./tests/...
-```
-
-## Performance Targets
-
-### Query Performance
-- Simple query: <100ms (excluding CLI startup)
-- CLI subprocess startup: 200-500ms (Node.js overhead)
-- Message parsing: <1ms per message
-
-### Memory Usage
-- Typical session: <50MB
-- No memory leaks in long-running sessions
-
-### Goroutine Management
-- Clean shutdown with no goroutine leaks
-- Proper context cancellation handling
+- `make test` stays cheap and deterministic: it runs `go test -race -short -count=1 -p 4 ./...`.
+- Mock-CLI tests verify SDK plumbing only; real-CLI tests exist to catch wire-shape drift between the SDK and the actual `claude` subprocess.
+- Real-CLI tests use explicit build tags and guard helpers so missing CLI/auth state is a skip, not a surprise local failure.
+- Tests use context timeouts and goroutine leak checks to keep subprocess lifecycle issues visible.
+- Fixture files must be redacted before commit; do not store session IDs, home-directory paths, API keys, OAuth tokens, or raw user prompts.
 
 ## Troubleshooting
 
-### Tests hang
-- Check for goroutine leaks: `go test -timeout 30s`
-- Enable verbose logging: `go test -v`
-- Check context cancellation
+| Symptom | Check |
+|---------|-------|
+| Real-CLI tests are skipped | Run `claude --version`, set `CLAUDE_CLI_PATH` if needed, and confirm one supported auth source is present. |
+| Turn-driving tests are skipped | Set `CLAUDE_SDK_RUN_TURNS=1` and use `make test-integration-quota`. |
+| Tests hang | Re-run with a shorter `-timeout`, inspect subprocess cleanup, and check goroutine leak output. |
+| Benchmark results vary | Use `-benchtime=1s` and `-count=5`; avoid running benchmark comparisons on a busy machine. |
 
-### Coverage too low
-- Run coverage report: `go test -run TestCoverageReport`
-- Generate HTML report: `go test -run TestCoverageHTML`
-- Focus on untested code paths
+## References
 
-### Integration tests fail
-- Check Claude CLI installation: `which claude`
-- Set API key: `export CLAUDE_API_KEY=...`
-- Check network connectivity
-
-### Benchmark variance
-- Run with longer benchtime: `-benchtime=1s`
-- Run multiple times: `-count=5`
-- Check CPU throttling / background processes
-
-## Contributing
-
-When adding new tests:
-
-1. **Integration tests** - Add to `integration_test.go`
-   - Use mock CLI when possible
-   - Include goroutine leak detection
-   - Use timeouts
-
-2. **Benchmarks** - Add to `benchmarks_test.go`
-   - Focus on critical paths
-   - Include memory profiling with `b.ReportAllocs()`
-
-3. **Helpers** - Add to `test_helpers.go`
-   - Document expected behavior
-   - Handle errors gracefully
-
-4. **Coverage** - Maintain >80% coverage
-   - Run coverage report before PR
-   - Add tests for uncovered paths
-
-## Reference
-
-- Main implementation: `/internal/`
-- Python SDK reference: https://github.com/anthropics/claude-agent-sdk-python
-- Implementation plan: `/GO_PORT_PLAN.md`
+- Main SDK tests live at the repository root and under `internal/`.
+- Public surface coverage lives in `tests/coverage_matrix.md`.
+- Fixture policy lives in `tests/fixtures/README.md`.
