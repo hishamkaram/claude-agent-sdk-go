@@ -64,74 +64,102 @@ import (
 //   - A read-only channel of Message types
 //   - An error if connection or initialization fails
 func Query(ctx context.Context, prompt string, options *types.ClaudeAgentOptions) (<-chan types.Message, error) {
-	// Use default options if not provided
 	if options == nil {
 		options = types.NewClaudeAgentOptions()
 	}
-
-	// Validate prompt
 	if prompt == "" {
 		return nil, fmt.Errorf("prompt cannot be empty")
 	}
 
-	// Find Claude CLI path
+	runtime, err := prepareQueryRuntime(ctx, options)
+	if err != nil {
+		return nil, err
+	}
+
+	transportInst := transport.NewSubprocessCLITransport(runtime.cliPath, runtime.cwd, runtime.env, runtime.logger, runtime.resumeID, options)
+	if connectErr := transportInst.Connect(ctx); connectErr != nil {
+		runtime.cleanupSessionStore()
+		return nil, types.NewCLIConnectionErrorWithCause("failed to connect to Claude CLI", connectErr)
+	}
+
+	queryHandler := internal.NewQuery(ctx, transportInst, options, runtime.logger, false)
+	if startErr := queryHandler.Start(ctx); startErr != nil {
+		_ = transportInst.Close(ctx)
+		runtime.cleanupSessionStore()
+		return nil, startErr
+	}
+
+	if err := sendQueryPrompt(ctx, queryHandler, transportInst, prompt, runtime.resumeID); err != nil {
+		return nil, err
+	}
+
+	outputChan := make(chan types.Message, 10)
+	go forwardQueryMessages(ctx, queryHandler, transportInst, runtime.cleanupSessionStore, outputChan)
+
+	return outputChan, nil
+}
+
+type queryRuntime struct {
+	cliPath             string
+	cwd                 string
+	env                 map[string]string
+	logger              *log.Logger
+	resumeID            string
+	cleanupSessionStore func()
+}
+
+func prepareQueryRuntime(ctx context.Context, options *types.ClaudeAgentOptions) (*queryRuntime, error) {
 	cliPath, err := resolveCLIPath(ctx, options)
 	if err != nil {
 		return nil, err
 	}
-
-	// Determine working directory
 	cwd := ""
 	if options.CWD != nil {
 		cwd = *options.CWD
 	}
-
-	// Create transport with --print flag for non-streaming mode
 	env := copyOptionsEnv(options)
-
-	// Create logger with verbosity from options
-	verbose := options != nil && options.Verbose
-	logger := log.NewLogger(verbose)
-
-	// Determine resume session ID from options
+	logger := log.NewLogger(options != nil && options.Verbose)
 	resumeID := ""
 	if options.Resume != nil && *options.Resume != "" {
 		resumeID = *options.Resume
 	}
-
 	cleanupSessionStore, err := prepareSessionStoreRuntime(ctx, options, cwd, resumeID, env)
 	if err != nil {
 		return nil, err
 	}
+	return &queryRuntime{
+		cliPath:             cliPath,
+		cwd:                 cwd,
+		env:                 env,
+		logger:              logger,
+		resumeID:            resumeID,
+		cleanupSessionStore: cleanupSessionStore,
+	}, nil
+}
 
-	// Create subprocess transport with optional resume and options
-	transportInst := transport.NewSubprocessCLITransport(cliPath, cwd, env, logger, resumeID, options)
-
-	// Connect to CLI
-	if connectErr := transportInst.Connect(ctx); connectErr != nil {
-		cleanupSessionStore()
-		return nil, types.NewCLIConnectionErrorWithCause("failed to connect to Claude CLI", connectErr)
-	}
-
-	// Create query handler (non-streaming mode)
-	queryHandler := internal.NewQuery(ctx, transportInst, options, logger, false)
-
-	// Start message processing
-	if startErr := queryHandler.Start(ctx); startErr != nil {
+func sendQueryPrompt(
+	ctx context.Context,
+	queryHandler *internal.Query,
+	transportInst *transport.SubprocessCLITransport,
+	prompt string,
+	resumeID string,
+) error {
+	data, err := json.Marshal(buildQueryMessage(prompt, querySessionID(resumeID)))
+	if err != nil {
+		_ = queryHandler.Stop(ctx)
 		_ = transportInst.Close(ctx)
-		cleanupSessionStore()
-		return nil, startErr
+		return types.NewControlProtocolErrorWithCause("failed to marshal query", err)
 	}
-
-	// Use resume ID as session ID, or default if not resuming
-	sessionID := "default-session"
-	if resumeID != "" {
-		sessionID = resumeID
+	if err := transportInst.Write(ctx, string(data)); err != nil {
+		_ = queryHandler.Stop(ctx)
+		_ = transportInst.Close(ctx)
+		return err
 	}
+	return nil
+}
 
-	// Build the query message to send to CLI
-	// Format matches Python SDK: type, message{role,content}, parent_tool_use_id, session_id
-	queryMsg := map[string]interface{}{
+func buildQueryMessage(prompt, sessionID string) map[string]interface{} {
+	return map[string]interface{}{
 		"type": "user",
 		"message": map[string]interface{}{
 			"role":    "user",
@@ -140,28 +168,13 @@ func Query(ctx context.Context, prompt string, options *types.ClaudeAgentOptions
 		"parent_tool_use_id": nil,
 		"session_id":         sessionID,
 	}
+}
 
-	// Marshal and send
-	data, err := json.Marshal(queryMsg)
-	if err != nil {
-		_ = queryHandler.Stop(ctx)
-		_ = transportInst.Close(ctx)
-		return nil, types.NewControlProtocolErrorWithCause("failed to marshal query", err)
+func querySessionID(resumeID string) string {
+	if resumeID != "" {
+		return resumeID
 	}
-
-	if err := transportInst.Write(ctx, string(data)); err != nil {
-		_ = queryHandler.Stop(ctx)
-		_ = transportInst.Close(ctx)
-		return nil, err
-	}
-
-	// Create output channel for user
-	outputChan := make(chan types.Message, 10)
-
-	// Start goroutine to read messages and forward to output channel
-	go forwardQueryMessages(ctx, queryHandler, transportInst, cleanupSessionStore, outputChan)
-
-	return outputChan, nil
+	return "default-session"
 }
 
 // resolveCLIPath returns the configured CLI path, or discovers it on PATH.

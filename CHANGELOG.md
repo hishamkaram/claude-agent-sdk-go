@@ -4,6 +4,11 @@ All notable changes to the Claude Agent SDK for Go are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Reorganized public client, query, options, and message type implementation
+  across smaller domain files for maintainability. This is intended as a
+  backward-compatible source-layout change with no public API behavior change.
+
 ### Added
 - Real-CLI integration test suite under `tests/integration_*_test.go`,
   gated by the `integration` Go build tag. Covers every public `Client`

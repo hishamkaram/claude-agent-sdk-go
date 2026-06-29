@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -108,19 +109,16 @@ func TestQuery_WithOptions(t *testing.T) {
 	}
 }
 
-// TestQuery_Integration is an integration test that requires Claude CLI to be installed.
-// It's skipped by default but can be run with: go test -tags=integration
+// TestQuery_Integration is a live, token-spending test that requires Claude CLI
+// auth. It is skipped by default; set CLAUDE_SDK_RUN_TURNS=1 to opt in.
 func TestQuery_Integration(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
-
-	// Check if CLAUDE_API_KEY is set
-	// Note: We don't use os.Getenv here to avoid import, but in real tests you would
-	// if apiKey := os.Getenv("CLAUDE_API_KEY"); apiKey == "" {
-	// 	t.Skip("CLAUDE_API_KEY not set")
-	// }
+	if os.Getenv("CLAUDE_SDK_RUN_TURNS") != "1" {
+		t.Skip("CLAUDE_SDK_RUN_TURNS=1 not set - skipping live Claude query test")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
