@@ -1,16 +1,16 @@
 # Graph Report - claude-agent-sdk-go  (2026-06-29)
 
 ## Corpus Check
-- 202 files · ~148,931 words
+- 202 files · ~148,970 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 2459 nodes · 5132 edges · 195 communities (159 shown, 36 thin omitted)
-- Extraction: 72% EXTRACTED · 28% INFERRED · 0% AMBIGUOUS · INFERRED: 1441 edges (avg confidence: 0.8)
+- 2470 nodes · 5137 edges · 184 communities (154 shown, 30 thin omitted)
+- Extraction: 72% EXTRACTED · 28% INFERRED · 0% AMBIGUOUS · INFERRED: 1446 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b95f5b67`
+- Built from commit: `e0b5e697`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -181,23 +181,12 @@
 - [[_COMMUNITY_Community 175|Community 175]]
 - [[_COMMUNITY_Community 176|Community 176]]
 - [[_COMMUNITY_Community 177|Community 177]]
-- [[_COMMUNITY_Community 178|Community 178]]
-- [[_COMMUNITY_Community 179|Community 179]]
-- [[_COMMUNITY_Community 180|Community 180]]
 - [[_COMMUNITY_Community 181|Community 181]]
 - [[_COMMUNITY_Community 182|Community 182]]
 - [[_COMMUNITY_Community 183|Community 183]]
-- [[_COMMUNITY_Community 184|Community 184]]
-- [[_COMMUNITY_Community 185|Community 185]]
-- [[_COMMUNITY_Community 186|Community 186]]
-- [[_COMMUNITY_Community 187|Community 187]]
 - [[_COMMUNITY_Community 188|Community 188]]
 - [[_COMMUNITY_Community 189|Community 189]]
-- [[_COMMUNITY_Community 190|Community 190]]
 - [[_COMMUNITY_Community 191|Community 191]]
-- [[_COMMUNITY_Community 192|Community 192]]
-- [[_COMMUNITY_Community 193|Community 193]]
-- [[_COMMUNITY_Community 194|Community 194]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `NewClaudeAgentOptions()` - 227 edges
@@ -218,51 +207,51 @@
   examples/with_hooks/main.go → types/options.go
 - `main()` --calls--> `NewClaudeAgentOptions()`  [INFERRED]
   examples/with_permissions/main.go → types/options.go
-- `main()` --calls--> `NewClaudeAgentOptions()`  [INFERRED]
-  examples/mcp_server_simple/main.go → types/options.go
-- `newCalculatorOptions()` --calls--> `NewClaudeAgentOptions()`  [INFERRED]
-  examples/mcp_server_simple/main.go → types/options.go
+- `TestClient_ConnectDoesNotBlockIsConnected()` --calls--> `NewClient()`  [INFERRED]
+  client_connect_close_test.go → client.go
+- `TestClient_ConnectDoesNotBlockIsConnected()` --calls--> `WithTimeout()`  [INFERRED]
+  client_connect_close_test.go → tests/test_helpers.go
 
 ## Import Cycles
 - None detected.
 
-## Communities (195 total, 36 thin omitted)
+## Communities (184 total, 30 thin omitted)
 
 ### Community 0 - "Community 0"
-Cohesion: 0.24
-Nodes (15): main(), NewClaudeAgentOptions(), T, TestNewClaudeAgentOptions_PhaseCDefaults(), TestPhaseCBuilderChaining(), TestWithEffort(), TestWithEnableFileCheckpointing(), TestWithFallbackModel() (+7 more)
+Cohesion: 0.09
+Nodes (41): T, main(), TestBuildCommandArgs_Agents(), TestBuildCommandArgs_AgentsWithSubagentExecution(), TestBuildCommandArgs_SubagentExecution(), NewClaudeAgentOptions(), T, TestNewClaudeAgentOptions_PhaseCDefaults() (+33 more)
 
 ### Community 1 - "Community 1"
-Cohesion: 0.15
-Nodes (18): SessionStoreBackend, getSessionInfoDir(), GetSessionInfoOptions, Context, GetSessionInfoOptions, ListSessionsOptions, ListSubagentsOptions, SDKSessionInfo (+10 more)
+Cohesion: 0.12
+Nodes (25): SessionStoreBackend, GetSessionMessagesOptions, applyMessageWindow(), getSessionMessagesDir(), getSessionMessagesLimit(), getSessionMessagesOffset(), GetSessionMessagesOptions, SessionMessage (+17 more)
 
 ### Community 2 - "Community 2"
 Cohesion: 0.06
-Nodes (72): HistoryBackend, ForkSessionOptions, ForkSessionResult, NewLocalTranscriptBackend(), RenameSessionOptions, ForkSession(), GetSessionInfo(), GetSessionMessages() (+64 more)
+Nodes (71): HistoryBackend, ForkSessionOptions, ForkSessionResult, RenameSessionOptions, ForkSession(), GetSessionInfo(), GetSessionMessages(), GetSubagentMessages() (+63 more)
 
 ### Community 3 - "Community 3"
-Cohesion: 0.21
-Nodes (11): LocalTranscriptBackend, transcriptEntry, applyTranscriptEntryToInfo(), Context, GetSessionInfoOptions, RawMessage, SDKSessionInfo, cloneRaw() (+3 more)
+Cohesion: 0.12
+Nodes (23): transcriptEntry, applyTranscriptEntryToInfo(), ListSessionsOptions, RawMessage, SDKSessionInfo, applySessionWindow(), buildParentChain(), cloneRaw() (+15 more)
 
 ### Community 4 - "Community 4"
-Cohesion: 0.11
-Nodes (21): Bool, CancelFunc, CanUseToolFunc, Client, InitializeResult, Logger, Mutex, Query (+13 more)
+Cohesion: 0.12
+Nodes (18): Bool, CancelFunc, CanUseToolFunc, ClaudeAgentOptions, HookCallbackFunc, HookEvent, HookMatcher, Query (+10 more)
 
 ### Community 5 - "Community 5"
 Cohesion: 0.18
 Nodes (14): clientTestTransport, Context, Message, Mutex, T, TestClient_CloseIdempotent(), TestClient_ConnectBeforeQuery(), TestClient_ContextCancellation() (+6 more)
 
 ### Community 6 - "Community 6"
-Cohesion: 0.15
-Nodes (7): Context, Client, Context, CLIConnectionError, ControlProtocolError, NewCLIConnectionError(), NewControlProtocolErrorWithCause()
+Cohesion: 0.13
+Nodes (10): Context, Client, Context, CLIConnectionError, ControlProtocolError, TestCLIConnectionError_Display(), TestControlProtocolError_Display(), NewCLIConnectionError() (+2 more)
 
 ### Community 7 - "Community 7"
-Cohesion: 0.28
-Nodes (8): ListSubagentsOptions, SubagentInfo, applySubagentWindow(), ListSubagentsOptions, SubagentInfo, listSubagentsDir(), listSubagentsLimit(), listSubagentsOffset()
+Cohesion: 0.17
+Nodes (13): LocalTranscriptBackend, Context, GetSessionInfoOptions, ListSubagentsOptions, SubagentInfo, applySubagentWindow(), getSessionInfoDir(), GetSessionInfoOptions (+5 more)
 
 ### Community 8 - "Community 8"
 Cohesion: 0.04
-Nodes (3): OutputFormat, StderrCallbackFunc, ClaudeAgentOptions
+Nodes (3): ProcessSpawner, StderrCallbackFunc, ClaudeAgentOptions
 
 ### Community 9 - "Community 9"
 Cohesion: 0.13
@@ -273,16 +262,16 @@ Cohesion: 0.05
 Nodes (42): Checklist for Migration, Common Patterns, Configuration Migration, Error Handling, Further Reading, Go, Go, Go (+34 more)
 
 ### Community 11 - "Community 11"
-Cohesion: 0.36
-Nodes (7): BenchmarkClient_Create(), B, T, TestEnableChannel_BeforeConnect(), TestGetContextUsage_BeforeConnect(), TestGetSettings_BeforeConnect(), TestReloadPlugins_BeforeConnect()
+Cohesion: 0.26
+Nodes (11): BenchmarkClient_Create(), B, T, TestEnableChannel_BeforeConnect(), TestGetContextUsage_BeforeConnect(), TestGetSettings_BeforeConnect(), TestReloadPlugins_BeforeConnect(), T (+3 more)
 
 ### Community 12 - "Community 12"
 Cohesion: 0.08
-Nodes (36): T, Reader, T, T, Scanner, TestBuildEnvMap(), TestExpandHome_AllBranches(), TestGetExitCode() (+28 more)
+Nodes (36): T, Reader, T, B, T, Scanner, TestExpandHome_AllBranches(), TestGetExitCode() (+28 more)
 
 ### Community 13 - "Community 13"
-Cohesion: 0.08
-Nodes (41): AssistantMessage, ClaudeAgentOptions, calculatorTool(), main(), newCalculatorOptions(), newCalculatorServer(), numberPairInputSchema(), printAssistantMessage() (+33 more)
+Cohesion: 0.32
+Nodes (15): NewSDKMCPServer(), T, TestNewSDKMCPServer_Errors(), TestNewSDKMCPServer_Success(), TestSDKMCPServer_HandleCallTool_MissingParams(), TestSDKMCPServer_HandleCallTool_StringResult(), TestSDKMCPServer_HandleCallTool_Success(), TestSDKMCPServer_HandleCallTool_ToolNotFound() (+7 more)
 
 ### Community 14 - "Community 14"
 Cohesion: 0.19
@@ -290,23 +279,23 @@ Nodes (15): fakeListStore, fakeSessionStore, fakeSummaryStore, Context, ListSess
 
 ### Community 15 - "Community 15"
 Cohesion: 0.06
-Nodes (70): B, BenchmarkParseContentBlock(), BenchmarkParseContentBlocks(), BenchmarkParseMessage_Assistant(), BenchmarkParseMessage_AssistantComplex(), BenchmarkParseMessage_User(), boolPtr(), T (+62 more)
+Nodes (70): BenchmarkParseContentBlock(), BenchmarkParseContentBlocks(), BenchmarkParseMessage_Assistant(), BenchmarkParseMessage_AssistantComplex(), BenchmarkParseMessage_User(), B, boolPtr(), T (+62 more)
 
 ### Community 16 - "Community 16"
 Cohesion: 0.25
 Nodes (7): Design Principles, Environment Gates, References, Running Tests, Test Layout, Test Suite Documentation, Troubleshooting
 
 ### Community 17 - "Community 17"
-Cohesion: 0.27
-Nodes (11): failingMockTransport, Context, T, newFailingMockTransport(), TestSendControlRequest_NonStreaming(), TestSendControlRequest_WriteError(), TestSendErrorResponse_WriteError(), TestSendErrorResponse_WritesJSON() (+3 more)
+Cohesion: 0.26
+Nodes (6): formatAsJSON(), formatMapAsJSON(), marshalToJSON(), SDKMCPServer, Tool, ToolHandler
 
 ### Community 18 - "Community 18"
-Cohesion: 0.22
-Nodes (17): Context, T, T, expandHome(), FindCLI(), findCLIUncached(), resetFindCLICache(), resetFindCLICacheForTest() (+9 more)
+Cohesion: 0.13
+Nodes (27): Context, T, T, BenchmarkQuery(), B, T, TestQuery_CLINotFound(), TestQuery_ContextCancellation() (+19 more)
 
 ### Community 19 - "Community 19"
 Cohesion: 0.14
-Nodes (14): Client, Context, Query, sendControlNoResponse(), decodeControlResponse(), Client, Context, sendControlResponse() (+6 more)
+Nodes (14): Client, Context, PermissionMode, Query, sendControlNoResponse(), decodeControlResponse(), Client, Context (+6 more)
 
 ### Community 20 - "Community 20"
 Cohesion: 0.06
@@ -314,23 +303,19 @@ Nodes (35): [0.1.0] - 2025-10-18, [0.2.2] - 2025-10-19, [0.2.9] - 2025-12-07, Ac
 
 ### Community 22 - "Community 22"
 Cohesion: 0.18
-Nodes (11): Field, controlRequestLogFields(), permissionResultLogFields(), applyAllowResponse(), applyDenyResponse(), Context, Query, matchesToolName() (+3 more)
+Nodes (12): Field, controlRequestLogFields(), permissionResultLogFields(), applyAllowResponse(), applyDenyResponse(), Context, Query, ToolPermissionContext (+4 more)
 
 ### Community 23 - "Community 23"
 Cohesion: 0.21
-Nodes (16): EffortLevel, T, M, TestBuildCommandArgs_Effort(), TestBuildCommandArgs_FallbackModel(), TestBuildCommandArgs_McpConfig(), TestBuildCommandArgs_PersistSession(), TestBuildCommandArgs_SessionID() (+8 more)
+Nodes (14): AssistantMessage, ClaudeAgentOptions, Message, ResultMessage, calculatorTool(), main(), newCalculatorOptions(), newCalculatorServer() (+6 more)
 
 ### Community 24 - "Community 24"
 Cohesion: 0.25
-Nodes (5): Context, SpawnedProcess, SubprocessCLITransport, validateSpawnedPipes(), NewCLIConnectionErrorWithCause()
+Nodes (4): Context, SpawnedProcess, SubprocessCLITransport, validateSpawnedPipes()
 
 ### Community 25 - "Community 25"
-Cohesion: 0.12
-Nodes (23): BashToolConfig, CanUseToolFunc, ComputerToolConfig, EffortLevel, HookCallbackFunc, HookMatcher, McpHTTPServerConfig, McpSdkServerConfig (+15 more)
-
-### Community 26 - "Community 26"
-Cohesion: 0.20
-Nodes (7): Context, Duration, SubprocessCLITransport, Context, ReadCloser, ProcessError, waitForProcDone()
+Cohesion: 0.11
+Nodes (24): SystemPromptPreset, BashToolConfig, CanUseToolFunc, ComputerToolConfig, EffortLevel, HookCallbackFunc, HookMatcher, McpHTTPServerConfig (+16 more)
 
 ### Community 27 - "Community 27"
 Cohesion: 0.08
@@ -345,12 +330,12 @@ Cohesion: 0.23
 Nodes (22): T, TestClient_Close_DisconnectsCleanly(), TestClient_EnableChannel(), TestClient_GetContextUsage(), TestClient_GetSettings(), TestClient_InitResult(), TestClient_Interrupt_DuringStream(), TestClient_IsConnected() (+14 more)
 
 ### Community 30 - "Community 30"
-Cohesion: 0.32
-Nodes (14): contains(), T, TestCLIConnectionError_Display(), TestControlProtocolError_Display(), TestIsCheckers_ReturnsFalseForNil(), TestJSONDecodeErrorWithCause_RawAndCause(), TestJSONDecodeErrorWithRaw_Truncation(), TestMessageParseErrorWithCause() (+6 more)
+Cohesion: 0.14
+Nodes (15): T, TestIsCheckers_ReturnsFalseForNil(), TestJSONDecodeErrorWithCause_RawAndCause(), TestJSONDecodeErrorWithRaw_Truncation(), TestPermissionDeniedError_ToolAndReason(), TestProcessErrorWithCauseAndCode(), TestProcessErrorWithCode(), TestSentinelErrors() (+7 more)
 
 ### Community 31 - "Community 31"
-Cohesion: 0.16
-Nodes (25): ClaudeAgentOptions, T, ReadCloser, T, WriteCloser, mockSpawnedProcessNilPipe, newMockSpawnedProcess(), newMockTransportWithProcess() (+17 more)
+Cohesion: 0.12
+Nodes (35): T, ClaudeAgentOptions, Duration, SubprocessCLITransport, T, ReadCloser, T, WriteCloser (+27 more)
 
 ### Community 32 - "Community 32"
 Cohesion: 0.16
@@ -361,36 +346,36 @@ Cohesion: 0.10
 Nodes (20): AsyncHookJSONOutput, ControlErrorResponse, ControlResponse, HookContext, HookEvent, HookSpecificOutput, MCPServer, PermissionResultDeny (+12 more)
 
 ### Community 34 - "Community 34"
-Cohesion: 0.14
+Cohesion: 0.15
 Nodes (6): AgentInfo, Client, InitializeResult, ModelInfo, SlashCommand, TransportHealth
 
 ### Community 35 - "Community 35"
-Cohesion: 0.17
-Nodes (17): T, Context, T, TestBuildCommandArgs_GatesExperimentalFlags(), TestCapabilityFunctions_AbsentFlags(), CheckCLIVersion(), GetCLIVersion(), ParseSemanticVersion() (+9 more)
+Cohesion: 0.26
+Nodes (11): T, Context, TestCapabilityFunctions_AbsentFlags(), CheckCLIVersion(), GetCLIVersion(), ParseSemanticVersion(), SupportsAgentProgressSummaries(), SupportsSubagentExecution() (+3 more)
 
 ### Community 36 - "Community 36"
-Cohesion: 0.15
-Nodes (8): CLINotFoundError, TestAllErrorTypes_Constructor_Error_Is_Unwrap_As(), NewCLINotFoundError(), NewCLINotFoundErrorWithCause(), NewSessionNotFoundError(), NewSessionNotFoundErrorWithCause(), TestCLINotFoundError(), SessionNotFoundError
+Cohesion: 0.28
+Nodes (12): TestClient_Close_WaitsForReceiveGoroutines(), TestClient_CloseDuringConnect(), TestClient_CloseNotConnectingNoop(), TestClient_ConnectDoesNotBlockIsConnected(), TestClient_ConnectRejectsDoubleConnecting(), TestClient_ConnectTransportClosedClientReturnsClientCause(), TestClient_ReceiveResponse_GoroutineTracked(), TestClientCloseReturnsFirstShutdownError() (+4 more)
 
 ### Community 37 - "Community 37"
 Cohesion: 0.12
 Nodes (17): Advanced Usage, Comparison with Manual Implementation, Creating an MCP Server, Error Handling, Handler Function, How the Factory Function Works, Key API Details, Key Features (+9 more)
 
 ### Community 38 - "Community 38"
-Cohesion: 0.21
-Nodes (10): File, ringBuffer, ReadCloser, Context, ReadCloser, ringBuffer, SubprocessCLITransport, captureStderrTail() (+2 more)
+Cohesion: 0.22
+Nodes (11): File, ReadCloser, Context, ReadCloser, ringBuffer, SubprocessCLITransport, appendStderrPartial(), extractSessionNotFoundError() (+3 more)
 
 ### Community 39 - "Community 39"
 Cohesion: 0.29
 Nodes (8): Duration, NopObserver, T, TestNopObserver_SatisfiesInterfaceAndIsInert(), TestObserverOrNop(), TestRecordingObserver_EmbeddingOverridesSubset(), TestWithObserver_SetsField(), recordingObserver
 
 ### Community 40 - "Community 40"
-Cohesion: 0.30
-Nodes (12): AgentInfo, CompactMetadata, FailedFile, InitializeResult, ModelInfo, ModelUsage, PermissionDenial, PersistedFile (+4 more)
+Cohesion: 0.14
+Nodes (16): FailedFile, PersistedFile, AgentInfo, FailedFile, FilesPersistedEvent, InitializeResult, Message, T (+8 more)
 
 ### Community 41 - "Community 41"
-Cohesion: 0.16
-Nodes (8): Context, Query, SystemMessage, Context, Query, SystemMessage, mcpServerErrorResponse(), NewControlProtocolError()
+Cohesion: 0.21
+Nodes (6): Context, Query, SystemMessage, Context, Query, SystemMessage
 
 ### Community 42 - "Community 42"
 Cohesion: 0.06
@@ -401,8 +386,8 @@ Cohesion: 0.15
 Nodes (26): queryRuntime, runtimeTranscriptEntry, buildQueryMessage(), copyOptionsEnv(), forwardQueryMessages(), ClaudeAgentOptions, Context, Logger (+18 more)
 
 ### Community 44 - "Community 44"
-Cohesion: 0.13
-Nodes (14): Cmd, ClaudeAgentOptions, Duration, Message, Mutex, ringBuffer, SpawnedProcess, SubprocessCLITransport (+6 more)
+Cohesion: 0.12
+Nodes (16): Cmd, CancelFunc, ClaudeAgentOptions, Duration, Logger, Message, Mutex, ringBuffer (+8 more)
 
 ### Community 45 - "Community 45"
 Cohesion: 0.14
@@ -413,24 +398,24 @@ Cohesion: 0.15
 Nodes (11): SessionMessage, SessionKey, SessionStore, SessionStoreDeleter, SessionStoreEntry, SessionStoreListEntry, SessionStoreLister, SessionStoreSubkeyLister (+3 more)
 
 ### Community 47 - "Community 47"
-Cohesion: 0.19
-Nodes (26): T, TestClient_Integration(), TestClient_MultipleQueries(), NewClient(), T, TestInterrupt_BeforeConnect(), TestMCPServerStatus_BeforeConnect(), TestParseInitResult_AgentsInvalidType() (+18 more)
+Cohesion: 0.22
+Nodes (22): NewClient(), T, TestInterrupt_BeforeConnect(), TestMCPServerStatus_BeforeConnect(), TestParseInitResult_AgentsInvalidType(), TestParseInitResult_AgentsSkipsEmptyName(), TestParseInitResult_AllFieldsTogether(), TestParseInitResult_WithAgents() (+14 more)
 
 ### Community 48 - "Community 48"
-Cohesion: 0.12
-Nodes (9): Buffer, Mutex, ReadCloser, WriteCloser, mockWriteCloser, PipeReader, PipeWriter, mockSpawnedProcess (+1 more)
+Cohesion: 0.07
+Nodes (56): Buffer, T, T, T, T, EffortLevel, M, Mutex (+48 more)
 
 ### Community 49 - "Community 49"
 Cohesion: 0.42
 Nodes (4): Client, Context, InitializeResult, Query
 
 ### Community 50 - "Community 50"
-Cohesion: 0.19
-Nodes (9): Context, Duration, Message, SubprocessCLITransport, JSONLineReader, Observer, Time, messageReaderState (+1 more)
+Cohesion: 0.13
+Nodes (15): Context, Duration, Context, Context, Duration, Message, Observer, ReadCloser (+7 more)
 
 ### Community 51 - "Community 51"
 Cohesion: 0.42
-Nodes (5): Context, Message, Context, Query, Message
+Nodes (5): Query, Context, Message, Context, Message
 
 ### Community 52 - "Community 52"
 Cohesion: 0.14
@@ -461,7 +446,7 @@ Cohesion: 0.22
 Nodes (4): NopObserver, Observer, Duration, TransportHealth
 
 ### Community 59 - "Community 59"
-Cohesion: 0.25
+Cohesion: 0.22
 Nodes (6): Bool, Duration, Mutex, NopObserver, Uint64, emissionObserver
 
 ### Community 60 - "Community 60"
@@ -470,7 +455,7 @@ Nodes (4): T, isSensitiveArgFlag(), redactArgsForLog(), TestRedactArgsForLog()
 
 ### Community 62 - "Community 62"
 Cohesion: 0.22
-Nodes (3): TaskUsage, TaskNotificationMessage, TaskProgressMessage
+Nodes (4): TaskUsage, TaskNotificationMessage, TaskProgressMessage, TaskUsage
 
 ### Community 63 - "Community 63"
 Cohesion: 0.36
@@ -481,8 +466,8 @@ Cohesion: 0.08
 Nodes (22): AgentDefinition, CanUseToolFunc, Duration, EffortLevel, HookMatcher, OutputFormat, PermissionMode, PluginConfig (+14 more)
 
 ### Community 65 - "Community 65"
-Cohesion: 0.26
-Nodes (13): T, newBlockingReadTransport(), TestErrorResponse(), TestInitialize(), TestInitializeFailure_ClearsRegisteredHookCallbacks(), TestNewQuery(), TestQueryStartStop(), TestQueryStop_ClearsHookCallbacks() (+5 more)
+Cohesion: 0.23
+Nodes (8): T, Logger, NewLoggerFromZap(), TestLogger_LogMethods(), TestLogger_Zap(), TestNewLogger(), TestNewLogger_VerboseFiltersCorrectly(), TestNewLoggerFromZap()
 
 ### Community 66 - "Community 66"
 Cohesion: 0.25
@@ -521,8 +506,8 @@ Cohesion: 0.40
 Nodes (5): Context, ToolPermissionContext, isRiskyCommand(), main(), permissionHandler()
 
 ### Community 75 - "Community 75"
-Cohesion: 0.22
-Nodes (17): BenchmarkChannelOperations(), BenchmarkClient_Connect(), BenchmarkClient_Create(), BenchmarkClient_QueryCycle(), BenchmarkContentBlockParsing(), BenchmarkContextCreation(), BenchmarkErrorCreation(), BenchmarkErrorWrapping() (+9 more)
+Cohesion: 0.26
+Nodes (13): BenchmarkChannelOperations(), BenchmarkClient_Connect(), BenchmarkClient_Create(), BenchmarkClient_QueryCycle(), BenchmarkContextCreation(), BenchmarkMemoryAllocation(), BenchmarkMessageParsing(), BenchmarkMessageParsing_Parallel() (+5 more)
 
 ### Community 76 - "Community 76"
 Cohesion: 0.36
@@ -537,7 +522,7 @@ Cohesion: 0.33
 Nodes (3): ModelUsage, PermissionDenial, ResultMessage
 
 ### Community 79 - "Community 79"
-Cohesion: 0.33
+Cohesion: 0.29
 Nodes (3): HookCallbackFunc, HookMatcher, Query
 
 ### Community 80 - "Community 80"
@@ -545,24 +530,24 @@ Cohesion: 0.57
 Nodes (7): permissionOracleCase, T, permissionOracleCases(), permissionSignature(), readPermissionOracle(), TestHandlePermissionRequest_Oracle(), writePermissionOracle()
 
 ### Community 81 - "Community 81"
-Cohesion: 0.21
-Nodes (10): NewJSONDecodeError(), NewJSONDecodeErrorWithRaw(), containsSubstring(), T, stringContains(), TestJSONDecodeError(), TestMessageParseError(), TestProcessErrorExportedFieldShape() (+2 more)
+Cohesion: 0.18
+Nodes (14): BenchmarkErrorCreation(), BenchmarkErrorWrapping(), CLINotFoundError, NewCLINotFoundError(), NewCLINotFoundErrorWithCause(), containsSubstring(), T, stringContains() (+6 more)
 
 ### Community 82 - "Community 82"
 Cohesion: 0.53
 Nodes (5): T, TestGetHookEventName(), TestNewHookEventConstants_PhaseC(), TestPermissionBehaviorConstants(), TestPermissionUpdateDestinationConstants()
 
 ### Community 83 - "Community 83"
-Cohesion: 0.21
-Nodes (15): MockCLI, AssertMessageContent(), AssertMessageType(), CollectMessages(), CreateMockCLI(), FindRealCLI(), Context, Duration (+7 more)
+Cohesion: 0.17
+Nodes (29): T, TestClientIntegration_FullSession(), TestClientIntegration_MultipleQueries(), TestClientIntegration_WithHooks(), TestClientIntegration_WithPermissions(), TestQueryIntegration_ContextCancellation(), TestQueryIntegration_ErrorHandling(), TestQueryIntegration_SimplePrompt() (+21 more)
 
 ### Community 84 - "Community 84"
 Cohesion: 0.13
 Nodes (15): Beta Features, Complete Feature Comparison Matrix, Core API & Session Management, Cost Management, Development & Debugging, Error Handling & Validation, Extended Thinking, Hook System (+7 more)
 
 ### Community 85 - "Community 85"
-Cohesion: 0.14
-Nodes (31): T, TestHandleControlRequest_CanUseTool_NoCallback(), TestHandleControlRequest_InterruptSubtype(), TestHandleControlRequest_NoRequestID(), TestHandleControlRequest_SetPermissionModeSubtype(), TestHandleControlRequest_UnsupportedSubtype(), TestSendErrorResponse_NilRequest(), T (+23 more)
+Cohesion: 0.25
+Nodes (18): T, TestHandleControlRequest_CanUseTool_NoCallback(), TestHandleControlRequest_InterruptSubtype(), TestHandleControlRequest_NoRequestID(), TestHandleControlRequest_SetPermissionModeSubtype(), TestHandleControlRequest_UnsupportedSubtype(), TestSendErrorResponse_NilRequest(), mockTransport (+10 more)
 
 ### Community 87 - "Community 87"
 Cohesion: 0.40
@@ -581,8 +566,8 @@ Cohesion: 0.14
 Nodes (14): Area Not Implemented, At a Glance, FAQ, Go SDK, Go SDK vs Python SDK Feature Parity Guide, Help Us Close the Gaps, Key Differences in Approach, Known Gaps & Workarounds (+6 more)
 
 ### Community 91 - "Community 91"
-Cohesion: 0.47
-Nodes (9): UnmarshalMessage(), T, TestExistingSystemSubtypesReturnSystemMessage(), TestUnmarshalCompactBoundaryMessage(), TestUnmarshalFilesPersistedEvent(), TestUnmarshalHookMessages(), TestUnmarshalStatusMessage(), TestUnmarshalSystemUnknownSubtype() (+1 more)
+Cohesion: 0.26
+Nodes (7): mockMCPServer, assertPermissionPanicErrorResponse(), T, TestRouteMessage_LogsBackpressureWhenMessagesChannelFull(), TestRouteMessageSessionStoreAppendErrorEmitsSystemMessage(), waitForControlResponses(), waitForWrittenControlRequest()
 
 ### Community 93 - "Community 93"
 Cohesion: 0.50
@@ -605,20 +590,20 @@ Cohesion: 0.43
 Nodes (7): T, TestSDKControlMcpReconnectRequest_JSONRoundtrip(), TestSDKControlMcpSetServersRequest_JSONRoundtrip(), TestSDKControlMcpStatusRequest_JSONRoundtrip(), TestSDKControlMcpToggleRequest_JSONRoundtrip(), TestSDKControlRewindFilesRequest_JSONRoundtrip(), TestSDKControlStopTaskRequest_JSONRoundtrip()
 
 ### Community 98 - "Community 98"
-Cohesion: 0.29
-Nodes (13): ClaudeProjectKey(), extractClaudeMessageText(), RawMessage, T, TestClaudeProjectKeyNormalizationAndLongPath(), TestLocalTranscriptBackendClaudeConfigDirOverride(), TestLocalTranscriptBackendGetMessagesParentChainAndFilters(), TestLocalTranscriptBackendListAndInfo() (+5 more)
+Cohesion: 0.31
+Nodes (12): ClaudeProjectKey(), NewLocalTranscriptBackend(), T, TestClaudeProjectKeyNormalizationAndLongPath(), TestLocalTranscriptBackendClaudeConfigDirOverride(), TestLocalTranscriptBackendGetMessagesParentChainAndFilters(), TestLocalTranscriptBackendListAndInfo(), TestLocalTranscriptBackendMalformedJSONL() (+4 more)
 
 ### Community 99 - "Community 99"
-Cohesion: 0.25
-Nodes (5): NopObserver, T, Uint64, TestMessageReaderLoop_GiveUpTerminatesSubprocess(), recordingTransportObserver
+Cohesion: 0.33
+Nodes (3): NopObserver, Uint64, recordingTransportObserver
 
 ### Community 100 - "Community 100"
-Cohesion: 0.39
-Nodes (8): Message, Message, decodeMessage(), decodeMessageFunc(), T, truncateRaw(), unmarshalSystemMessage(), msgPtr
+Cohesion: 0.43
+Nodes (7): T, TestBuildCommandArgs_Betas(), TestBuildCommandArgs_NoOptions(), TestBuildCommandArgs_Plugins(), TestBuildCommandArgs_PluginsWithOtherOptions(), TestBuildCommandArgs_SystemPrompt(), TestBuildCommandArgs_SystemPromptPreset()
 
 ### Community 101 - "Community 101"
-Cohesion: 0.48
-Nodes (6): T, TestUnmarshalAuthStatusMessage(), TestUnmarshalPromptSuggestionMessage(), TestUnmarshalRateLimitEvent(), TestUnmarshalToolProgressMessage(), TestUnmarshalToolUseSummaryMessage()
+Cohesion: 0.25
+Nodes (12): checkPermission(), main(), Context, ToolPermissionContext, contains(), T, TestFormatAsJSON(), TestFormatMapAsJSON() (+4 more)
 
 ### Community 102 - "Community 102"
 Cohesion: 0.67
@@ -633,40 +618,52 @@ Cohesion: 0.40
 Nodes (4): SandboxFilesystemConfig, SandboxNetworkConfig, SandboxConfig, SandboxConfig
 
 ### Community 105 - "Community 105"
-Cohesion: 0.12
-Nodes (4): AuthStatusMessage, StatusMessage, ToolProgressMessage, ToolUseSummaryMessage
+Cohesion: 0.10
+Nodes (5): HookProgressMessage, HookResponseMessage, PromptSuggestionMessage, TaskStartedMessage, ToolUseSummaryMessage
+
+### Community 106 - "Community 106"
+Cohesion: 0.27
+Nodes (7): decodeMessage(), decodeMessageFunc(), Message, RawMessage, truncateRaw(), unmarshalSystemMessage(), UnknownMessage
 
 ### Community 107 - "Community 107"
-Cohesion: 0.14
-Nodes (25): GetSessionMessagesOptions, GetSubagentMessagesOptions, SessionMessage, applyMessageWindow(), buildParentChain(), ensurePathUnder(), getSessionMessagesDir(), getSessionMessagesLimit() (+17 more)
+Cohesion: 0.24
+Nodes (10): GetSubagentMessagesOptions, SessionMessage, getSubagentMessagesDir(), getSubagentMessagesLimit(), getSubagentMessagesOffset(), getSubagentMessagesParentSessionID(), GetSubagentMessagesOptions, isValidSubagentSubpath() (+2 more)
 
 ### Community 108 - "Community 108"
-Cohesion: 0.36
-Nodes (13): T, TestBuildCommandArgs_AgentDefinitionNewFields(), TestBuildCommandArgs_CombinedNewFlags(), TestBuildCommandArgs_DebugFile(), TestBuildCommandArgs_ResumeSessionAt(), TestBuildCommandArgs_ResumeSessionAtWithoutResume(), TestBuildCommandArgs_SessionAgent(), TestBuildCommandArgs_StrictMcpConfig() (+5 more)
+Cohesion: 0.40
+Nodes (4): Int64, NopObserver, Uint64, exitObserver
 
 ### Community 109 - "Community 109"
 Cohesion: 0.53
 Nodes (5): FuzzElicitationHookInput_Unmarshal(), FuzzNotificationHookInput_Unmarshal(), FuzzPostToolUseFailureHookInput_Unmarshal(), FuzzSessionStartHookInput_Unmarshal(), F
 
+### Community 110 - "Community 110"
+Cohesion: 0.53
+Nodes (5): T, TestParseSemanticVersion(), TestSemanticVersionIsAtLeast(), TestSemanticVersionString(), TestSupportsThinkingDisplay()
+
 ### Community 111 - "Community 111"
-Cohesion: 0.33
-Nodes (3): FailedFile, PersistedFile, FilesPersistedEvent
+Cohesion: 0.47
+Nodes (9): UnmarshalMessage(), T, TestExistingSystemSubtypesReturnSystemMessage(), TestUnmarshalCompactBoundaryMessage(), TestUnmarshalFilesPersistedEvent(), TestUnmarshalHookMessages(), TestUnmarshalStatusMessage(), TestUnmarshalSystemUnknownSubtype() (+1 more)
 
 ### Community 112 - "Community 112"
-Cohesion: 0.16
-Nodes (25): T, TestColdStartLatency_RealCLI(), requireAuth(), requireClaude(), T, TestClientIntegration_FullSession(), TestClientIntegration_MultipleQueries(), TestClientIntegration_WithHooks() (+17 more)
+Cohesion: 0.20
+Nodes (12): T, TestColdStartLatency_RealCLI(), requireAuth(), requireClaude(), T, TestRealCLI_TaskLifecycleEvents(), T, TestControlProtocol_FullFlow() (+4 more)
 
 ### Community 113 - "Community 113"
 Cohesion: 0.43
 Nodes (7): T, TestEffortLevelConstants(), TestOutputFormat_JSONRoundtrip(), TestSandboxConfig_JSONRoundtrip(), TestSandboxFilesystemConfig_JSONRoundtrip(), TestSandboxNetworkConfig_JSONRoundtrip(), TestThinkingConfig_JSONRoundtrip()
 
+### Community 114 - "Community 114"
+Cohesion: 0.48
+Nodes (6): T, TestModelInfo_JSONRoundtrip(), TestModelInfo_OptionalDescription(), TestResultMessageErrorSubtypes(), TestResultMessageMarshaling(), TestResultMessageNewFields()
+
 ### Community 115 - "Community 115"
-Cohesion: 0.29
-Nodes (9): T, extractSessionNotFoundError(), findSubstring(), isWhitespace(), trimWhitespace(), TestExtractSessionNotFoundError(), TestForkSessionFlag(), TestParseStderrError() (+1 more)
+Cohesion: 0.50
+Nodes (4): T, TestExtractSessionNotFoundError(), TestParseStderrError(), IsSessionNotFoundError()
 
 ### Community 119 - "Community 119"
-Cohesion: 0.35
-Nodes (12): T, TestBuildCommandArgs_OutputFormat(), TestBuildCommandArgs_ReplayUserMessages(), TestBuildCommandArgs_SettingsFileCheckpointing(), TestBuildCommandArgs_SettingsSandbox(), TestBuildCommandArgs_SettingsThinking(), TestBuildCommandArgs_ThinkingDisplay(), TestBuildCommandArgs_ThinkingDisplayUnsupportedCLI() (+4 more)
+Cohesion: 0.48
+Nodes (6): T, TestUnmarshalAuthStatusMessage(), TestUnmarshalPromptSuggestionMessage(), TestUnmarshalRateLimitEvent(), TestUnmarshalToolProgressMessage(), TestUnmarshalToolUseSummaryMessage()
 
 ### Community 121 - "Community 121"
 Cohesion: 0.67
@@ -677,12 +674,12 @@ Cohesion: 0.24
 Nodes (4): blockingReadTransport, Context, Message, Once
 
 ### Community 123 - "Community 123"
-Cohesion: 0.31
-Nodes (10): BenchmarkQuery(), B, T, TestQuery_CLINotFound(), TestQuery_ContextCancellation(), TestQuery_EmptyPrompt(), TestQuery_Integration(), TestQuery_NilOptions() (+2 more)
+Cohesion: 0.33
+Nodes (3): Query, MCPServer, mcpServerErrorResponse()
 
 ### Community 124 - "Community 124"
-Cohesion: 0.10
-Nodes (8): ContentBlock, AssistantMessage, ContentBlock, UnmarshalContentBlock(), TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock
+Cohesion: 0.09
+Nodes (9): BenchmarkContentBlockParsing(), AssistantMessage, ContentBlock, UnmarshalContentBlock(), ContentBlock, TextBlock, ThinkingBlock, ToolResultBlock (+1 more)
 
 ### Community 130 - "Community 130"
 Cohesion: 0.53
@@ -697,40 +694,40 @@ Cohesion: 0.23
 Nodes (9): NewLocalPluginConfig(), NewPluginConfig(), PluginConfig, T, TestClaudeAgentOptions_Plugins(), TestPluginConfig(), TestWithBeta(), TestWithBetas() (+1 more)
 
 ### Community 153 - "Community 153"
-Cohesion: 0.07
-Nodes (26): Int64, failingSessionStore, T, mockMCPServer, mockTransport, assertPermissionPanicErrorResponse(), Context, Message (+18 more)
-
-### Community 154 - "Community 154"
-Cohesion: 0.32
-Nodes (7): ListSessionsOptions, applySessionWindow(), ListSessionsOptions, SDKSessionInfo, listSessionsDir(), listSessionsLimit(), listSessionsOffset()
+Cohesion: 0.16
+Nodes (8): failingSessionStore, mockTransport, Context, Message, Mutex, SessionKey, SessionMessage, SessionStoreEntry
 
 ### Community 155 - "Community 155"
 Cohesion: 0.12
-Nodes (35): T, T, T, T, T, T, T, NewLogger() (+27 more)
+Nodes (37): T, T, T, T, T, T, T, WithTimeout() (+29 more)
 
 ### Community 156 - "Community 156"
 Cohesion: 0.43
 Nodes (7): T, TestMCPServerStatus_EmptyConfig(), TestMCPServerStatusInfo_WireShape(), TestReconnectMCPServer_UnknownServer(), TestSetMCPServers_EmptyMap(), TestSetMCPServers_Minimal(), TestToggleMCPServer_Disabled()
 
 ### Community 157 - "Community 157"
-Cohesion: 0.18
-Nodes (15): T, TestBuildCommandArgs_Agents(), TestBuildCommandArgs_AgentsWithSubagentExecution(), TestBuildCommandArgs_SubagentExecution(), NewSubagentExecutionConfig(), T, TestSettingSourceConstants(), TestWithBuilders_AllMethods() (+7 more)
+Cohesion: 0.24
+Nodes (11): NewSubagentExecutionConfig(), T, TestSettingSourceConstants(), TestWithBuilders_AllMethods(), T, TestAgentDefinitionWithExecutionControl(), TestMultiInvocationModeConstants(), TestNewSubagentExecutionConfig() (+3 more)
 
 ### Community 160 - "Community 160"
-Cohesion: 0.11
-Nodes (14): IsValidationError(), NewMessageParseError(), NewMessageParseErrorWithCause(), NewMessageParseErrorWithType(), NewPermissionDeniedError(), NewPermissionDeniedErrorWithCause(), NewPermissionDeniedErrorWithReason(), NewPermissionDeniedErrorWithTool() (+6 more)
+Cohesion: 0.08
+Nodes (21): TestAllErrorTypes_Constructor_Error_Is_Unwrap_As(), TestMessageParseErrorWithCause(), IsValidationError(), NewJSONDecodeError(), NewMessageParseError(), NewMessageParseErrorWithCause(), NewMessageParseErrorWithType(), NewPermissionDeniedError() (+13 more)
 
 ### Community 161 - "Community 161"
 Cohesion: 0.67
 Nodes (3): T, TestHookEventConstants_PhaseC(), TestHookEventConstants_PhaseC_NoDuplicates()
 
-### Community 163 - "Community 163"
+### Community 162 - "Community 162"
 Cohesion: 0.33
-Nodes (10): T, TestSpawnOptions_JSONRoundtrip(), TestSpawnProcess_NotMarshaledToJSON(), TestToolConfig_JSONRoundtrip(), TestWithDebugFile(), TestWithResumeSessionAt(), TestWithSpawnProcess(), TestWithStrictMcpConfig() (+2 more)
+Nodes (3): CompactMetadata, CompactBoundaryMessage, CompactMetadata
+
+### Community 163 - "Community 163"
+Cohesion: 0.40
+Nodes (4): Query, Message, SessionMessage, sessionStoreMessageFromMessage()
 
 ### Community 164 - "Community 164"
-Cohesion: 0.38
-Nodes (9): T, Duration, TestMessageReaderLoop_ProcDoneClosesPartialStdout(), TestSubprocessCrash_CloseDoesNotHang(), TestSubprocessCrash_NoGoroutineLeak(), TestSubprocessCrash_PartialStdoutWithoutNewlineClosesMessages(), TestSubprocessCrash_ReadyFalse(), TestSubprocessCrash_WriteReturnsError() (+1 more)
+Cohesion: 0.53
+Nodes (5): computeMessageGolden(), Message, T, messageSignature(), TestMessageDispatchOracle()
 
 ### Community 166 - "Community 166"
 Cohesion: 0.53
@@ -741,100 +738,72 @@ Cohesion: 0.53
 Nodes (5): T, TestInteractions_ConcurrentReads_AreSafe(), TestInteractions_ContextCancel_ClosesChannel(), TestInteractions_DoubleClose_IsIdempotent(), TestInteractions_ReconnectAfterClose()
 
 ### Community 168 - "Community 168"
-Cohesion: 0.40
-Nodes (4): checkPermission(), main(), Context, ToolPermissionContext
+Cohesion: 0.60
+Nodes (4): T, TestUnmarshalMessageMissingType(), TestUnmarshalMessageNoErrorOnUnknownType(), TestUnmarshalUnknownMessage()
 
 ### Community 169 - "Community 169"
-Cohesion: 0.29
-Nodes (5): NewProcessError(), NewProcessErrorWithCause(), NewProcessErrorWithCode(), TestProcessError(), ProcessError
+Cohesion: 0.50
+Nodes (4): 100% Feature Parity (19 features), ~95% Feature Parity (4 features with minor gaps), Emerging/Preview (2 features), Feature Breakdown by Category
 
 ### Community 170 - "Community 170"
 Cohesion: 0.33
 Nodes (5): Bool, Duration, NopObserver, Uint64, realObserver
 
 ### Community 171 - "Community 171"
-Cohesion: 0.43
-Nodes (7): T, TestNewClaudeAgentOptions(), TestOptionsChaining(), TestWithMaxBudgetUSD(), TestWithMaxBudgetUSDZeroValue(), TestWithMaxThinkingTokens(), TestWithMaxThinkingTokensZeroValue()
+Cohesion: 0.50
+Nodes (4): Choose Go SDK When:, Choose Python SDK When:, Migration Notes, When to Use Each SDK
 
 ### Community 172 - "Community 172"
 Cohesion: 0.60
 Nodes (4): T, TestFlags_AllEmittedFlagsAcceptedByCLI(), TestFlags_HiddenFlagsDocumented(), TestFlags_UnsupportedFlagsAreDocumented()
 
 ### Community 173 - "Community 173"
-Cohesion: 0.48
-Nodes (6): T, TestModelInfo_JSONRoundtrip(), TestModelInfo_OptionalDescription(), TestResultMessageErrorSubtypes(), TestResultMessageMarshaling(), TestResultMessageNewFields()
-
-### Community 174 - "Community 174"
-Cohesion: 0.53
-Nodes (5): computeMessageGolden(), Message, T, messageSignature(), TestMessageDispatchOracle()
-
-### Community 175 - "Community 175"
-Cohesion: 0.48
-Nodes (6): T, TestBuildCommandArgs_NoSettingsWhenNothingSet(), TestBuildCommandArgs_SettingsMerge(), TestBuildSettingsJSON_InvalidUserSettingsIgnored(), TestBuildSettingsJSON_ThinkingDisplay(), TestBuildSettingsJSON_UserSettingsReturnedVerbatim()
+Cohesion: 0.50
+Nodes (3): ringBuffer, captureStderrTail(), procDoneClosed()
 
 ### Community 176 - "Community 176"
-Cohesion: 0.17
-Nodes (26): T, TestHandleControlRequest_HookCallback(), TestHandleControlRequest_HookCallback_UnknownCallbackID(), NewQuery(), T, TestHandleControlRequest_CanUseTool_PanicSendsErrorResponse(), TestHandleControlRequest_PanicRecovery(), TestHandleControlResponse_NonBlockingSend() (+18 more)
+Cohesion: 0.12
+Nodes (49): T, TestHandleHookCallback(), TestHandleMCPMessage(), TestHandlePermissionRequest(), T, TestHandleControlRequest_HookCallback(), TestHandleControlRequest_HookCallback_UnknownCallbackID(), T (+41 more)
 
 ### Community 177 - "Community 177"
 Cohesion: 0.43
 Nodes (7): T, TestTextBlockMarshaling(), TestToolUseBlockMarshaling(), TestUnmarshalContentBlock(), TestUserMessageIsReplay(), TestUserMessageMarshaling(), TestUserMessageUUID()
-
-### Community 178 - "Community 178"
-Cohesion: 0.60
-Nodes (4): T, TestUnmarshalMessageMissingType(), TestUnmarshalMessageNoErrorOnUnknownType(), TestUnmarshalUnknownMessage()
-
-### Community 179 - "Community 179"
-Cohesion: 0.50
-Nodes (4): 100% Feature Parity (19 features), ~95% Feature Parity (4 features with minor gaps), Emerging/Preview (2 features), Feature Breakdown by Category
-
-### Community 180 - "Community 180"
-Cohesion: 0.50
-Nodes (4): Choose Go SDK When:, Choose Python SDK When:, Migration Notes, When to Use Each SDK
 
 ### Community 181 - "Community 181"
 Cohesion: 0.39
 Nodes (8): T, TestAgentInfo_JSONRoundtrip(), TestAgentInfo_OmitEmptyModel(), TestInitializeResult_AgentsField(), TestInitializeResult_AgentsOmitEmpty(), TestRewindFilesResult_JSONRoundtrip(), TestRewindFilesResult_OmitEmpty(), TestRewindFilesResult_WireFormatKeys()
 
 ### Community 182 - "Community 182"
-Cohesion: 0.26
-Nodes (13): T, TestClient_Close_WaitsForReceiveGoroutines(), TestClient_CloseDuringConnect(), TestClient_CloseNotConnectingNoop(), TestClient_ConnectDoesNotBlockIsConnected(), TestClient_ConnectRejectsDoubleConnecting(), TestClient_ConnectTransportClosedClientReturnsClientCause(), TestClient_ReceiveResponse_GoroutineTracked() (+5 more)
+Cohesion: 0.25
+Nodes (12): failingMockTransport, Context, mockTransport, T, newFailingMockTransport(), TestSendControlRequest_NonStreaming(), TestSendControlRequest_WriteError(), TestSendErrorResponse_WriteError() (+4 more)
 
 ### Community 183 - "Community 183"
-Cohesion: 0.53
-Nodes (5): clientCLIPath(), clientEnvironment(), clientResumeID(), clientWorkingDirectory(), ClaudeAgentOptions
+Cohesion: 0.19
+Nodes (13): clientCLIPath(), clientEnvironment(), clientResumeID(), clientWorkingDirectory(), CancelFunc, Client, ClaudeAgentOptions, InitializeResult (+5 more)
 
-### Community 184 - "Community 184"
-Cohesion: 0.40
-Nodes (4): Query, Message, SessionMessage, sessionStoreMessageFromMessage()
-
-### Community 185 - "Community 185"
-Cohesion: 0.53
-Nodes (5): T, TestWithAgentProgressSummaries(), TestWithIncludeHookEvents(), TestWithTaskBudget(), TestWithTaskBudget_NilByDefault()
-
-### Community 186 - "Community 186"
-Cohesion: 0.83
-Nodes (3): T, buildOracleArgs(), TestBuildCommandArgs_FullSequenceOracle()
+### Community 188 - "Community 188"
+Cohesion: 0.33
+Nodes (3): RateLimitInfo, RateLimitEvent, RateLimitInfo
 
 ## Knowledge Gaps
-- **435 isolated node(s):** `Added`, `Fixed`, `Known issues (surfaced by the new flag drift test)`, `Added`, `Details` (+430 more)
+- **446 isolated node(s):** `Transport`, `Query`, `Logger`, `Mutex`, `CancelFunc` (+441 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **36 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **30 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `NewClaudeAgentOptions()` connect `Community 0` to `Community 5`, `Community 11`, `Community 12`, `Community 13`, `Community 14`, `Community 23`, `Community 152`, `Community 153`, `Community 25`, `Community 155`, `Community 29`, `Community 157`, `Community 31`, `Community 35`, `Community 164`, `Community 163`, `Community 167`, `Community 168`, `Community 43`, `Community 171`, `Community 47`, `Community 176`, `Community 175`, `Community 182`, `Community 185`, `Community 186`, `Community 191`, `Community 64`, `Community 65`, `Community 67`, `Community 69`, `Community 73`, `Community 74`, `Community 75`, `Community 80`, `Community 85`, `Community 99`, `Community 108`, `Community 112`, `Community 115`, `Community 119`, `Community 123`?**
-  _High betweenness centrality (0.240) - this node is a cross-community bridge._
-- **Why does `contains()` connect `Community 30` to `Community 3`, `Community 12`, `Community 13`, `Community 15`, `Community 17`, `Community 153`, `Community 155`, `Community 156`, `Community 29`, `Community 31`, `Community 35`, `Community 36`, `Community 168`, `Community 172`, `Community 176`, `Community 67`, `Community 74`, `Community 83`, `Community 85`, `Community 98`, `Community 103`, `Community 112`, `Community 115`?**
-  _High betweenness centrality (0.099) - this node is a cross-community bridge._
-- **Why does `WithTimeout()` connect `Community 176` to `Community 2`, `Community 5`, `Community 6`, `Community 17`, `Community 22`, `Community 155`, `Community 29`, `Community 31`, `Community 35`, `Community 164`, `Community 167`, `Community 172`, `Community 47`, `Community 49`, `Community 182`, `Community 191`, `Community 65`, `Community 75`, `Community 83`, `Community 85`, `Community 99`, `Community 112`, `Community 119`, `Community 123`?**
-  _High betweenness centrality (0.063) - this node is a cross-community bridge._
+- **Why does `NewClaudeAgentOptions()` connect `Community 0` to `Community 5`, `Community 11`, `Community 14`, `Community 18`, `Community 23`, `Community 152`, `Community 25`, `Community 155`, `Community 29`, `Community 157`, `Community 31`, `Community 36`, `Community 167`, `Community 43`, `Community 174`, `Community 47`, `Community 176`, `Community 48`, `Community 191`, `Community 64`, `Community 67`, `Community 69`, `Community 73`, `Community 74`, `Community 75`, `Community 80`, `Community 83`, `Community 85`, `Community 91`, `Community 100`, `Community 101`, `Community 112`?**
+  _High betweenness centrality (0.197) - this node is a cross-community bridge._
+- **Why does `contains()` connect `Community 101` to `Community 6`, `Community 12`, `Community 13`, `Community 15`, `Community 155`, `Community 156`, `Community 29`, `Community 30`, `Community 31`, `Community 160`, `Community 172`, `Community 174`, `Community 176`, `Community 182`, `Community 67`, `Community 74`, `Community 83`, `Community 85`, `Community 91`, `Community 98`, `Community 100`, `Community 103`, `Community 107`, `Community 112`, `Community 115`?**
+  _High betweenness centrality (0.127) - this node is a cross-community bridge._
+- **Why does `WithTimeout()` connect `Community 155` to `Community 2`, `Community 5`, `Community 6`, `Community 11`, `Community 18`, `Community 22`, `Community 29`, `Community 31`, `Community 35`, `Community 36`, `Community 167`, `Community 172`, `Community 176`, `Community 49`, `Community 182`, `Community 191`, `Community 75`, `Community 83`, `Community 85`?**
+  _High betweenness centrality (0.071) - this node is a cross-community bridge._
 - **Are the 225 inferred relationships involving `NewClaudeAgentOptions()` (e.g. with `main()` and `TestClient_CloseDuringConnect()`) actually correct?**
   _`NewClaudeAgentOptions()` has 225 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 107 inferred relationships involving `WithTimeout()` (e.g. with `.cleanupFailedInitialize()` and `client_connect.go`) actually correct?**
   _`WithTimeout()` has 107 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 97 inferred relationships involving `NewLogger()` (e.g. with `TestClient_ConnectTransportClosedClientReturnsClientCause()` and `TestClientCloseJoinsQueryAndTransportErrors()`) actually correct?**
+- **Are the 97 inferred relationships involving `NewLogger()` (e.g. with `TestClient_ConnectTransportClosedClientReturnsClientCause()` and `TestClientCloseReturnsFirstShutdownError()`) actually correct?**
   _`NewLogger()` has 97 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 62 inferred relationships involving `NewClient()` (e.g. with `TestClient_CloseDuringConnect()` and `TestClient_CloseNotConnectingNoop()`) actually correct?**
   _`NewClient()` has 62 INFERRED edges - model-reasoned connections that need verification._

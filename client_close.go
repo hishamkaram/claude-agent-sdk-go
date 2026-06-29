@@ -2,7 +2,6 @@ package claude
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"go.uber.org/zap"
@@ -35,7 +34,7 @@ func (c *Client) Close(ctx context.Context) error {
 	c.logger.Debug("Connection closed")
 	c.cleanupSessionStoreRuntime()
 	if len(errs) > 0 {
-		return errors.Join(errs...)
+		return errs[0]
 	}
 	return nil
 }

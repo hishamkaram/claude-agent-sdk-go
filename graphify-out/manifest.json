@@ -605,8 +605,8 @@
     "semantic_hash": ""
   },
   "client_close.go": {
-    "mtime": 1782699419.0861104,
-    "ast_hash": "12cc094bf9764b38564368454a262076",
+    "mtime": 1782729102.5085096,
+    "ast_hash": "36c07b8a14d4a9ceb05cba95315d2121",
     "semantic_hash": ""
   },
   "client_connect.go": {
@@ -655,8 +655,8 @@
     "semantic_hash": ""
   },
   "internal/query_lifecycle.go": {
-    "mtime": 1782699382.575521,
-    "ast_hash": "56866baff8e89649089cb414f6b84a44",
+    "mtime": 1782729113.353386,
+    "ast_hash": "e5925801066de39a10f07c33f85b20c0",
     "semantic_hash": ""
   },
   "internal/query_mcp.go": {
@@ -915,8 +915,8 @@
     "semantic_hash": ""
   },
   "client_connect_close_test.go": {
-    "mtime": 1782699500.3711958,
-    "ast_hash": "5ff1ee6b4af637ee055560a3da821855",
+    "mtime": 1782729108.097446,
+    "ast_hash": "b0399b84a4c5509af0a087fe994cfc1f",
     "semantic_hash": ""
   },
   "client_extra_methods_test.go": {

@@ -33,7 +33,10 @@ func (q *Query) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop gracefully stops the query handler.
+// Stop gracefully stops the query handler. If ctx expires while Stop is
+// waiting for the read loop or in-flight control handlers, Stop returns the
+// context error and leaves messagesChan open; the producer closes it when the
+// message loop eventually exits.
 func (q *Query) Stop(ctx context.Context) error {
 	defer q.clearHookCallbacks()
 

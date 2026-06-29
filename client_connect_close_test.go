@@ -241,7 +241,7 @@ func TestClient_CloseNotConnectingNoop(t *testing.T) {
 	}
 }
 
-func TestClientCloseJoinsQueryAndTransportErrors(t *testing.T) {
+func TestClientCloseReturnsFirstShutdownError(t *testing.T) {
 	t.Parallel()
 
 	handlerStarted := make(chan struct{})
@@ -300,8 +300,8 @@ func TestClientCloseJoinsQueryAndTransportErrors(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Close error = %v, want context deadline component", err)
 	}
-	if !errors.Is(err, transportErr) {
-		t.Fatalf("Close error = %v, want transport close component", err)
+	if errors.Is(err, transportErr) {
+		t.Fatalf("Close error = %v, want legacy first-error contract without transport component", err)
 	}
 	release()
 	select {
