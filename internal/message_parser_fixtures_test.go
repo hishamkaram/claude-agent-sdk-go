@@ -553,6 +553,18 @@ var (
 		"session_id": "sess_tprog_001"
 	}`)
 
+	systemTaskUpdated = []byte(`{
+		"type": "system",
+		"subtype": "task_updated",
+		"task_id": "task_003",
+		"patch": {
+			"status": "completed",
+			"end_time": 1782904297561
+		},
+		"uuid": "uuid_tupd_001",
+		"session_id": "sess_tupd_001"
+	}`)
+
 	systemFilesPersisted = []byte(`{
 		"type": "system",
 		"subtype": "files_persisted",

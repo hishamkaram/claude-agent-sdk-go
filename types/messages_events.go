@@ -19,6 +19,7 @@ const (
 	SystemSubtypeTaskNotification    = "task_notification"
 	SystemSubtypeTaskStarted         = "task_started"
 	SystemSubtypeTaskProgress        = "task_progress"
+	SystemSubtypeTaskUpdated         = "task_updated"
 	SystemSubtypeFilesPersisted      = "files_persisted"
 	SystemSubtypeLocalCommandOutput  = "local_command_output"
 	SystemSubtypeElicitationComplete = "elicitation_complete"
@@ -191,14 +192,16 @@ func (m *TaskNotificationMessage) isMessage()                {}
 
 // TaskStartedMessage indicates a background task has started.
 type TaskStartedMessage struct {
-	Type        string  `json:"type"`
-	Subtype     string  `json:"subtype"`
-	TaskID      string  `json:"task_id"`
-	ToolUseID   *string `json:"tool_use_id,omitempty"`
-	Description string  `json:"description"`
-	TaskType    *string `json:"task_type,omitempty"`
-	UUID        string  `json:"uuid"`
-	SessionID   string  `json:"session_id"`
+	Type         string  `json:"type"`
+	Subtype      string  `json:"subtype"`
+	TaskID       string  `json:"task_id"`
+	ToolUseID    *string `json:"tool_use_id,omitempty"`
+	Description  string  `json:"description"`
+	TaskType     *string `json:"task_type,omitempty"`
+	WorkflowName string  `json:"workflow_name,omitempty"`
+	Prompt       string  `json:"prompt,omitempty"`
+	UUID         string  `json:"uuid"`
+	SessionID    string  `json:"session_id"`
 }
 
 func (m *TaskStartedMessage) GetMessageType() string    { return m.Type }
@@ -207,20 +210,37 @@ func (m *TaskStartedMessage) isMessage()                {}
 
 // TaskProgressMessage contains progress information for a background task.
 type TaskProgressMessage struct {
-	Type         string    `json:"type"`
-	Subtype      string    `json:"subtype"`
-	TaskID       string    `json:"task_id"`
-	ToolUseID    *string   `json:"tool_use_id,omitempty"`
-	Description  string    `json:"description"`
-	Usage        TaskUsage `json:"usage"`
-	LastToolName *string   `json:"last_tool_name,omitempty"`
-	UUID         string    `json:"uuid"`
-	SessionID    string    `json:"session_id"`
+	Type             string                  `json:"type"`
+	Subtype          string                  `json:"subtype"`
+	TaskID           string                  `json:"task_id"`
+	ToolUseID        *string                 `json:"tool_use_id,omitempty"`
+	Description      string                  `json:"description"`
+	Summary          string                  `json:"summary,omitempty"`
+	WorkflowProgress []WorkflowProgressEntry `json:"workflow_progress,omitempty"`
+	Usage            TaskUsage               `json:"usage"`
+	LastToolName     *string                 `json:"last_tool_name,omitempty"`
+	UUID             string                  `json:"uuid"`
+	SessionID        string                  `json:"session_id"`
 }
 
 func (m *TaskProgressMessage) GetMessageType() string    { return m.Type }
 func (m *TaskProgressMessage) ShouldDisplayToUser() bool { return false }
 func (m *TaskProgressMessage) isMessage()                {}
+
+// TaskUpdatedMessage contains status updates for a background task patch.
+type TaskUpdatedMessage struct {
+	Type      string           `json:"type"`
+	Subtype   string           `json:"subtype"`
+	TaskID    string           `json:"task_id"`
+	ToolUseID *string          `json:"tool_use_id,omitempty"`
+	Patch     TaskUpdatedPatch `json:"patch"`
+	UUID      string           `json:"uuid"`
+	SessionID string           `json:"session_id"`
+}
+
+func (m *TaskUpdatedMessage) GetMessageType() string    { return m.Type }
+func (m *TaskUpdatedMessage) ShouldDisplayToUser() bool { return false }
+func (m *TaskUpdatedMessage) isMessage()                {}
 
 // FilesPersistedEvent indicates files have been persisted to a checkpoint.
 type FilesPersistedEvent struct {

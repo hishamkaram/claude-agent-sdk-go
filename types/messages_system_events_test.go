@@ -231,6 +231,36 @@ func TestUnmarshalTaskMessages(t *testing.T) {
 		}
 	})
 
+	t.Run("WorkflowTaskStartedMessage", func(t *testing.T) {
+		t.Parallel()
+		jsonData := `{
+			"type":"system","subtype":"task_started",
+			"task_id":"wtismrl5c","tool_use_id":"toolu_workflow",
+			"description":"Smallest dynamic workflow",
+			"task_type":"local_workflow",
+			"workflow_name":"minimal-probe",
+			"prompt":"export const meta = { name: 'minimal-probe' }",
+			"uuid":"u","session_id":"s"
+		}`
+		msg, err := UnmarshalMessage([]byte(jsonData))
+		if err != nil {
+			t.Fatalf("error = %v", err)
+		}
+		m, ok := msg.(*TaskStartedMessage)
+		if !ok {
+			t.Fatalf("expected *TaskStartedMessage, got %T", msg)
+		}
+		if m.TaskType == nil || *m.TaskType != "local_workflow" {
+			t.Fatalf("TaskType = %v, want local_workflow", m.TaskType)
+		}
+		if m.WorkflowName != "minimal-probe" {
+			t.Fatalf("WorkflowName = %q, want minimal-probe", m.WorkflowName)
+		}
+		if m.Prompt == "" {
+			t.Fatal("Prompt was not parsed")
+		}
+	})
+
 	t.Run("TaskProgressMessage", func(t *testing.T) {
 		t.Parallel()
 		jsonData := `{
@@ -258,6 +288,156 @@ func TestUnmarshalTaskMessages(t *testing.T) {
 			t.Error("ShouldDisplayToUser() should return false")
 		}
 	})
+
+	t.Run("WorkflowTaskProgressMessage", func(t *testing.T) {
+		t.Parallel()
+		jsonData := `{
+			"type":"system","subtype":"task_progress",
+			"task_id":"wtismrl5c","summary":"1 phase, 1 agent",
+			"usage":{"total_tokens":30574,"tool_uses":0,"duration_ms":3283},
+			"workflow_progress":[
+				{"type":"workflow_phase","index":1,"title":"Probe"},
+				{"type":"workflow_agent","index":1,"label":"probe","phaseIndex":1,"phaseTitle":"Probe","model":"claude-opus-4-8","state":"done","tokens":30574,"toolCalls":0,"durationMs":3283,"resultPreview":"workflow-ok","promptPreview":"Return exactly workflow-ok"}
+			],
+			"uuid":"u","session_id":"s"
+		}`
+		msg, err := UnmarshalMessage([]byte(jsonData))
+		if err != nil {
+			t.Fatalf("error = %v", err)
+		}
+		m, ok := msg.(*TaskProgressMessage)
+		if !ok {
+			t.Fatalf("expected *TaskProgressMessage, got %T", msg)
+		}
+		if m.Summary != "1 phase, 1 agent" {
+			t.Fatalf("Summary = %q", m.Summary)
+		}
+		if len(m.WorkflowProgress) != 2 {
+			t.Fatalf("WorkflowProgress len = %d, want 2", len(m.WorkflowProgress))
+		}
+		agent := m.WorkflowProgress[1]
+		if agent.Type != "workflow_agent" || agent.Label != "probe" || agent.State != "done" {
+			t.Fatalf("agent progress = %+v", agent)
+		}
+		if agent.Tokens != 30574 || agent.ResultPreview != "workflow-ok" || agent.PromptPreview == "" {
+			t.Fatalf("agent progress details = %+v", agent)
+		}
+	})
+
+	t.Run("TaskUpdatedMessage", func(t *testing.T) {
+		t.Parallel()
+		jsonData := `{
+			"type":"system","subtype":"task_updated",
+			"task_id":"wtismrl5c",
+			"patch":{"status":"completed","end_time":1782904297561},
+			"uuid":"u","session_id":"s"
+		}`
+		msg, err := UnmarshalMessage([]byte(jsonData))
+		if err != nil {
+			t.Fatalf("error = %v", err)
+		}
+		m, ok := msg.(*TaskUpdatedMessage)
+		if !ok {
+			t.Fatalf("expected *TaskUpdatedMessage, got %T", msg)
+		}
+		if m.Patch.Status != "completed" || m.Patch.EndTime != 1782904297561 {
+			t.Fatalf("Patch = %+v", m.Patch)
+		}
+		if m.ShouldDisplayToUser() {
+			t.Fatal("TaskUpdatedMessage should be internal-only")
+		}
+	})
+}
+
+func TestUnmarshalWorkflowToolUseResult(t *testing.T) {
+	t.Parallel()
+	jsonData := `{
+		"type":"user",
+		"message":{"role":"user","content":[{"tool_use_id":"toolu_workflow","type":"tool_result","content":"Workflow launched in background.","is_error":false}]},
+		"session_id":"s","uuid":"u","timestamp":"2026-07-01T11:11:34.095Z",
+		"tool_use_result":{
+			"status":"async_launched",
+			"taskId":"wtismrl5c",
+			"taskType":"local_workflow",
+			"workflowName":"minimal-probe",
+			"runId":"wf_2c525e4f-988",
+			"summary":"Smallest dynamic workflow",
+			"transcriptDir":"/tmp/agentd/workflows/wf_2c525e4f-988",
+			"scriptPath":"/tmp/agentd/workflows/minimal-probe.js"
+		}
+	}`
+	msg, err := UnmarshalMessage([]byte(jsonData))
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	m, ok := msg.(*UserMessage)
+	if !ok {
+		t.Fatalf("expected *UserMessage, got %T", msg)
+	}
+	if m.ToolUseResult == nil {
+		t.Fatal("ToolUseResult was not parsed")
+	}
+	if m.ToolUseResult.Status != "async_launched" ||
+		m.ToolUseResult.TaskID != "wtismrl5c" ||
+		m.ToolUseResult.WorkflowName != "minimal-probe" ||
+		m.ToolUseResult.RunID != "wf_2c525e4f-988" {
+		t.Fatalf("ToolUseResult = %+v", m.ToolUseResult)
+	}
+	if m.Timestamp == "" {
+		t.Fatal("Timestamp was not parsed")
+	}
+}
+
+func TestUnmarshalUserMessageIgnoresNonObjectToolUseResult(t *testing.T) {
+	t.Parallel()
+	jsonData := `{
+		"type":"user",
+		"message":{"role":"user","content":[{"tool_use_id":"toolu_1","type":"tool_result","content":"InputValidationError: boom","is_error":true}]},
+		"session_id":"s","uuid":"u",
+		"tool_use_result":"InputValidationError: boom"
+	}`
+	msg, err := UnmarshalMessage([]byte(jsonData))
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	m, ok := msg.(*UserMessage)
+	if !ok {
+		t.Fatalf("expected *UserMessage, got %T", msg)
+	}
+	if m.ToolUseResult != nil {
+		t.Fatalf("ToolUseResult = %+v, want nil for non-object payload", m.ToolUseResult)
+	}
+	blocks, ok := m.Content.([]ContentBlock)
+	if !ok || len(blocks) != 1 {
+		t.Fatalf("Content = %#v, want one content block", m.Content)
+	}
+}
+
+func TestUnmarshalSystemInitTools(t *testing.T) {
+	t.Parallel()
+	jsonData := `{
+		"type":"system","subtype":"init",
+		"tools":["Workflow","Bash","Read"],
+		"cwd":"/tmp/workspace",
+		"model":"claude-opus-4-8",
+		"permissionMode":"default",
+		"claude_code_version":"2.1.195",
+		"session_id":"s"
+	}`
+	msg, err := UnmarshalMessage([]byte(jsonData))
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	m, ok := msg.(*SystemMessage)
+	if !ok {
+		t.Fatalf("expected *SystemMessage, got %T", msg)
+	}
+	if len(m.Tools) != 3 || m.Tools[0] != "Workflow" {
+		t.Fatalf("Tools = %#v", m.Tools)
+	}
+	if m.ClaudeCodeVersion != "2.1.195" || m.PermissionMode != "default" {
+		t.Fatalf("init fields = %+v", m)
+	}
 }
 
 func TestUnmarshalFilesPersistedEvent(t *testing.T) {

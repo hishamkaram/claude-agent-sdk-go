@@ -61,6 +61,7 @@ var systemSubtypeCorpus = []struct {
 	{"task_notification", fmt.Sprintf(`{"type":"system","subtype":%q}`, SystemSubtypeTaskNotification)},
 	{"task_started", fmt.Sprintf(`{"type":"system","subtype":%q}`, SystemSubtypeTaskStarted)},
 	{"task_progress", fmt.Sprintf(`{"type":"system","subtype":%q}`, SystemSubtypeTaskProgress)},
+	{"task_updated", fmt.Sprintf(`{"type":"system","subtype":%q}`, SystemSubtypeTaskUpdated)},
 	{"files_persisted", fmt.Sprintf(`{"type":"system","subtype":%q}`, SystemSubtypeFilesPersisted)},
 	{"unknown_subtype", `{"type":"system","subtype":"some_future_subtype"}`},
 	{"no_subtype_default", `{"type":"system","subtype":""}`},

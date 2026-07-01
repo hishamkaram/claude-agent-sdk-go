@@ -133,6 +133,50 @@ type TaskUsage struct {
 	DurationMs  int `json:"duration_ms"`
 }
 
+// ToolUseResult describes top-level metadata emitted with CLI tool_result user
+// messages. Workflow launches populate the task and run identifiers here.
+type ToolUseResult struct {
+	Status        string `json:"status,omitempty"`
+	TaskID        string `json:"taskId,omitempty"`
+	TaskType      string `json:"taskType,omitempty"`
+	WorkflowName  string `json:"workflowName,omitempty"`
+	RunID         string `json:"runId,omitempty"`
+	Summary       string `json:"summary,omitempty"`
+	TranscriptDir string `json:"transcriptDir,omitempty"`
+	ScriptPath    string `json:"scriptPath,omitempty"`
+}
+
+// WorkflowProgressEntry describes one workflow_progress item from a
+// task_progress system frame. PromptPreview is parsed for completeness but
+// downstream AgentD payloads must not forward it to clients.
+type WorkflowProgressEntry struct {
+	Type           string `json:"type"`
+	Index          int    `json:"index,omitempty"`
+	Title          string `json:"title,omitempty"`
+	Label          string `json:"label,omitempty"`
+	AgentID        string `json:"agentId,omitempty"`
+	PhaseIndex     int    `json:"phaseIndex,omitempty"`
+	PhaseTitle     string `json:"phaseTitle,omitempty"`
+	Model          string `json:"model,omitempty"`
+	State          string `json:"state,omitempty"`
+	QueuedAt       int64  `json:"queuedAt,omitempty"`
+	StartedAt      int64  `json:"startedAt,omitempty"`
+	LastProgressAt int64  `json:"lastProgressAt,omitempty"`
+	Attempt        int    `json:"attempt,omitempty"`
+	Tokens         int    `json:"tokens,omitempty"`
+	ToolCalls      int    `json:"toolCalls,omitempty"`
+	DurationMs     int    `json:"durationMs,omitempty"`
+	ResultPreview  string `json:"resultPreview,omitempty"`
+	PromptPreview  string `json:"promptPreview,omitempty"`
+}
+
+// TaskUpdatedPatch contains the sparse patch object in task_updated frames.
+type TaskUpdatedPatch struct {
+	Status    string `json:"status,omitempty"`
+	StartTime int64  `json:"start_time,omitempty"`
+	EndTime   int64  `json:"end_time,omitempty"`
+}
+
 // PersistedFile represents a successfully persisted file.
 type PersistedFile struct {
 	Filename string `json:"filename"`
