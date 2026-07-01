@@ -103,6 +103,7 @@ var systemMessageDecoders = map[string]func([]byte) (Message, error){
 	SystemSubtypeTaskNotification: decodeMessageFunc[TaskNotificationMessage]("failed to unmarshal task notification message"),
 	SystemSubtypeTaskStarted:      decodeMessageFunc[TaskStartedMessage]("failed to unmarshal task started message"),
 	SystemSubtypeTaskProgress:     decodeMessageFunc[TaskProgressMessage]("failed to unmarshal task progress message"),
+	SystemSubtypeTaskUpdated:      decodeMessageFunc[TaskUpdatedMessage]("failed to unmarshal task updated message"),
 	SystemSubtypeFilesPersisted:   decodeMessageFunc[FilesPersistedEvent]("failed to unmarshal files persisted event"),
 }
 

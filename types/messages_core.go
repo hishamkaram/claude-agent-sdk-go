@@ -1,18 +1,21 @@
 package types
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
 
 // UserMessage represents a message from the user.
 type UserMessage struct {
-	Type            string      `json:"type"`
-	Content         interface{} `json:"content"` // Can be string or []ContentBlock
-	ParentToolUseID *string     `json:"parent_tool_use_id,omitempty"`
-	IsReplay        bool        `json:"isReplay,omitempty"`
-	UUID            string      `json:"uuid,omitempty"` // User message identifier for checkpoint targeting
-	SessionID       string      `json:"session_id,omitempty"`
+	Type            string         `json:"type"`
+	Content         interface{}    `json:"content"` // Can be string or []ContentBlock
+	ParentToolUseID *string        `json:"parent_tool_use_id,omitempty"`
+	IsReplay        bool           `json:"isReplay,omitempty"`
+	UUID            string         `json:"uuid,omitempty"` // User message identifier for checkpoint targeting
+	SessionID       string         `json:"session_id,omitempty"`
+	Timestamp       string         `json:"timestamp,omitempty"`
+	ToolUseResult   *ToolUseResult `json:"tool_use_result,omitempty"`
 }
 
 // GetMessageType returns the type of the message.
@@ -31,8 +34,9 @@ func (m *UserMessage) isMessage() {}
 func (m *UserMessage) UnmarshalJSON(data []byte) error {
 	type Alias UserMessage
 	aux := &struct {
-		Content json.RawMessage            `json:"content"`
-		Message map[string]json.RawMessage `json:"message"` // Handle nested message format from CLI
+		Content          json.RawMessage            `json:"content"`
+		Message          map[string]json.RawMessage `json:"message"` // Handle nested message format from CLI
+		ToolUseResultRaw json.RawMessage            `json:"tool_use_result"`
 		*Alias
 	}{
 		Alias: (*Alias)(m),
@@ -41,6 +45,7 @@ func (m *UserMessage) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return fmt.Errorf("types.UserMessage.UnmarshalJSON: %w", err)
 	}
+	m.ToolUseResult = parseWorkflowToolUseResult(aux.ToolUseResultRaw)
 
 	var contentRaw json.RawMessage
 
@@ -91,6 +96,18 @@ func (m *UserMessage) UnmarshalJSON(data []byte) error {
 	}
 
 	return NewMessageParseError("types.UserMessage.UnmarshalJSON: content must be string or array of content blocks")
+}
+
+func parseWorkflowToolUseResult(raw json.RawMessage) *ToolUseResult {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) || raw[0] != '{' {
+		return nil
+	}
+	var result ToolUseResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil
+	}
+	return &result
 }
 
 // AssistantMessage represents a message from Claude assistant.
@@ -179,12 +196,18 @@ func (m *AssistantMessage) MarshalJSON() ([]byte, error) {
 
 // SystemMessage represents a system message with metadata.
 type SystemMessage struct {
-	Type      string                 `json:"type"`
-	Subtype   string                 `json:"subtype,omitempty"`
-	Data      map[string]interface{} `json:"data,omitempty"`
-	Response  map[string]interface{} `json:"response,omitempty"`   // For control_response messages
-	Request   map[string]interface{} `json:"request,omitempty"`    // For control_request messages
-	RequestID string                 `json:"request_id,omitempty"` // For control_request/control_response messages (top-level field)
+	Type              string                 `json:"type"`
+	Subtype           string                 `json:"subtype,omitempty"`
+	Data              map[string]interface{} `json:"data,omitempty"`
+	Response          map[string]interface{} `json:"response,omitempty"`   // For control_response messages
+	Request           map[string]interface{} `json:"request,omitempty"`    // For control_request messages
+	RequestID         string                 `json:"request_id,omitempty"` // For control_request/control_response messages (top-level field)
+	Tools             []string               `json:"tools,omitempty"`
+	CWD               string                 `json:"cwd,omitempty"`
+	Model             string                 `json:"model,omitempty"`
+	PermissionMode    string                 `json:"permissionMode,omitempty"`
+	ClaudeCodeVersion string                 `json:"claude_code_version,omitempty"`
+	SessionID         string                 `json:"session_id,omitempty"`
 }
 
 // GetMessageType returns the type of the message.

@@ -175,10 +175,10 @@ func TestUnmarshalMessage_AllTypes(t *testing.T) {
 func TestUnmarshalMessage_CurrentClaudeTaskSubtypesWithoutPinnedSchema(t *testing.T) {
 	t.Parallel()
 
-	// Claude Code CLI 2.1.132 contains these stream-json system subtypes, but
-	// this SDK has no pinned fixture for their full payload shape yet. Keep
-	// them generic until a real stream capture establishes the typed contract.
-	for _, subtype := range []string{"task_updated", "task_summary"} {
+	// Claude Code CLI contains this stream-json system subtype, but this SDK has
+	// no pinned fixture for its full payload shape yet. Keep it generic until a
+	// real stream capture establishes the typed contract.
+	for _, subtype := range []string{"task_summary"} {
 		subtype := subtype
 		t.Run(subtype, func(t *testing.T) {
 			t.Parallel()
@@ -248,6 +248,11 @@ func TestUnmarshalSystemMessage_Subtypes(t *testing.T) {
 			wantSubtype: "task_progress",
 		},
 		{
+			name:        "task_updated",
+			json:        `{"type":"system","subtype":"task_updated","task_id":"t1","patch":{"status":"completed"},"uuid":"u","session_id":"s"}`,
+			wantSubtype: "task_updated",
+		},
+		{
 			name:        "files_persisted",
 			json:        `{"type":"system","subtype":"files_persisted","files":[],"failed":[],"processed_at":"now","uuid":"u","session_id":"s"}`,
 			wantSubtype: "files_persisted",
@@ -305,6 +310,7 @@ func TestShouldDisplayToUser(t *testing.T) {
 		{"TaskNotificationMessage", &TaskNotificationMessage{Type: "system"}, true},
 		{"TaskStartedMessage", &TaskStartedMessage{Type: "system"}, true},
 		{"TaskProgressMessage", &TaskProgressMessage{Type: "system"}, false},
+		{"TaskUpdatedMessage", &TaskUpdatedMessage{Type: "system"}, false},
 		{"FilesPersistedEvent", &FilesPersistedEvent{Type: "system"}, false},
 		{"UnknownMessage", &UnknownMessage{Type: "unknown"}, false},
 	}

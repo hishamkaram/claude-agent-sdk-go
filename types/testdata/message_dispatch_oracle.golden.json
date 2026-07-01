@@ -40,6 +40,10 @@
     "*types.TaskStartedMessage | {\"type\":\"system\",\"subtype\":\"task_started\",\"task_id\":\"\",\"description\":\"\",\"uuid\":\"\",\"session_id\":\"\"}"
   ],
   [
+    "subtype:task_updated",
+    "*types.TaskUpdatedMessage | {\"type\":\"system\",\"subtype\":\"task_updated\",\"task_id\":\"\",\"patch\":{},\"uuid\":\"\",\"session_id\":\"\"}"
+  ],
+  [
     "subtype:unknown_subtype",
     "*types.SystemMessage | {\"type\":\"system\",\"subtype\":\"some_future_subtype\"}"
   ],

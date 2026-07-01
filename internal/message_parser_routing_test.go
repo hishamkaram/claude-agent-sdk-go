@@ -91,7 +91,7 @@ func TestParseMessage_NewTopLevelTypes(t *testing.T) {
 	}
 }
 
-// TestParseMessage_SystemSubtypes tests routing for 9 typed system subtypes.
+// TestParseMessage_SystemSubtypes tests routing for typed system subtypes.
 func TestParseMessage_SystemSubtypes(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -143,6 +143,11 @@ func TestParseMessage_SystemSubtypes(t *testing.T) {
 			name:   "task_progress",
 			input:  systemTaskProgress,
 			goType: "*types.TaskProgressMessage",
+		},
+		{
+			name:   "task_updated",
+			input:  systemTaskUpdated,
+			goType: "*types.TaskUpdatedMessage",
 		},
 		{
 			name:   "files_persisted",
