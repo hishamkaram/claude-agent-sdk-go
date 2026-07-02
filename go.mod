@@ -8,8 +8,8 @@ retract v0.2.0 // Accidentally published version
 
 require (
 	go.uber.org/goleak v1.3.0
-	go.uber.org/zap v1.27.1
-	golang.org/x/text v0.31.0
+	go.uber.org/zap v1.28.0
+	golang.org/x/text v0.38.0
 )
 
 require (
