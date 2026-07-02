@@ -45,6 +45,59 @@ func (c *Client) SetPermissionMode(ctx context.Context, mode types.PermissionMod
 	)
 }
 
+// SetEffort changes the session reasoning effort through Claude Code's
+// Agent SDK flag-settings control path and verifies the applied setting by
+// reading back get_settings.applied.effort.
+func (c *Client) SetEffort(ctx context.Context, effort types.EffortLevel) error {
+	if effort == "" {
+		return fmt.Errorf("Client.SetEffort: effort: %w", types.ErrEmptyParameter)
+	}
+	settings, err := c.applyFlagSettings(ctx, types.FlagSettings{EffortLevel: effort})
+	if err != nil {
+		return err
+	}
+	if settings.Applied.Effort != string(effort) {
+		return fmt.Errorf("Client.SetEffort: applied effort %q, want %q", settings.Applied.Effort, effort)
+	}
+	return nil
+}
+
+// SetUltracode toggles Claude Code workflow automation for the active session
+// through Agent SDK flag settings and verifies get_settings.applied.ultracode.
+func (c *Client) SetUltracode(ctx context.Context, enabled bool) error {
+	settings, err := c.applyFlagSettings(ctx, types.FlagSettings{Ultracode: &enabled})
+	if err != nil {
+		return err
+	}
+	if settings.Applied.Ultracode == nil {
+		return fmt.Errorf("Client.SetUltracode: applied ultracode missing, want %t", enabled)
+	}
+	if *settings.Applied.Ultracode != enabled {
+		return fmt.Errorf("Client.SetUltracode: applied ultracode %t, want %t", *settings.Applied.Ultracode, enabled)
+	}
+	return nil
+}
+
+func (c *Client) applyFlagSettings(ctx context.Context, settings types.FlagSettings) (*types.SettingsResult, error) {
+	q, err := c.activeQuery("not connected - call Connect() first")
+	if err != nil {
+		return nil, err
+	}
+	if sendErr := sendControlNoResponse(
+		ctx,
+		q,
+		map[string]interface{}{"subtype": "apply_flag_settings", "flagSettings": settings},
+		"Client.applyFlagSettings",
+	); sendErr != nil {
+		return nil, sendErr
+	}
+	applied, err := c.GetSettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("Client.applyFlagSettings: verify get_settings: %w", err)
+	}
+	return applied, nil
+}
+
 // Interrupt sends an interrupt control request to cancel the active query.
 func (c *Client) Interrupt(ctx context.Context) error {
 	q, err := c.activeQuery("Client.Interrupt: not connected - call Connect() first")

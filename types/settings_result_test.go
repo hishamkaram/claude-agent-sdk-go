@@ -5,6 +5,23 @@ import (
 	"testing"
 )
 
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+func assertBoolPtrEqual(t *testing.T, got, want *bool) {
+	t.Helper()
+	if got == nil || want == nil {
+		if got != want {
+			t.Errorf("Applied.Ultracode = %v, want %v", got, want)
+		}
+		return
+	}
+	if *got != *want {
+		t.Errorf("Applied.Ultracode = %t, want %t", *got, *want)
+	}
+}
+
 func TestSettingsResult_JSONRoundtrip(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -15,13 +32,15 @@ func TestSettingsResult_JSONRoundtrip(t *testing.T) {
 			name: "all fields populated",
 			result: SettingsResult{
 				Applied: AppliedSettings{
-					Model:  "claude-sonnet-4-6",
-					Effort: "high",
+					Model:     "claude-sonnet-4-6",
+					Effort:    "high",
+					Ultracode: boolPtr(true),
 				},
 				Raw: map[string]interface{}{
-					"model":  "claude-sonnet-4-6",
-					"effort": "high",
-					"custom": "value",
+					"model":     "claude-sonnet-4-6",
+					"effort":    "high",
+					"ultracode": true,
+					"custom":    "value",
 				},
 			},
 		},
@@ -60,6 +79,7 @@ func TestSettingsResult_JSONRoundtrip(t *testing.T) {
 			if decoded.Applied.Effort != tt.result.Applied.Effort {
 				t.Errorf("Applied.Effort = %q, want %q", decoded.Applied.Effort, tt.result.Applied.Effort)
 			}
+			assertBoolPtrEqual(t, decoded.Applied.Ultracode, tt.result.Applied.Ultracode)
 			if len(decoded.Raw) != len(tt.result.Raw) {
 				t.Errorf("Raw len = %d, want %d", len(decoded.Raw), len(tt.result.Raw))
 			}
@@ -70,7 +90,7 @@ func TestSettingsResult_JSONRoundtrip(t *testing.T) {
 func TestSettingsResult_WireFormatKeys(t *testing.T) {
 	t.Parallel()
 	result := SettingsResult{
-		Applied: AppliedSettings{Model: "test", Effort: "low"},
+		Applied: AppliedSettings{Model: "test", Effort: "low", Ultracode: boolPtr(true)},
 		Raw:     map[string]interface{}{"key": "val"},
 	}
 
@@ -95,7 +115,7 @@ func TestSettingsResult_WireFormatKeys(t *testing.T) {
 	if !ok {
 		t.Fatal("expected 'applied' to be a map")
 	}
-	for _, key := range []string{"model", "effort"} {
+	for _, key := range []string{"model", "effort", "ultracode"} {
 		if _, ok := applied[key]; !ok {
 			t.Errorf("expected applied JSON key %q", key)
 		}
@@ -125,6 +145,7 @@ func TestSettingsResult_OmitEmptyRaw(t *testing.T) {
 
 func FuzzSettingsResult_Unmarshal(f *testing.F) {
 	f.Add([]byte(`{"applied":{"model":"m","effort":"e"},"raw":{}}`))
+	f.Add([]byte(`{"applied":{"model":"m","effort":"xhigh","ultracode":true},"raw":{}}`))
 	f.Add([]byte(`{}`))
 	f.Add([]byte(`{"applied":{"model":"","effort":""}}`))
 

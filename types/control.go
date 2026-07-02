@@ -461,6 +461,20 @@ type SDKControlSetPermissionModeRequest struct {
 	Mode    string `json:"mode"`
 }
 
+// FlagSettings contains session-scoped Claude Code flag settings that can be
+// applied through the Agent SDK control channel.
+type FlagSettings struct {
+	EffortLevel EffortLevel `json:"effortLevel,omitempty"`
+	Ultracode   *bool       `json:"ultracode,omitempty"`
+}
+
+// SDKControlApplyFlagSettingsRequest represents a request to apply
+// session-scoped flag settings.
+type SDKControlApplyFlagSettingsRequest struct {
+	Subtype      string       `json:"subtype"` // "apply_flag_settings"
+	FlagSettings FlagSettings `json:"flagSettings"`
+}
+
 // SDKHookCallbackRequest represents a hook callback request.
 type SDKHookCallbackRequest struct {
 	Subtype    string      `json:"subtype"` // "hook_callback"

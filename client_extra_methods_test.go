@@ -49,6 +49,46 @@ func TestGetSettings_BeforeConnect(t *testing.T) {
 	}
 }
 
+func TestSetEffort_BeforeConnect(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
+
+	client, err := NewClient(ctx, opts)
+	if err != nil {
+		t.Skip("Could not create client")
+	}
+	defer func() { _ = client.Close(ctx) }()
+
+	err = client.SetEffort(ctx, types.EffortHigh)
+	if err == nil {
+		t.Fatal("expected error when calling SetEffort before Connect()")
+	}
+	if !types.IsCLIConnectionError(err) {
+		t.Errorf("expected CLIConnectionError, got: %v", err)
+	}
+}
+
+func TestSetUltracode_BeforeConnect(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	opts := types.NewClaudeAgentOptions().WithCLIPath("/bin/echo")
+
+	client, err := NewClient(ctx, opts)
+	if err != nil {
+		t.Skip("Could not create client")
+	}
+	defer func() { _ = client.Close(ctx) }()
+
+	err = client.SetUltracode(ctx, true)
+	if err == nil {
+		t.Fatal("expected error when calling SetUltracode before Connect()")
+	}
+	if !types.IsCLIConnectionError(err) {
+		t.Errorf("expected CLIConnectionError, got: %v", err)
+	}
+}
+
 // TestReloadPlugins_BeforeConnect ensures ReloadPlugins returns CLIConnectionError when not connected.
 func TestReloadPlugins_BeforeConnect(t *testing.T) {
 	t.Parallel()

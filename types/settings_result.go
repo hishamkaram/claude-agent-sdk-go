@@ -8,6 +8,7 @@ type SettingsResult struct {
 
 // AppliedSettings contains the structured settings currently in effect.
 type AppliedSettings struct {
-	Model  string `json:"model"`
-	Effort string `json:"effort"`
+	Model     string `json:"model"`
+	Effort    string `json:"effort"`
+	Ultracode *bool  `json:"ultracode,omitempty"`
 }

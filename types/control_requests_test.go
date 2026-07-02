@@ -128,6 +128,82 @@ func TestSDKControlRewindFilesRequest_JSONRoundtrip(t *testing.T) {
 	}
 }
 
+func TestSDKControlApplyFlagSettingsRequest_JSONRoundtrip(t *testing.T) {
+	t.Parallel()
+	ultracode := true
+	tests := []struct {
+		name string
+		req  SDKControlApplyFlagSettingsRequest
+	}{
+		{
+			name: "effort high",
+			req: SDKControlApplyFlagSettingsRequest{
+				Subtype:      "apply_flag_settings",
+				FlagSettings: FlagSettings{EffortLevel: EffortHigh},
+			},
+		},
+		{
+			name: "effort max",
+			req: SDKControlApplyFlagSettingsRequest{
+				Subtype:      "apply_flag_settings",
+				FlagSettings: FlagSettings{EffortLevel: EffortMax},
+			},
+		},
+		{
+			name: "ultracode true",
+			req: SDKControlApplyFlagSettingsRequest{
+				Subtype:      "apply_flag_settings",
+				FlagSettings: FlagSettings{Ultracode: &ultracode},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			data, err := json.Marshal(tt.req)
+			if err != nil {
+				t.Fatalf("failed to marshal: %v", err)
+			}
+
+			var decoded SDKControlApplyFlagSettingsRequest
+			if err := json.Unmarshal(data, &decoded); err != nil {
+				t.Fatalf("failed to unmarshal: %v", err)
+			}
+			if decoded.Subtype != tt.req.Subtype {
+				t.Errorf("Subtype = %q, want %q", decoded.Subtype, tt.req.Subtype)
+			}
+			if decoded.FlagSettings.EffortLevel != tt.req.FlagSettings.EffortLevel {
+				t.Errorf("EffortLevel = %q, want %q", decoded.FlagSettings.EffortLevel, tt.req.FlagSettings.EffortLevel)
+			}
+			if tt.req.FlagSettings.Ultracode != nil {
+				if decoded.FlagSettings.Ultracode == nil || *decoded.FlagSettings.Ultracode != *tt.req.FlagSettings.Ultracode {
+					t.Fatalf("Ultracode = %#v, want %#v", decoded.FlagSettings.Ultracode, tt.req.FlagSettings.Ultracode)
+				}
+			}
+
+			var raw map[string]interface{}
+			if err := json.Unmarshal(data, &raw); err != nil {
+				t.Fatalf("failed to unmarshal to map: %v", err)
+			}
+			if raw["subtype"] != "apply_flag_settings" {
+				t.Fatalf("subtype = %q, want apply_flag_settings", raw["subtype"])
+			}
+			flagSettings, ok := raw["flagSettings"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("expected JSON key 'flagSettings'")
+			}
+			if tt.req.FlagSettings.EffortLevel != "" && flagSettings["effortLevel"] != string(tt.req.FlagSettings.EffortLevel) {
+				t.Errorf("effortLevel = %q, want %q", flagSettings["effortLevel"], tt.req.FlagSettings.EffortLevel)
+			}
+			if tt.req.FlagSettings.Ultracode != nil && flagSettings["ultracode"] != *tt.req.FlagSettings.Ultracode {
+				t.Errorf("ultracode = %#v, want %t", flagSettings["ultracode"], *tt.req.FlagSettings.Ultracode)
+			}
+		})
+	}
+}
+
 func TestSDKControlMcpStatusRequest_JSONRoundtrip(t *testing.T) {
 	t.Parallel()
 	req := SDKControlMcpStatusRequest{
