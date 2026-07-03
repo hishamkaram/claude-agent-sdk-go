@@ -291,6 +291,13 @@ func (o *ClaudeAgentOptions) WithToolCallbackTimeout(d time.Duration) *ClaudeAge
 	return o
 }
 
+// WithControlResponseTimeout sets the timeout for SDK control responses.
+// If zero, defaults to 30 seconds.
+func (o *ClaudeAgentOptions) WithControlResponseTimeout(d time.Duration) *ClaudeAgentOptions {
+	o.ControlResponseTimeout = d
+	return o
+}
+
 // WithHooks sets the hook configurations.
 func (o *ClaudeAgentOptions) WithHooks(hooks map[HookEvent][]HookMatcher) *ClaudeAgentOptions {
 	o.Hooks = hooks

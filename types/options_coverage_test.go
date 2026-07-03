@@ -325,6 +325,14 @@ func TestWithBuilders_AllMethods(t *testing.T) {
 		}
 	})
 
+	t.Run("WithControlResponseTimeout", func(t *testing.T) {
+		t.Parallel()
+		opts := NewClaudeAgentOptions().WithControlResponseTimeout(3 * time.Second)
+		if opts.ControlResponseTimeout != 3*time.Second {
+			t.Errorf("ControlResponseTimeout = %v", opts.ControlResponseTimeout)
+		}
+	})
+
 	t.Run("WithHooks", func(t *testing.T) {
 		t.Parallel()
 		hooks := map[HookEvent][]HookMatcher{

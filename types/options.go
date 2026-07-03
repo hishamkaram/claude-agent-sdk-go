@@ -149,10 +149,11 @@ type ClaudeAgentOptions struct {
 	Verbose bool `json:"-"` // Enable verbose debug logging
 
 	// Callbacks (not marshaled to JSON)
-	CanUseTool          CanUseToolFunc              `json:"-"`
-	ToolCallbackTimeout time.Duration               `json:"-"` // Timeout for CanUseTool callback; defaults to 5m if zero
-	Hooks               map[HookEvent][]HookMatcher `json:"-"`
-	Stderr              StderrCallbackFunc          `json:"-"`
+	CanUseTool             CanUseToolFunc              `json:"-"`
+	ToolCallbackTimeout    time.Duration               `json:"-"` // Timeout for CanUseTool callback; defaults to 5m if zero
+	ControlResponseTimeout time.Duration               `json:"-"` // Timeout for SDK control responses; defaults to 30s if zero
+	Hooks                  map[HookEvent][]HookMatcher `json:"-"`
+	Stderr                 StderrCallbackFunc          `json:"-"`
 
 	// Stderr file logging (SDK-managed, configuration-time only)
 	// - nil (default): No file logging

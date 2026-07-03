@@ -86,7 +86,7 @@ func (c *Client) applyFlagSettings(ctx context.Context, settings types.FlagSetti
 	if sendErr := sendControlNoResponse(
 		ctx,
 		q,
-		map[string]interface{}{"subtype": "apply_flag_settings", "flagSettings": settings},
+		map[string]interface{}{"subtype": "apply_flag_settings", "settings": settings},
 		"Client.applyFlagSettings",
 	); sendErr != nil {
 		return nil, sendErr
