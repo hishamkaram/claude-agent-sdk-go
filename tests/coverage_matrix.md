@@ -39,7 +39,7 @@ go test -tags=integration -race -count=5 -p 1 ./tests/... -timeout=1800s
 | `SlashCommands` | :610 | ✅ | `TestClient_SlashCommands` | Asserts `/help` present |
 | `SupportedModels` | :621 | ✅ | `TestClient_SupportedModels` | |
 | `SetModel` | :633 | ✅ | `TestClient_SetModel` | Cycles through advertised models |
-| `SetPermissionMode` | :656 | ✅ | `TestClient_SetPermissionMode` | 3 modes tested |
+| `SetPermissionMode` | :656 | ✅ | `TestClient_SetPermissionMode`, `TestCLI_PermissionModes` | Uses discovered CLI modes |
 | `ProcessID` | :678 | ✅ | `TestClient_ProcessID`, `TestInteractions_ReconnectAfterClose` | |
 | `Interrupt` | :693 | 🔒 | `TestClient_Interrupt_DuringStream` | |
 | `StreamInput` | :713 | 🔒 | `TestClient_StreamInput_AppendMidTurn` | Skips if CLI rejects |

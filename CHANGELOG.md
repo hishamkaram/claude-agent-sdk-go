@@ -10,6 +10,10 @@ All notable changes to the Claude Agent SDK for Go are documented in this file.
   backward-compatible source-layout change with no public API behavior change.
 
 ### Added
+- `Client.SupportedPermissionModes()` and `DiscoverSupportedPermissionModes()`
+  for discovering the installed Claude Code CLI's supported permission modes
+  from future structured init metadata, `claude --help`, or a conservative
+  fallback.
 - Real-CLI integration test suite under `tests/integration_*_test.go`,
   gated by the `integration` Go build tag. Covers every public `Client`
   method, the `sessions` package API, all 23 `HookEvent` constants, the

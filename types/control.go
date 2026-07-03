@@ -14,6 +14,25 @@ const (
 	PermissionModeDontAsk           PermissionMode = "dontAsk"
 )
 
+// PermissionModeSource identifies how a supported permission mode was discovered.
+type PermissionModeSource string
+
+const (
+	PermissionModeSourceCLIHelp  PermissionModeSource = "cli_help"
+	PermissionModeSourceInit     PermissionModeSource = "init"
+	PermissionModeSourceFallback PermissionModeSource = "fallback"
+)
+
+// SupportedPermissionMode describes one provider-native permission mode
+// supported by the installed Claude CLI. ProviderValue is a string, not
+// PermissionMode, so callers can see unknown future CLI values and decide
+// whether to expose them.
+type SupportedPermissionMode struct {
+	ProviderValue string               `json:"provider_value"`
+	Source        PermissionModeSource `json:"source"`
+	Version       string               `json:"version,omitempty"`
+}
+
 // PermissionBehavior represents the behavior for a permission rule.
 type PermissionBehavior string
 
