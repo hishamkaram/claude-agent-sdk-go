@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
+
+const defaultControlResponseTimeout = 30 * time.Second
 
 // handleControlResponse handles a control response message.
 func (q *Query) handleControlResponse(msg *types.SystemMessage) error {
@@ -82,6 +85,8 @@ func (q *Query) sendControlRequest(ctx context.Context, request map[string]inter
 	if !q.isStreamingMode {
 		return nil, types.NewControlProtocolError("control requests require streaming mode")
 	}
+	waitCtx, cancel := q.controlResponseContext(ctx)
+	defer cancel()
 
 	// Generate unique request ID
 	requestID := q.generateRequestID()
@@ -108,7 +113,7 @@ func (q *Query) sendControlRequest(ctx context.Context, request map[string]inter
 		return nil, types.NewControlProtocolErrorWithCause("failed to marshal control request", err)
 	}
 
-	if err := q.transport.Write(ctx, string(data)); err != nil {
+	if err := q.transport.Write(waitCtx, string(data)); err != nil {
 		q.mu.Lock()
 		delete(q.requestMap, requestID)
 		q.mu.Unlock()
@@ -122,17 +127,28 @@ func (q *Query) sendControlRequest(ctx context.Context, request map[string]inter
 			return nil, result.err
 		}
 		return result.response, nil
-	case <-ctx.Done():
+	case <-waitCtx.Done():
 		q.mu.Lock()
 		delete(q.requestMap, requestID)
 		q.mu.Unlock()
-		return nil, ctx.Err()
+		return nil, waitCtx.Err()
 	case <-q.ctx.Done():
 		q.mu.Lock()
 		delete(q.requestMap, requestID)
 		q.mu.Unlock()
 		return nil, types.NewControlProtocolError("query stopped")
 	}
+}
+
+func (q *Query) controlResponseContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	timeout := defaultControlResponseTimeout
+	if q.options != nil && q.options.ControlResponseTimeout > 0 {
+		timeout = q.options.ControlResponseTimeout
+	}
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= timeout {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, timeout)
 }
 
 // sendSuccessResponse sends a success control response.

@@ -471,8 +471,51 @@ type FlagSettings struct {
 // SDKControlApplyFlagSettingsRequest represents a request to apply
 // session-scoped flag settings.
 type SDKControlApplyFlagSettingsRequest struct {
-	Subtype      string       `json:"subtype"` // "apply_flag_settings"
-	FlagSettings FlagSettings `json:"flagSettings"`
+	Subtype  string       `json:"subtype"` // "apply_flag_settings"
+	Settings FlagSettings `json:"settings"`
+
+	// Deprecated: use Settings. This field is marshaled as "settings" for
+	// source compatibility with callers that populated the old SDK field.
+	FlagSettings FlagSettings `json:"-"`
+}
+
+func (r SDKControlApplyFlagSettingsRequest) MarshalJSON() ([]byte, error) {
+	type wireRequest struct {
+		Subtype  string       `json:"subtype"`
+		Settings FlagSettings `json:"settings"`
+	}
+	settings := r.Settings
+	if flagSettingsEmpty(settings) {
+		settings = r.FlagSettings
+	}
+	return json.Marshal(wireRequest{
+		Subtype:  r.Subtype,
+		Settings: settings,
+	})
+}
+
+func (r *SDKControlApplyFlagSettingsRequest) UnmarshalJSON(data []byte) error {
+	type wireRequest struct {
+		Subtype            string       `json:"subtype"`
+		Settings           FlagSettings `json:"settings"`
+		LegacyFlagSettings FlagSettings `json:"flagSettings"`
+	}
+	var wire wireRequest
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	settings := wire.Settings
+	if flagSettingsEmpty(settings) {
+		settings = wire.LegacyFlagSettings
+	}
+	r.Subtype = wire.Subtype
+	r.Settings = settings
+	r.FlagSettings = settings
+	return nil
+}
+
+func flagSettingsEmpty(settings FlagSettings) bool {
+	return settings.EffortLevel == "" && settings.Ultracode == nil
 }
 
 // SDKHookCallbackRequest represents a hook callback request.

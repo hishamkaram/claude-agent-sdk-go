@@ -159,6 +159,24 @@ func TestClient_GetSettings(t *testing.T) {
 	}
 }
 
+func TestClient_SetUltracode(t *testing.T) {
+	client, ctx := setupClient(t, func(opts *types.ClaudeAgentOptions) {
+		opts.WithSettings("{}")
+		opts.WithSystemPromptString("")
+	})
+
+	if err := client.SetUltracode(ctx, true); err != nil {
+		t.Fatalf("SetUltracode(true): %v", err)
+	}
+	settings, err := client.GetSettings(ctx)
+	if err != nil {
+		t.Fatalf("GetSettings after SetUltracode: %v", err)
+	}
+	if settings.Applied.Ultracode == nil || !*settings.Applied.Ultracode {
+		t.Fatalf("GetSettings.Applied.Ultracode = %v, want true", settings.Applied.Ultracode)
+	}
+}
+
 func TestClient_GetContextUsage(t *testing.T) {
 	client, ctx := setupClient(t, nil)
 

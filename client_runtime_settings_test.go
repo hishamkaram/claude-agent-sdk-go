@@ -86,11 +86,16 @@ func (t *runtimeSettingsTransport) sendControlResponse(request map[string]interf
 
 func newRuntimeSettingsClient(t *testing.T) (*Client, *runtimeSettingsTransport) {
 	t.Helper()
+	return newRuntimeSettingsClientWithOptions(t, types.NewClaudeAgentOptions())
+}
+
+func newRuntimeSettingsClientWithOptions(t *testing.T, opts *types.ClaudeAgentOptions) (*Client, *runtimeSettingsTransport) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	t.Cleanup(cancel)
 
 	transport := newRuntimeSettingsTransport()
-	query := internal.NewQuery(ctx, transport, types.NewClaudeAgentOptions(), log.NewLogger(false), true)
+	query := internal.NewQuery(ctx, transport, opts, log.NewLogger(false), true)
 	if err := query.Start(ctx); err != nil {
 		t.Fatalf("query.Start: %v", err)
 	}
@@ -141,12 +146,12 @@ func TestClientSetEffort_ApplyFlagSettingsAndVerifiesReadback(t *testing.T) {
 	if applyPayload["subtype"] != "apply_flag_settings" {
 		t.Fatalf("subtype = %q, want apply_flag_settings", applyPayload["subtype"])
 	}
-	flagSettings, ok := applyPayload["flagSettings"].(map[string]interface{})
+	settings, ok := applyPayload["settings"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("flagSettings missing or wrong type: %#v", applyPayload["flagSettings"])
+		t.Fatalf("settings missing or wrong type: %#v", applyPayload["settings"])
 	}
-	if flagSettings["effortLevel"] != "high" {
-		t.Fatalf("effortLevel = %q, want high", flagSettings["effortLevel"])
+	if settings["effortLevel"] != "high" {
+		t.Fatalf("effortLevel = %q, want high", settings["effortLevel"])
 	}
 	transport.sendControlResponse(applyReq, nil)
 
@@ -184,9 +189,9 @@ func TestClientSetUltracode_ApplyFlagSettingsAndVerifiesReadback(t *testing.T) {
 	}()
 
 	applyReq := waitForControlRequest(t, transport, 0)
-	flagSettings := controlRequestPayload(t, applyReq)["flagSettings"].(map[string]interface{})
-	if flagSettings["ultracode"] != true {
-		t.Fatalf("ultracode = %#v, want true", flagSettings["ultracode"])
+	settings := controlRequestPayload(t, applyReq)["settings"].(map[string]interface{})
+	if settings["ultracode"] != true {
+		t.Fatalf("ultracode = %#v, want true", settings["ultracode"])
 	}
 	transport.sendControlResponse(applyReq, nil)
 
@@ -209,6 +214,70 @@ func TestClientSetUltracode_ApplyFlagSettingsAndVerifiesReadback(t *testing.T) {
 	}
 }
 
+func TestClientSetUltracode_ApplyFlagSettingsTimeout(t *testing.T) {
+	t.Parallel()
+	client, transport := newRuntimeSettingsClientWithOptions(
+		t,
+		types.NewClaudeAgentOptions().WithControlResponseTimeout(20*time.Millisecond),
+	)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.SetUltracode(context.Background(), true)
+	}()
+
+	applyReq := waitForControlRequest(t, transport, 0)
+	applyPayload := controlRequestPayload(t, applyReq)
+	if applyPayload["subtype"] != "apply_flag_settings" {
+		t.Fatalf("subtype = %q, want apply_flag_settings", applyPayload["subtype"])
+	}
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected timeout error")
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("SetUltracode error = %v, want context deadline exceeded", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("SetUltracode did not return after control response timeout")
+	}
+}
+
+func TestClientSetUltracode_ApplyFlagSettingsTimeoutBeforeCallerDeadline(t *testing.T) {
+	t.Parallel()
+	client, transport := newRuntimeSettingsClientWithOptions(
+		t,
+		types.NewClaudeAgentOptions().WithControlResponseTimeout(20*time.Millisecond),
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.SetUltracode(ctx, true)
+	}()
+
+	applyReq := waitForControlRequest(t, transport, 0)
+	applyPayload := controlRequestPayload(t, applyReq)
+	if applyPayload["subtype"] != "apply_flag_settings" {
+		t.Fatalf("subtype = %q, want apply_flag_settings", applyPayload["subtype"])
+	}
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected timeout error")
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("SetUltracode error = %v, want context deadline exceeded", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("SetUltracode waited for caller deadline instead of control response timeout")
+	}
+}
+
 func TestClientSetUltracode_MissingReadbackFails(t *testing.T) {
 	t.Parallel()
 	client, transport := newRuntimeSettingsClient(t)
@@ -221,9 +290,9 @@ func TestClientSetUltracode_MissingReadbackFails(t *testing.T) {
 	}()
 
 	applyReq := waitForControlRequest(t, transport, 0)
-	flagSettings := controlRequestPayload(t, applyReq)["flagSettings"].(map[string]interface{})
-	if flagSettings["ultracode"] != false {
-		t.Fatalf("ultracode = %#v, want false", flagSettings["ultracode"])
+	settings := controlRequestPayload(t, applyReq)["settings"].(map[string]interface{})
+	if settings["ultracode"] != false {
+		t.Fatalf("ultracode = %#v, want false", settings["ultracode"])
 	}
 	transport.sendControlResponse(applyReq, nil)
 
