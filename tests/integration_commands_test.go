@@ -119,11 +119,18 @@ func TestClient_ProcessID(t *testing.T) {
 func TestClient_SetPermissionMode(t *testing.T) {
 	client, ctx := setupClient(t, nil)
 
-	for _, mode := range []types.PermissionMode{
+	modes := []types.PermissionMode{
 		types.PermissionModeDefault,
 		types.PermissionModeAcceptEdits,
-		types.PermissionModeBypassPermissions,
-	} {
+	}
+	if supportedPermissionModeValues(client.SupportedPermissionModes())[string(types.PermissionModeBypassPermissions)] {
+		modes = append(modes, types.PermissionModeBypassPermissions)
+	}
+	if supportedPermissionModeValues(client.SupportedPermissionModes())[string(types.PermissionModeAuto)] {
+		modes = append(modes, types.PermissionModeAuto)
+	}
+
+	for _, mode := range modes {
 		mode := mode
 		t.Run(string(mode), func(t *testing.T) {
 			if err := client.SetPermissionMode(ctx, mode); err != nil {
@@ -131,6 +138,41 @@ func TestClient_SetPermissionMode(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCLI_PermissionModes(t *testing.T) {
+	client, ctx := setupClient(t, nil)
+
+	modes := client.SupportedPermissionModes()
+	values := supportedPermissionModeValues(modes)
+	t.Logf("SupportedPermissionModes returned %#v", modes)
+	for _, required := range []types.PermissionMode{
+		types.PermissionModeDefault,
+		types.PermissionModePlan,
+		types.PermissionModeAcceptEdits,
+	} {
+		if !values[string(required)] {
+			t.Fatalf("SupportedPermissionModes missing %q: %#v", required, modes)
+		}
+	}
+	if values[string(types.PermissionModeAuto)] {
+		if err := client.SetPermissionMode(ctx, types.PermissionModeAuto); err != nil {
+			t.Fatalf("SetPermissionMode(auto): %v", err)
+		}
+	}
+	if values[string(types.PermissionModeBypassPermissions)] {
+		if err := client.SetPermissionMode(ctx, types.PermissionModeBypassPermissions); err != nil {
+			t.Fatalf("SetPermissionMode(bypassPermissions): %v", err)
+		}
+	}
+}
+
+func supportedPermissionModeValues(modes []types.SupportedPermissionMode) map[string]bool {
+	values := make(map[string]bool, len(modes))
+	for _, mode := range modes {
+		values[mode.ProviderValue] = true
+	}
+	return values
 }
 
 func TestClient_SetModel(t *testing.T) {

@@ -17,7 +17,7 @@ import (
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
-func TestRealCLI_WorkflowLifecycleEvents(t *testing.T) {
+func TestCLI_WorkflowLifecycleEvents(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}

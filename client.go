@@ -19,6 +19,7 @@ type Client struct {
 	transport transport.Transport
 	query     *internal.Query
 	logger    *log.Logger
+	cliPath   string
 
 	mu           sync.Mutex
 	connected    bool
@@ -67,6 +68,7 @@ func NewClient(ctx context.Context, options *types.ClaudeAgentOptions) (*Client,
 		options:             options,
 		transport:           transport.NewSubprocessCLITransport(cliPath, cwd, env, logger, resumeID, options),
 		logger:              logger,
+		cliPath:             cliPath,
 		ctx:                 clientCtx,
 		cancel:              cancel,
 		sessionStoreCleanup: cleanupSessionStore,
