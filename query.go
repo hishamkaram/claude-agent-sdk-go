@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/hishamkaram/claude-agent-sdk-go/internal"
 	"github.com/hishamkaram/claude-agent-sdk-go/internal/log"
@@ -197,7 +198,8 @@ func copyOptionsEnv(options *types.ClaudeAgentOptions) map[string]string {
 }
 
 // forwardQueryMessages drains the query handler's messages into outputChan until
-// the result message arrives, the source channel closes, or ctx is canceled.
+// a result has arrived and no active Claude task remains, the source channel
+// closes, or ctx is canceled.
 // It then closes outputChan and tears down the handler, transport, and
 // session-store temp dir. All dependencies are passed in (no closure capture).
 func forwardQueryMessages(
@@ -215,10 +217,16 @@ func forwardQueryMessages(
 	}()
 
 	messagesChan := queryHandler.GetMessages(ctx)
+	tasks := newActiveTaskTracker()
+	var closeTimer *time.Timer
+	var closeTimerC <-chan time.Time
+	defer stopResponseCloseTimer(closeTimer)
 
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case <-closeTimerC:
 			return
 		case msg, ok := <-messagesChan:
 			if !ok {
@@ -229,8 +237,10 @@ func forwardQueryMessages(
 			// Forward message to output
 			select {
 			case outputChan <- msg:
-				// Check if this is a result message (end of query)
-				if _, isResult := msg.(*types.ResultMessage); isResult {
+				decision := tasks.observe(msg)
+				var closeNow bool
+				closeTimer, closeTimerC, closeNow = applyResponseForwardDecision(closeTimer, decision, tasks)
+				if closeNow {
 					return
 				}
 			case <-ctx.Done():

@@ -351,6 +351,425 @@ func TestClient_ReceiveResponse_GoroutineTracked(t *testing.T) {
 	}
 }
 
+func TestClient_ReceiveResponseClosesAfterPostResultWorkflowNotification(t *testing.T) {
+	t.Parallel()
+
+	client, mockTransport := makeConnectedClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	respCh := client.ReceiveResponse(ctx)
+
+	taskID := "task-agent-1"
+	toolUseID := "toolu_agent_1"
+	taskType := "local_workflow"
+	intermediate := "launched child agent"
+	mockTransport.sendMessage(&types.TaskStartedMessage{
+		Type:      "system",
+		TaskID:    taskID,
+		ToolUseID: &toolUseID,
+		TaskType:  &taskType,
+	})
+	mockTransport.sendMessage(&types.TaskUpdatedMessage{
+		Type:   "system",
+		TaskID: taskID,
+		Patch:  types.TaskUpdatedPatch{Status: "completed"},
+	})
+	mockTransport.sendMessage(&types.ResultMessage{
+		Type:   "result",
+		Result: &intermediate,
+	})
+
+	if msg := receiveTestMessage(t, respCh); msg.GetMessageType() != "system" {
+		t.Fatalf("first message type = %q, want system", msg.GetMessageType())
+	}
+	if msg := receiveTestMessage(t, respCh); msg.GetMessageType() != "system" {
+		t.Fatalf("second message type = %q, want system", msg.GetMessageType())
+	}
+	if msg := receiveTestMessage(t, respCh); msg.GetMessageType() != "result" {
+		t.Fatalf("third message type = %q, want result", msg.GetMessageType())
+	}
+	select {
+	case _, ok := <-respCh:
+		if !ok {
+			t.Fatal("ReceiveResponse closed on intermediate ResultMessage before task notification")
+		}
+		t.Fatal("unexpected extra message before task completion")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	mockTransport.sendMessage(&types.TaskNotificationMessage{
+		Type:      "system",
+		TaskID:    taskID,
+		ToolUseID: &toolUseID,
+		Status:    "completed",
+	})
+
+	if msg := receiveTestMessage(t, respCh); msg.GetMessageType() != "system" {
+		t.Fatalf("fourth message type = %q, want system", msg.GetMessageType())
+	}
+	select {
+	case _, ok := <-respCh:
+		if ok {
+			t.Fatal("ReceiveResponse stayed open after post-result task notification")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ReceiveResponse did not close after post-result task notification")
+	}
+
+	if err := client.Close(ctx); err != nil {
+		t.Logf("Close returned error (acceptable): %v", err)
+	}
+}
+
+func TestClient_ReceiveResponseClosesAfterPostResultWorkflowTerminalUpdate(t *testing.T) {
+	t.Parallel()
+
+	client, mockTransport := makeConnectedClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	respCh := client.ReceiveResponse(ctx)
+
+	taskID := "task-workflow-1"
+	toolUseID := "toolu_workflow_1"
+	taskType := taskTypeLocalWorkflow
+	final := "workflow completed"
+	mockTransport.sendMessage(&types.TaskStartedMessage{
+		Type:      "system",
+		TaskID:    taskID,
+		ToolUseID: &toolUseID,
+		TaskType:  &taskType,
+	})
+	mockTransport.sendMessage(&types.ResultMessage{
+		Type:   "result",
+		Result: &final,
+	})
+
+	if msg := receiveTestMessage(t, respCh); msg.GetMessageType() != "system" {
+		t.Fatalf("first message type = %q, want system", msg.GetMessageType())
+	}
+	if msg := receiveTestMessage(t, respCh); msg.GetMessageType() != "result" {
+		t.Fatalf("second message type = %q, want result", msg.GetMessageType())
+	}
+	select {
+	case _, ok := <-respCh:
+		if !ok {
+			t.Fatal("ReceiveResponse closed before terminal workflow update")
+		}
+		t.Fatal("unexpected extra message before terminal workflow update")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	mockTransport.sendMessage(&types.TaskUpdatedMessage{
+		Type:      "system",
+		TaskID:    taskID,
+		ToolUseID: &toolUseID,
+		Patch:     types.TaskUpdatedPatch{Status: "completed"},
+	})
+
+	if msg := receiveTestMessage(t, respCh); msg.GetMessageType() != "system" {
+		t.Fatalf("third message type = %q, want system", msg.GetMessageType())
+	}
+	select {
+	case _, ok := <-respCh:
+		if ok {
+			t.Fatal("ReceiveResponse stayed open after post-result terminal workflow update")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ReceiveResponse did not close after post-result terminal workflow update")
+	}
+
+	if err := client.Close(ctx); err != nil {
+		t.Logf("Close returned error (acceptable): %v", err)
+	}
+}
+
+func TestClient_ReceiveResponseKeepsGraceCloseAfterUnrelatedFrame(t *testing.T) {
+	t.Parallel()
+
+	client, mockTransport := makeConnectedClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	respCh := client.ReceiveResponse(ctx)
+
+	taskID := "task-workflow-1"
+	toolUseID := "toolu_workflow_1"
+	taskType := taskTypeLocalWorkflow
+	final := "workflow completed"
+	mockTransport.sendMessage(&types.TaskStartedMessage{
+		Type:      "system",
+		TaskID:    taskID,
+		ToolUseID: &toolUseID,
+		TaskType:  &taskType,
+	})
+	mockTransport.sendMessage(&types.TaskUpdatedMessage{
+		Type:      "system",
+		TaskID:    taskID,
+		ToolUseID: &toolUseID,
+		Patch:     types.TaskUpdatedPatch{Status: "completed"},
+	})
+	mockTransport.sendMessage(&types.ResultMessage{
+		Type:   "result",
+		Result: &final,
+	})
+
+	for i := 0; i < 3; i++ {
+		receiveTestMessage(t, respCh)
+	}
+	time.Sleep(20 * time.Millisecond)
+	mockTransport.sendMessage(&types.SystemMessage{
+		Type:    "system",
+		Subtype: "status",
+	})
+
+	if msg := receiveTestMessage(t, respCh); msg.GetMessageType() != "system" {
+		t.Fatalf("fourth message type = %q, want system", msg.GetMessageType())
+	}
+	select {
+	case _, ok := <-respCh:
+		if ok {
+			t.Fatal("ReceiveResponse stayed open after unrelated frame followed terminal result")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ReceiveResponse did not close after unrelated frame followed terminal result")
+	}
+
+	if err := client.Close(ctx); err != nil {
+		t.Logf("Close returned error (acceptable): %v", err)
+	}
+}
+
+func TestClient_ReceiveResponseClosesOnResultWithLegacyTaskType(t *testing.T) {
+	t.Parallel()
+
+	client, mockTransport := makeConnectedClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	respCh := client.ReceiveResponse(ctx)
+
+	taskType := "agent"
+	final := "legacy task completed"
+	mockTransport.sendMessage(&types.TaskStartedMessage{
+		Type:     "system",
+		TaskID:   "task-legacy-1",
+		TaskType: &taskType,
+	})
+	mockTransport.sendMessage(&types.ResultMessage{
+		Type:   "result",
+		Result: &final,
+	})
+
+	if msg := receiveTestMessage(t, respCh); msg.GetMessageType() != "system" {
+		t.Fatalf("first message type = %q, want system", msg.GetMessageType())
+	}
+	result, ok := receiveTestMessage(t, respCh).(*types.ResultMessage)
+	if !ok {
+		t.Fatal("second message was not ResultMessage")
+	}
+	if result.Result == nil || *result.Result != final {
+		t.Fatalf("final result = %v, want %q", result.Result, final)
+	}
+	select {
+	case _, ok := <-respCh:
+		if ok {
+			t.Fatal("ReceiveResponse stayed open after result with legacy task type")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ReceiveResponse did not close after result with legacy task type")
+	}
+
+	if err := client.Close(ctx); err != nil {
+		t.Logf("Close returned error (acceptable): %v", err)
+	}
+}
+
+func TestClient_ReceiveResponseKeepsAgentOpenAfterTerminalChildResultUntilFinalResult(t *testing.T) {
+	t.Parallel()
+
+	client, mockTransport := makeConnectedClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	respCh := client.ReceiveResponse(ctx)
+
+	taskID := "task-agent-1"
+	toolUseID := "toolu_agent_1"
+	taskType := "local_agent"
+	intermediate := "child agent completed"
+	final := "MAIN_RECEIVED: AGENTD_NAMED_AGENT_LIVE_OK"
+	mockTransport.sendMessage(&types.TaskStartedMessage{
+		Type:      "system",
+		TaskID:    taskID,
+		ToolUseID: &toolUseID,
+		TaskType:  &taskType,
+	})
+	mockTransport.sendMessage(&types.TaskUpdatedMessage{
+		Type:      "system",
+		TaskID:    taskID,
+		ToolUseID: &toolUseID,
+		Patch:     types.TaskUpdatedPatch{Status: "completed"},
+	})
+	mockTransport.sendMessage(&types.ResultMessage{
+		Type:   "result",
+		Result: &intermediate,
+	})
+
+	if msg := receiveTestMessage(t, respCh); msg.GetMessageType() != "system" {
+		t.Fatalf("first message type = %q, want system", msg.GetMessageType())
+	}
+	if msg := receiveTestMessage(t, respCh); msg.GetMessageType() != "system" {
+		t.Fatalf("second message type = %q, want system", msg.GetMessageType())
+	}
+	if msg := receiveTestMessage(t, respCh); msg.GetMessageType() != "result" {
+		t.Fatalf("third message type = %q, want result", msg.GetMessageType())
+	}
+	select {
+	case _, ok := <-respCh:
+		if !ok {
+			t.Fatal("ReceiveResponse closed on local-agent child result before parent resumed")
+		}
+		t.Fatal("unexpected extra message before local-agent final result")
+	case <-time.After(terminalTaskUpdateCloseGrace + 50*time.Millisecond):
+	}
+
+	mockTransport.sendMessage(&types.TaskNotificationMessage{
+		Type:      "system",
+		TaskID:    taskID,
+		ToolUseID: &toolUseID,
+		Status:    "completed",
+	})
+	mockTransport.sendMessage(&types.AssistantMessage{
+		Type: "assistant",
+		Content: []types.ContentBlock{
+			&types.TextBlock{Type: "text", Text: final},
+		},
+	})
+	mockTransport.sendMessage(&types.ResultMessage{
+		Type:   "result",
+		Result: &final,
+	})
+
+	if msg := receiveTestMessage(t, respCh); msg.GetMessageType() != "system" {
+		t.Fatalf("fourth message type = %q, want assistant", msg.GetMessageType())
+	}
+	if msg := receiveTestMessage(t, respCh); msg.GetMessageType() != "assistant" {
+		t.Fatalf("fifth message type = %q, want assistant", msg.GetMessageType())
+	}
+	result, ok := receiveTestMessage(t, respCh).(*types.ResultMessage)
+	if !ok {
+		t.Fatal("sixth message was not ResultMessage")
+	}
+	if result.Result == nil || *result.Result != final {
+		t.Fatalf("final result = %v, want %q", result.Result, final)
+	}
+	select {
+	case _, ok := <-respCh:
+		if ok {
+			t.Fatal("ReceiveResponse stayed open after local-agent final result")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ReceiveResponse did not close after local-agent final result")
+	}
+
+	if err := client.Close(ctx); err != nil {
+		t.Logf("Close returned error (acceptable): %v", err)
+	}
+}
+
+func TestClient_ReceiveResponseDoesNotReuseAgentResultForWorkflowClose(t *testing.T) {
+	t.Parallel()
+
+	client, mockTransport := makeConnectedClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	respCh := client.ReceiveResponse(ctx)
+
+	agentTaskID := "task-agent-1"
+	agentToolUseID := "toolu_agent_1"
+	agentTaskType := "local_agent"
+	workflowTaskID := "task-workflow-1"
+	workflowToolUseID := "toolu_workflow_1"
+	workflowTaskType := taskTypeLocalWorkflow
+	intermediate := "child agent completed"
+	final := "parent final result"
+	mockTransport.sendMessage(&types.TaskStartedMessage{
+		Type:      "system",
+		TaskID:    agentTaskID,
+		ToolUseID: &agentToolUseID,
+		TaskType:  &agentTaskType,
+	})
+	mockTransport.sendMessage(&types.ResultMessage{
+		Type:   "result",
+		Result: &intermediate,
+	})
+	mockTransport.sendMessage(&types.TaskNotificationMessage{
+		Type:      "system",
+		TaskID:    agentTaskID,
+		ToolUseID: &agentToolUseID,
+		Status:    "completed",
+	})
+	mockTransport.sendMessage(&types.TaskStartedMessage{
+		Type:      "system",
+		TaskID:    workflowTaskID,
+		ToolUseID: &workflowToolUseID,
+		TaskType:  &workflowTaskType,
+	})
+	mockTransport.sendMessage(&types.TaskNotificationMessage{
+		Type:      "system",
+		TaskID:    workflowTaskID,
+		ToolUseID: &workflowToolUseID,
+		Status:    "completed",
+	})
+
+	for i := 0; i < 5; i++ {
+		receiveTestMessage(t, respCh)
+	}
+	select {
+	case _, ok := <-respCh:
+		if !ok {
+			t.Fatal("ReceiveResponse closed by stale local-agent result after workflow completion")
+		}
+		t.Fatal("unexpected extra message before parent final result")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	mockTransport.sendMessage(&types.ResultMessage{
+		Type:   "result",
+		Result: &final,
+	})
+	result, ok := receiveTestMessage(t, respCh).(*types.ResultMessage)
+	if !ok {
+		t.Fatal("final message was not ResultMessage")
+	}
+	if result.Result == nil || *result.Result != final {
+		t.Fatalf("final result = %v, want %q", result.Result, final)
+	}
+	select {
+	case _, ok := <-respCh:
+		if ok {
+			t.Fatal("ReceiveResponse stayed open after parent final result")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ReceiveResponse did not close after parent final result")
+	}
+
+	if err := client.Close(ctx); err != nil {
+		t.Logf("Close returned error (acceptable): %v", err)
+	}
+}
+
+func receiveTestMessage(t *testing.T, ch <-chan types.Message) types.Message {
+	t.Helper()
+	select {
+	case msg, ok := <-ch:
+		if !ok {
+			t.Fatal("response channel closed before expected message")
+		}
+		return msg
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for response message")
+		return nil
+	}
+}
+
 // TestClient_Close_WaitsForReceiveGoroutines verifies that Close() waits for
 // all in-flight ReceiveResponse goroutines to finish before returning.
 func TestClient_Close_WaitsForReceiveGoroutines(t *testing.T) {
