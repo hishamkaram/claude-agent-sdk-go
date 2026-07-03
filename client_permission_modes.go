@@ -32,10 +32,14 @@ func (c *Client) SupportedPermissionModes() []types.SupportedPermissionMode {
 	if modes := supportedPermissionModesFromInit(initResult); len(modes) > 0 {
 		return modes
 	}
-	if cliPath == "" || ctx == nil {
+	if ctx == nil {
 		return transport.FallbackPermissionModes("")
 	}
-	return transport.DiscoverPermissionModes(ctx, cliPath)
+	options := types.NewClaudeAgentOptions()
+	if cliPath != "" {
+		options.WithCLIPath(cliPath)
+	}
+	return DiscoverSupportedPermissionModes(ctx, options)
 }
 
 func supportedPermissionModesFromInit(initResult *types.InitializeResult) []types.SupportedPermissionMode {
