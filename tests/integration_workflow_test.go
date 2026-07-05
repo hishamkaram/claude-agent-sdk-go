@@ -10,12 +10,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	claude "github.com/hishamkaram/claude-agent-sdk-go"
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
+
+const workflowTaskType = "local_workflow"
 
 func TestCLI_WorkflowLifecycleEvents(t *testing.T) {
 	if testing.Short() {
@@ -114,7 +118,7 @@ func assertWorkflowCLIStream(t *testing.T, raw []byte) {
 				sawAssistantWorkflowToolUse = true
 			}
 		case *types.TaskStartedMessage:
-			if m.TaskType != nil && *m.TaskType == "local_workflow" {
+			if m.TaskType != nil && *m.TaskType == workflowTaskType {
 				sawWorkflowStarted = true
 				workflowTaskID = m.TaskID
 				if m.TaskID == "" || m.WorkflowName == "" {
@@ -124,8 +128,8 @@ func assertWorkflowCLIStream(t *testing.T, raw []byte) {
 		case *types.UserMessage:
 			if m.ToolUseResult != nil && m.ToolUseResult.Status == "async_launched" {
 				sawAsyncLaunch = true
-				if m.ToolUseResult.TaskType != "local_workflow" {
-					t.Fatalf("tool_use_result TaskType = %q, want local_workflow", m.ToolUseResult.TaskType)
+				if m.ToolUseResult.TaskType != workflowTaskType {
+					t.Fatalf("tool_use_result TaskType = %q, want %s", m.ToolUseResult.TaskType, workflowTaskType)
 				}
 				if m.ToolUseResult.TaskID == "" || m.ToolUseResult.WorkflowName == "" || m.ToolUseResult.RunID == "" {
 					t.Fatalf("tool_use_result missing workflow IDs: %+v", m.ToolUseResult)
@@ -203,6 +207,152 @@ func workflowStreamHasBudgetResult(raw []byte) bool {
 		}
 	}
 	return false
+}
+
+func TestClient_StopTaskStopsRunningWorkflow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("AGENTD_CLAUDE_CLI_INTEGRATION") != "1" {
+		t.Skip("AGENTD_CLAUDE_CLI_INTEGRATION=1 not set - skipping Claude Workflow CLI integration test")
+	}
+	maxBudgetUSD := os.Getenv("CLAUDE_WORKFLOW_TEST_MAX_BUDGET_USD")
+	if strings.TrimSpace(maxBudgetUSD) == "" {
+		t.Skip("CLAUDE_WORKFLOW_TEST_MAX_BUDGET_USD not set - skipping Claude Workflow CLI integration test")
+	}
+	budget, err := strconv.ParseFloat(maxBudgetUSD, 64)
+	if err != nil {
+		t.Fatalf("parse CLAUDE_WORKFLOW_TEST_MAX_BUDGET_USD=%q: %v", maxBudgetUSD, err)
+	}
+	requireRunTurns(t)
+
+	client, ctx := setupClient(t, func(opts *types.ClaudeAgentOptions) {
+		workspace := t.TempDir()
+		opts.WithMaxBudgetUSD(budget).
+			WithTools([]string{"Workflow", "Bash"}).
+			WithAllowedTools("Workflow", "Bash").
+			WithCWD(workspace)
+	})
+
+	respCh := client.ReceiveResponse(ctx)
+	prompt := strings.Join([]string{
+		"Use the Workflow tool exactly once.",
+		"Create one phase with one agent.",
+		"The workflow agent must run Bash command: sleep 60 && echo workflow-stop-unreached.",
+		"Do not edit files.",
+	}, "\n")
+	if err := client.Query(ctx, prompt); err != nil {
+		t.Fatalf("Query workflow: %v", err)
+	}
+
+	taskID := waitForWorkflowTaskAndStop(t, ctx, client, respCh)
+	status := waitForWorkflowTerminalStatus(t, ctx, respCh, taskID)
+	t.Logf("workflow task %s terminal status after StopTask: %s", taskID, status)
+	if status != "canceled" && status != "cancelled" && status != "stopped" {
+		t.Fatalf("workflow task terminal status = %q, want canceled/cancelled/stopped", status)
+	}
+	drainResponseChannel(t, ctx, respCh)
+
+	if err := client.Query(ctx, "Reply exactly parent-alive."); err != nil {
+		t.Fatalf("post-stop Query: %v", err)
+	}
+	msgs := collectUntilResult(t, ctx, client)
+	if !strings.Contains(findAssistantText(msgs), "parent-alive") {
+		t.Fatalf("parent session response after StopTask missing proof token; saw %d message(s)", len(msgs))
+	}
+}
+
+func drainResponseChannel(t *testing.T, ctx context.Context, respCh <-chan types.Message) {
+	t.Helper()
+
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("draining stopped workflow response channel: %v", ctx.Err())
+		case _, ok := <-respCh:
+			if !ok {
+				return
+			}
+		}
+	}
+}
+
+func waitForWorkflowTaskAndStop(
+	t *testing.T,
+	ctx context.Context,
+	client *claude.Client,
+	respCh <-chan types.Message,
+) string {
+	t.Helper()
+
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("waiting for workflow task_started: %v", ctx.Err())
+		case msg, ok := <-respCh:
+			if !ok {
+				t.Fatal("response channel closed before workflow task_started")
+			}
+			started, ok := msg.(*types.TaskStartedMessage)
+			if !ok || started.TaskType == nil || *started.TaskType != workflowTaskType {
+				continue
+			}
+			if started.TaskID == "" {
+				t.Fatal("workflow task_started missing task ID")
+			}
+			if err := client.StopTask(ctx, started.TaskID); err != nil {
+				t.Fatalf("StopTask(%s): %v", started.TaskID, err)
+			}
+			return started.TaskID
+		}
+	}
+}
+
+func waitForWorkflowTerminalStatus(
+	t *testing.T,
+	ctx context.Context,
+	respCh <-chan types.Message,
+	taskID string,
+) string {
+	t.Helper()
+
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("waiting for workflow terminal status after StopTask(%s): %v", taskID, ctx.Err())
+		case msg, ok := <-respCh:
+			if !ok {
+				t.Fatalf("response channel closed before workflow terminal status for %s", taskID)
+			}
+			status, ok := workflowTerminalStatus(msg, taskID)
+			if ok {
+				return status
+			}
+		}
+	}
+}
+
+func workflowTerminalStatus(msg types.Message, taskID string) (string, bool) {
+	switch m := msg.(type) {
+	case *types.TaskUpdatedMessage:
+		if m.TaskID == taskID && isTerminalWorkflowStatus(m.Patch.Status) {
+			return m.Patch.Status, true
+		}
+	case *types.TaskNotificationMessage:
+		if m.TaskID == taskID && isTerminalWorkflowStatus(m.Status) {
+			return m.Status, true
+		}
+	}
+	return "", false
+}
+
+func isTerminalWorkflowStatus(status string) bool {
+	switch status {
+	case "completed", "failed", "canceled", "cancelled", "stopped":
+		return true
+	default:
+		return false
+	}
 }
 
 func TestWorkflowStreamHasBudgetResult(t *testing.T) {
