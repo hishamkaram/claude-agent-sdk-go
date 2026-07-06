@@ -10,8 +10,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -83,6 +85,100 @@ func runWorkflowCLIProbe(ctx context.Context, cliPath, workspace, maxBudgetUSD s
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	return stdout.Bytes(), stderr.Bytes(), err
+}
+
+func TestClient_WorkflowAutoModeCanUseToolRequest(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	if os.Getenv("AGENTD_CLAUDE_CLI_INTEGRATION") != "1" {
+		t.Skip("AGENTD_CLAUDE_CLI_INTEGRATION=1 not set - skipping Claude Workflow CLI integration test")
+	}
+	maxBudgetUSD := os.Getenv("CLAUDE_WORKFLOW_TEST_MAX_BUDGET_USD")
+	if strings.TrimSpace(maxBudgetUSD) == "" {
+		t.Skip("CLAUDE_WORKFLOW_TEST_MAX_BUDGET_USD not set - skipping Claude Workflow CLI integration test")
+	}
+	requireRunTurns(t)
+	requireAuth(t)
+	cliPath := requireClaude(t)
+	discoveryCtx, discoveryCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer discoveryCancel()
+	modes := claude.DiscoverSupportedPermissionModes(
+		discoveryCtx,
+		types.NewClaudeAgentOptions().WithCLIPath(cliPath),
+	)
+	if !supportedPermissionModeValues(modes)[string(types.PermissionModeAuto)] {
+		t.Skipf("Claude CLI does not advertise permission mode %q; supported modes: %#v", types.PermissionModeAuto, modes)
+	}
+	budget, err := strconv.ParseFloat(maxBudgetUSD, 64)
+	if err != nil {
+		t.Fatalf("parse CLAUDE_WORKFLOW_TEST_MAX_BUDGET_USD=%q: %v", maxBudgetUSD, err)
+	}
+
+	type permissionProbe struct {
+		toolName        string
+		inputKeys       []string
+		suggestionCount int
+		suggestionTypes []string
+	}
+	var calls []permissionProbe
+	var callsMu sync.Mutex
+
+	canUseTool := func(_ context.Context, toolName string, input map[string]interface{}, permCtx types.ToolPermissionContext) (interface{}, error) {
+		keys := make([]string, 0, len(input))
+		for key := range input {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		typesSeen := make([]string, 0, len(permCtx.Suggestions))
+		for _, suggestion := range permCtx.Suggestions {
+			typesSeen = append(typesSeen, suggestion.Type)
+		}
+		sort.Strings(typesSeen)
+		callsMu.Lock()
+		calls = append(calls, permissionProbe{
+			toolName:        toolName,
+			inputKeys:       keys,
+			suggestionCount: len(permCtx.Suggestions),
+			suggestionTypes: typesSeen,
+		})
+		callsMu.Unlock()
+		return types.PermissionResultDeny{
+			Behavior: "deny",
+			Message:  "workflow permission probe denied before launch",
+		}, nil
+	}
+
+	client, ctx := setupClient(t, func(opts *types.ClaudeAgentOptions) {
+		opts.WithPermissionMode(types.PermissionModeAuto).
+			WithMaxBudgetUSD(budget).
+			WithTools([]string{"Workflow"}).
+			WithSettings(`{"permissions":{"ask":["Workflow"]}}`).
+			WithCanUseTool(canUseTool)
+	})
+
+	prompt := strings.Join([]string{
+		"Use the Workflow tool exactly once.",
+		"Do not use any other tool.",
+		"The workflow should have one phase and one agent.",
+		"The agent should return exactly workflow-ok.",
+	}, "\n")
+	if err := client.Query(ctx, prompt); err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	_ = collectUntilResult(t, ctx, client)
+
+	callsMu.Lock()
+	callsSnapshot := append([]permissionProbe(nil), calls...)
+	callsMu.Unlock()
+	for _, call := range callsSnapshot {
+		t.Logf("permission request: tool=%s input_keys=%v suggestion_count=%d suggestion_types=%v",
+			call.toolName, call.inputKeys, call.suggestionCount, call.suggestionTypes)
+		if call.toolName == "Workflow" {
+			return
+		}
+	}
+	t.Fatalf("Workflow permission request did not reach canUseTool; calls=%+v", callsSnapshot)
 }
 
 func assertWorkflowCLIStream(t *testing.T, raw []byte) {
