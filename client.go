@@ -21,13 +21,15 @@ type Client struct {
 	logger    *log.Logger
 	cliPath   string
 
-	mu           sync.Mutex
-	connected    bool
-	connecting   bool
-	closePending bool
-	ctx          context.Context
-	cancel       context.CancelFunc
-	initResult   *types.InitializeResult
+	mu                    sync.Mutex
+	connected             bool
+	connecting            bool
+	closePending          bool
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	initResult            *types.InitializeResult
+	permissionModes       []types.SupportedPermissionMode
+	permissionModeVersion string
 
 	recvWg sync.WaitGroup
 

@@ -8,6 +8,16 @@ import (
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
 
+func TestBuildCommandArgs_DefaultPermissionModeDefersToCLI(t *testing.T) {
+	t.Parallel()
+
+	opts := types.NewClaudeAgentOptions().WithPermissionMode(types.PermissionModeDefault)
+	args := newTestTransport(t, opts).buildCommandArgs()
+	if hasFlag(args, "--permission-mode") {
+		t.Fatalf("default permission mode must omit --permission-mode, got %v", args)
+	}
+}
+
 func TestBuildCommandArgs_SessionAgent(t *testing.T) {
 	t.Parallel()
 

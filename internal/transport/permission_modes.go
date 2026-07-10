@@ -3,8 +3,14 @@ package transport
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +21,7 @@ import (
 type permissionModeCacheKey struct {
 	cliPath string
 	version string
+	runtime string
 }
 
 var permissionModeDiscoveryCache struct {
@@ -23,23 +30,70 @@ var permissionModeDiscoveryCache struct {
 }
 
 // DiscoverPermissionModes returns the installed Claude CLI permission-mode
-// choices, falling back to conservative modes when help/version discovery fails.
+// choices. An empty result means discovery was unavailable.
 func DiscoverPermissionModes(ctx context.Context, cliPath string) []types.SupportedPermissionMode {
-	versionString := ""
-	if version, ok := tryGetCLIVersion(ctx, cliPath); ok {
-		versionString = version.String()
-		key := permissionModeCacheKey{cliPath: cliPath, version: versionString}
-		if cached := cachedPermissionModes(key); len(cached) > 0 {
-			return cached
+	modes, _ := DiscoverPermissionModesAndVersion(ctx, cliPath)
+	return modes
+}
+
+// DiscoverPermissionModesAndVersion returns permission modes and the version
+// reported by the same CLI process boundary.
+func DiscoverPermissionModesAndVersion(
+	ctx context.Context,
+	cliPath string,
+) (modes []types.SupportedPermissionMode, version string) {
+	modes, version, _ = DiscoverPermissionModesAndVersionWithEnvironment(ctx, cliPath, "", nil)
+	return modes, version
+}
+
+// DiscoverPermissionModesAndVersionWithEnvironment probes the same native CLI
+// environment and working directory used by the session runtime.
+func DiscoverPermissionModesAndVersionWithEnvironment(
+	ctx context.Context,
+	cliPath string,
+	cwd string,
+	env map[string]string,
+) (modes []types.SupportedPermissionMode, version string, err error) {
+	versionString, versionErr := DiscoverCLIVersionWithEnvironment(ctx, cliPath, cwd, env)
+	if versionErr == nil {
+		key := permissionModeCacheKey{
+			cliPath: cliPath,
+			version: versionString,
+			runtime: cliProbeCacheIdentity(cwd, env),
 		}
-		discovered := discoverPermissionModesUncached(ctx, cliPath, versionString)
+		if cached := cachedPermissionModes(key); len(cached) > 0 {
+			return cached, versionString, nil
+		}
+		discovered, discoveryErr := discoverPermissionModesUncached(ctx, cliPath, cwd, env, versionString)
+		if discoveryErr != nil {
+			return nil, versionString, discoveryErr
+		}
 		if shouldCachePermissionModes(discovered) {
 			storePermissionModes(key, discovered)
 		}
-		return cloneSupportedPermissionModes(discovered)
+		return cloneSupportedPermissionModes(discovered), versionString, nil
 	}
 
-	return discoverPermissionModesUncached(ctx, cliPath, versionString)
+	discovered, discoveryErr := discoverPermissionModesUncached(ctx, cliPath, cwd, env, "")
+	if discoveryErr != nil {
+		return nil, "", discoveryErr
+	}
+	return discovered, "", versionErr
+}
+
+// DiscoverCLIVersionWithEnvironment probes the installed CLI version using the
+// same working directory and effective environment as a native session.
+func DiscoverCLIVersionWithEnvironment(
+	ctx context.Context,
+	cliPath string,
+	cwd string,
+	env map[string]string,
+) (string, error) {
+	version, err := getCLIVersionForProbe(ctx, cliPath, cwd, env)
+	if err != nil {
+		return "", err
+	}
+	return version.String(), nil
 }
 
 // ParsePermissionModesFromHelp extracts quoted --permission-mode choices from
@@ -81,51 +135,182 @@ func ParsePermissionModesFromHelp(help string) []string {
 	return values
 }
 
-// FallbackPermissionModes returns the safe static fallback set used when the
-// installed CLI cannot be inspected.
-func FallbackPermissionModes(version string) []types.SupportedPermissionMode {
-	values := []string{
-		string(types.PermissionModeDefault),
-		string(types.PermissionModePlan),
-		string(types.PermissionModeAcceptEdits),
-	}
-	modes := make([]types.SupportedPermissionMode, 0, len(values))
-	for _, value := range values {
-		modes = append(modes, types.SupportedPermissionMode{
-			ProviderValue: value,
-			Source:        types.PermissionModeSourceFallback,
-			Version:       version,
-		})
-	}
-	return modes
-}
-
-func discoverPermissionModesUncached(ctx context.Context, cliPath, version string) []types.SupportedPermissionMode {
+func discoverPermissionModesUncached(
+	ctx context.Context,
+	cliPath string,
+	cwd string,
+	env map[string]string,
+	version string,
+) ([]types.SupportedPermissionMode, error) {
 	helpCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(helpCtx, cliPath, "--help")
+	cmd.WaitDelay = 100 * time.Millisecond
+	configureNativeCLIProbe(cmd, cwd, env)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return FallbackPermissionModes(version)
+		if ctxErr := helpCtx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("claude CLI permission-mode help probe: %w", ctxErr)
+		}
+		return nil, fmt.Errorf("claude CLI permission-mode help probe: %w", err)
 	}
 
-	values := ParsePermissionModesFromHelp(stdout.String() + "\n" + stderr.String())
+	return permissionModesFromHelp(stdout.String()+"\n"+stderr.String(), version), nil
+}
+
+func getCLIVersionForProbe(
+	ctx context.Context,
+	cliPath string,
+	cwd string,
+	env map[string]string,
+) (SemanticVersion, error) {
+	versionCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(versionCtx, cliPath, "--version")
+	cmd.WaitDelay = 100 * time.Millisecond
+	configureNativeCLIProbe(cmd, cwd, env)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		if ctxErr := versionCtx.Err(); ctxErr != nil {
+			return SemanticVersion{}, fmt.Errorf("claude CLI version probe: %w", ctxErr)
+		}
+		return SemanticVersion{}, fmt.Errorf("claude CLI version probe: %w", err)
+	}
+	version, err := ParseSemanticVersion(strings.TrimSpace(stdout.String()))
+	if err != nil {
+		return SemanticVersion{}, fmt.Errorf("claude CLI version probe: %w", err)
+	}
+	return version, nil
+}
+
+func configureNativeCLIProbe(cmd *exec.Cmd, cwd string, env map[string]string) {
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
+	cmd.Env = buildEffectiveProcessEnvironment(env)
+}
+
+func cliProbeCacheIdentity(cwd string, env map[string]string) string {
+	hash := sha256.New()
+	_, _ = hash.Write([]byte(effectiveWorkingDirectory(cwd)))
+	for _, entry := range buildEffectiveProcessEnvironment(env) {
+		_, _ = hash.Write([]byte{0})
+		_, _ = hash.Write([]byte(entry))
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil))
+}
+
+func buildEffectiveProcessEnvironment(overrides map[string]string) []string {
+	return buildEffectiveProcessEnvironmentForOS(os.Environ(), overrides, runtime.GOOS)
+}
+
+type processEnvironmentValue struct {
+	key   string
+	value string
+}
+
+func buildEffectiveProcessEnvironmentForOS(
+	inherited []string,
+	overrides map[string]string,
+	goos string,
+) []string {
+	values := make(map[string]processEnvironmentValue, len(inherited)+len(overrides))
+	for _, entry := range inherited {
+		key, value, ok := splitProcessEnvironmentEntry(entry)
+		if !ok {
+			continue
+		}
+		values[processEnvironmentKey(key, goos)] = processEnvironmentValue{key: key, value: value}
+	}
+
+	overrideKeys := make([]string, 0, len(overrides))
+	for key := range overrides {
+		overrideKeys = append(overrideKeys, key)
+	}
+	sort.Strings(overrideKeys)
+	for _, key := range overrideKeys {
+		values[processEnvironmentKey(key, goos)] = processEnvironmentValue{key: key, value: overrides[key]}
+	}
+
+	result := make([]string, 0, len(values))
+	for _, entry := range values {
+		result = append(result, entry.key+"="+entry.value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func splitProcessEnvironmentEntry(entry string) (key, value string, ok bool) {
+	separator := strings.IndexByte(entry, '=')
+	if separator == 0 {
+		nextSeparator := strings.IndexByte(entry[1:], '=')
+		if nextSeparator >= 0 {
+			separator = nextSeparator + 1
+		}
+	}
+	if separator < 0 {
+		return "", "", false
+	}
+	return entry[:separator], entry[separator+1:], true
+}
+
+func processEnvironmentKey(key, goos string) string {
+	if goos == "windows" {
+		return strings.ToUpper(key)
+	}
+	return key
+}
+
+func effectiveWorkingDirectory(cwd string) string {
+	if cwd == "" {
+		cwd = "."
+	}
+	absolute, err := filepath.Abs(cwd)
+	if err != nil {
+		return filepath.Clean(cwd)
+	}
+	return filepath.Clean(absolute)
+}
+
+func permissionModesFromHelp(help, version string) []types.SupportedPermissionMode {
+	values := ParsePermissionModesFromHelp(help)
 	if len(values) == 0 {
-		return FallbackPermissionModes(version)
+		return nil
 	}
 	modes := make([]types.SupportedPermissionMode, 0, len(values))
 	for _, value := range values {
 		modes = append(modes, types.SupportedPermissionMode{
-			ProviderValue: value,
-			Source:        types.PermissionModeSourceCLIHelp,
-			Version:       version,
+			ProviderValue:  value,
+			CanonicalValue: canonicalPermissionMode(value),
+			Source:         types.PermissionModeSourceCLIHelp,
+			Version:        version,
 		})
 	}
 	return modes
+}
+
+func canonicalPermissionMode(value string) types.PermissionMode {
+	switch value {
+	case "manual", string(types.PermissionModeDefault):
+		return types.PermissionModeDefault
+	case string(types.PermissionModeAcceptEdits):
+		return types.PermissionModeAcceptEdits
+	case string(types.PermissionModeAuto):
+		return types.PermissionModeAuto
+	case string(types.PermissionModePlan):
+		return types.PermissionModePlan
+	case string(types.PermissionModeBypassPermissions):
+		return types.PermissionModeBypassPermissions
+	case string(types.PermissionModeDontAsk):
+		return types.PermissionModeDontAsk
+	default:
+		return ""
+	}
 }
 
 func cachedPermissionModes(key permissionModeCacheKey) []types.SupportedPermissionMode {
@@ -147,15 +332,7 @@ func storePermissionModes(key permissionModeCacheKey, modes []types.SupportedPer
 }
 
 func shouldCachePermissionModes(modes []types.SupportedPermissionMode) bool {
-	if len(modes) == 0 {
-		return false
-	}
-	for _, mode := range modes {
-		if mode.Source == types.PermissionModeSourceFallback {
-			return false
-		}
-	}
-	return true
+	return len(modes) != 0
 }
 
 func cloneSupportedPermissionModes(modes []types.SupportedPermissionMode) []types.SupportedPermissionMode {

@@ -72,21 +72,50 @@ func parseInitModels(raw map[string]interface{}) []types.ModelInfo {
 		if !ok {
 			continue
 		}
-		info := types.ModelInfo{}
-		if v, ok := m["value"].(string); ok {
-			info.Value = v
-		}
-		if v, ok := m["displayName"].(string); ok {
-			info.DisplayName = v
-		}
-		if v, ok := m["description"].(string); ok {
-			info.Description = v
-		}
+		info := parseInitModel(m)
 		if info.Value != "" {
 			models = append(models, info)
 		}
 	}
 	return models
+}
+
+func parseInitModel(raw map[string]interface{}) types.ModelInfo {
+	effortLevels, _ := raw["supportedEffortLevels"].([]interface{})
+	return types.ModelInfo{
+		Value:                    modelStringField(raw, "value"),
+		DisplayName:              modelStringField(raw, "displayName"),
+		Description:              modelStringField(raw, "description"),
+		ResolvedModel:            modelStringField(raw, "resolvedModel"),
+		SupportsEffort:           modelBoolField(raw, "supportsEffort"),
+		SupportedEffortLevels:    parseEffortLevels(effortLevels),
+		SupportsAdaptiveThinking: modelBoolField(raw, "supportsAdaptiveThinking"),
+		SupportsFastMode:         modelBoolField(raw, "supportsFastMode"),
+		SupportsAutoMode:         modelBoolField(raw, "supportsAutoMode"),
+		Disabled:                 modelBoolField(raw, "disabled"),
+	}
+}
+
+func modelStringField(raw map[string]interface{}, key string) string {
+	value, _ := raw[key].(string)
+	return value
+}
+
+func modelBoolField(raw map[string]interface{}, key string) bool {
+	value, _ := raw[key].(bool)
+	return value
+}
+
+func parseEffortLevels(values []interface{}) []types.EffortLevel {
+	levels := make([]types.EffortLevel, 0, len(values))
+	for _, value := range values {
+		raw, ok := value.(string)
+		if !ok || raw == "" {
+			continue
+		}
+		levels = append(levels, types.EffortLevel(raw))
+	}
+	return levels
 }
 
 func parseInitAgents(raw map[string]interface{}) []types.AgentInfo {

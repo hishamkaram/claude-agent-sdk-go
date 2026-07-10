@@ -40,8 +40,7 @@ Successfully implemented extended thinking support and CLI improvements based on
 ```go
 opts := types.NewClaudeAgentOptions().
     WithMaxThinkingTokens(5000).          // Limit thinking to 5k tokens
-    WithMaxBudgetUSD(10.50).              // Stop if cost exceeds $10.50
-    WithModel("claude-3-5-sonnet-20241022")
+    WithMaxBudgetUSD(10.50)               // Stop if cost exceeds $10.50
 
 messages, err := claudesdk.Query(ctx, "Complex math problem", opts)
 ```

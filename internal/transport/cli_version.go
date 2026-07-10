@@ -121,6 +121,7 @@ func GetCLIVersion(ctx context.Context, cliPath string) (SemanticVersion, error)
 
 	// Run: claude --version
 	cmd := exec.CommandContext(versionCtx, cliPath, "--version")
+	cmd.WaitDelay = 100 * time.Millisecond
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

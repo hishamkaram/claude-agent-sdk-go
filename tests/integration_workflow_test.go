@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -354,8 +355,35 @@ func TestClient_StopTaskStopsRunningWorkflow(t *testing.T) {
 	}
 	msgs := collectUntilResult(t, ctx, client)
 	if !strings.Contains(findAssistantText(msgs), "parent-alive") {
-		t.Fatalf("parent session response after StopTask missing proof token; saw %d message(s)", len(msgs))
+		t.Fatalf(
+			"parent session response after StopTask missing proof token; messages=%s",
+			workflowMessageSummary(msgs),
+		)
 	}
+}
+
+func workflowMessageSummary(messages []types.Message) string {
+	summaries := make([]string, 0, len(messages))
+	for _, message := range messages {
+		switch typed := message.(type) {
+		case *types.AssistantMessage:
+			blockTypes := make([]string, 0, len(typed.Content))
+			for _, block := range typed.Content {
+				blockTypes = append(blockTypes, fmt.Sprintf("%T", block))
+			}
+			summaries = append(summaries, fmt.Sprintf("assistant(blocks=%v)", blockTypes))
+		case *types.ResultMessage:
+			summaries = append(summaries, fmt.Sprintf(
+				"result(subtype=%s,is_error=%t,error_count=%d)",
+				typed.Subtype,
+				typed.IsError,
+				len(typed.Errors),
+			))
+		default:
+			summaries = append(summaries, fmt.Sprintf("%T", message))
+		}
+	}
+	return strings.Join(summaries, ",")
 }
 
 func drainResponseChannel(t *testing.T, ctx context.Context, respCh <-chan types.Message) {

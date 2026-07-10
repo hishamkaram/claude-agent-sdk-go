@@ -28,9 +28,10 @@ const (
 // PermissionMode, so callers can see unknown future CLI values and decide
 // whether to expose them.
 type SupportedPermissionMode struct {
-	ProviderValue string               `json:"provider_value"`
-	Source        PermissionModeSource `json:"source"`
-	Version       string               `json:"version,omitempty"`
+	ProviderValue  string               `json:"provider_value"`
+	CanonicalValue PermissionMode       `json:"canonical_value,omitempty"`
+	Source         PermissionModeSource `json:"source"`
+	Version        string               `json:"version,omitempty"`
 }
 
 // PermissionBehavior represents the behavior for a permission rule.

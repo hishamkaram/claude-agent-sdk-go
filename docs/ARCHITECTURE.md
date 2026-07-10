@@ -187,20 +187,14 @@ from dataclasses import dataclass, field
 
 @dataclass
 class AgentOptions:
-    model: str = "claude-opus"
+    model: str = ""
     allowed_tools: list[str] = field(default_factory=list)
     system_prompt: str = ""
     can_use_tool: Optional[Callable] = None
     hooks: dict[HookEvent, list[HookCallback]] = field(default_factory=dict)
 
-    # With Pydantic validation
-    def __post_init__(self):
-        if not self.model:
-            raise ValueError("model is required")
-
 # Usage
 options = AgentOptions(
-    model="claude-opus",
     allowed_tools=["bash", "read"],
     system_prompt="You are helpful"
 )
@@ -228,9 +222,7 @@ type ClaudeAgentOptions struct {
 }
 
 func NewClaudeAgentOptions() *ClaudeAgentOptions {
-    return &ClaudeAgentOptions{
-        Model: "claude-opus",
-    }
+    return &ClaudeAgentOptions{}
 }
 
 // Builder methods
@@ -246,7 +238,6 @@ func (o *ClaudeAgentOptions) WithAllowedTools(tools ...string) *ClaudeAgentOptio
 
 // Usage (fluent API)
 options := NewClaudeAgentOptions().
-    WithModel("claude-opus").
     WithAllowedTools("bash", "read").
     WithSystemPrompt("You are helpful")
 ```

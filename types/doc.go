@@ -60,7 +60,6 @@
 // ClaudeAgentOptions provides a fluent builder API for configuration:
 //
 //	opts := types.NewClaudeAgentOptions().
-//	    WithModel("claude-3-5-sonnet-latest").
 //	    WithAllowedTools("Bash", "Write", "Read").
 //	    WithPermissionMode(types.PermissionModeAcceptEdits).
 //	    WithCanUseTool(func(ctx context.Context, toolName string, input map[string]interface{}, permCtx ToolPermissionContext) (interface{}, error) {

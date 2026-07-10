@@ -37,10 +37,21 @@ func (c *Client) SetPermissionMode(ctx context.Context, mode types.PermissionMod
 	if err != nil {
 		return err
 	}
+	modes, _, discoveryErr := c.supportedPermissionModes(ctx)
+	if discoveryErr != nil && len(modes) == 0 {
+		return fmt.Errorf("Client.SetPermissionMode: discover permission modes: %w", discoveryErr)
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("Client.SetPermissionMode: %w", ctxErr)
+	}
+	providerMode, err := providerPermissionMode(modes, mode)
+	if err != nil {
+		return fmt.Errorf("Client.SetPermissionMode: %w", err)
+	}
 	return sendControlNoResponse(
 		ctx,
 		q,
-		map[string]interface{}{"subtype": "set_permission_mode", "mode": string(mode)},
+		map[string]interface{}{"subtype": "set_permission_mode", "mode": providerMode},
 		"Client.SetPermissionMode",
 	)
 }

@@ -43,8 +43,10 @@ func (t *SubprocessCLITransport) appendPermissionArgs(args []string) []string {
 		t.logger.Debug("setting permission prompt tool", zap.String("tool", *t.options.PermissionPromptToolName))
 	}
 
-	// Add permission mode if specified
-	if t.options != nil && t.options.PermissionMode != nil {
+	// The canonical default means "use this CLI's default". Omitting the flag
+	// avoids coupling the SDK to provider spellings such as "manual".
+	if t.options != nil && t.options.PermissionMode != nil &&
+		*t.options.PermissionMode != types.PermissionModeDefault {
 		args = append(args, "--permission-mode", string(*t.options.PermissionMode))
 		t.logger.Debug("setting permission mode", zap.String("mode", string(*t.options.PermissionMode)))
 	}

@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
@@ -264,6 +265,42 @@ func TestParseInitResult_WithModels(t *testing.T) {
 	}
 	if result.Models[1].Description != "" {
 		t.Errorf("expected second model description empty, got %q", result.Models[1].Description)
+	}
+}
+
+func TestParseInitResult_WithModelCapabilities(t *testing.T) {
+	t.Parallel()
+
+	result := parseInitResult(map[string]interface{}{
+		"models": []interface{}{
+			map[string]interface{}{
+				"value":                    "provider-model-a",
+				"resolvedModel":            "provider-model-a-20260710",
+				"displayName":              "Provider Model A",
+				"description":              "Current account model",
+				"supportsEffort":           true,
+				"supportedEffortLevels":    []interface{}{"low", "high", "max"},
+				"supportsAdaptiveThinking": true,
+				"supportsFastMode":         true,
+				"supportsAutoMode":         false,
+				"disabled":                 true,
+			},
+		},
+	})
+
+	if result == nil || len(result.Models) != 1 {
+		t.Fatalf("parseInitResult() = %#v, want one model", result)
+	}
+	model := result.Models[0]
+	if model.ResolvedModel != "provider-model-a-20260710" || !model.SupportsEffort {
+		t.Fatalf("model metadata = %+v", model)
+	}
+	wantEfforts := []types.EffortLevel{types.EffortLow, types.EffortHigh, types.EffortMax}
+	if !slices.Equal(model.SupportedEffortLevels, wantEfforts) {
+		t.Fatalf("SupportedEffortLevels = %v, want %v", model.SupportedEffortLevels, wantEfforts)
+	}
+	if !model.SupportsAdaptiveThinking || !model.SupportsFastMode || model.SupportsAutoMode || !model.Disabled {
+		t.Fatalf("model capability flags = %+v", model)
 	}
 }
 

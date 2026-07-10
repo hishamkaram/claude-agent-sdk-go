@@ -2,8 +2,6 @@ package transport
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"os/exec"
 
 	"go.uber.org/zap"
@@ -222,11 +220,9 @@ func (t *SubprocessCLITransport) connectWithExecCommand(runCtx context.Context, 
 		t.cmd.Dir = t.cwd
 	}
 
-	// Set up environment variables
-	t.cmd.Env = os.Environ()
-	for key, value := range envMap {
-		t.cmd.Env = append(t.cmd.Env, fmt.Sprintf("%s=%s", key, value))
-	}
+	// Set up environment variables with SDK/provider values overriding inherited
+	// entries without duplicate keys.
+	t.cmd.Env = buildEffectiveProcessEnvironment(envMap)
 
 	// Set up pipes
 	var err error
@@ -334,29 +330,37 @@ func (t *SubprocessCLITransport) connectWithExecCommand(runCtx context.Context, 
 
 // buildEnvMap constructs the environment variable map for the subprocess.
 func (t *SubprocessCLITransport) buildEnvMap() map[string]string {
-	envMap := make(map[string]string)
-
-	// SDK-specific variables
-	envMap["CLAUDE_CODE_ENTRYPOINT"] = "agent"
-	envMap["CLAUDE_AGENT_SDK_VERSION"] = SDKVersion
-
-	// Model environment variable
+	envMap := BuildRuntimeEnvironment(t.options, t.env)
 	if t.options != nil && t.options.Model != nil {
-		envMap["ANTHROPIC_MODEL"] = *t.options.Model
 		t.logger.Debug("setting ANTHROPIC_MODEL environment variable", zap.String("model", *t.options.Model))
 	}
-
-	// Base URL environment variable
 	if t.options != nil && t.options.BaseURL != nil {
-		envMap["ANTHROPIC_BASE_URL"] = *t.options.BaseURL
 		t.logger.Debug("setting ANTHROPIC_BASE_URL environment variable", zap.String("base_url", *t.options.BaseURL))
 	}
-
-	// Custom environment variables (can override the above)
-	for key, value := range t.env {
-		envMap[key] = value
+	for key := range t.env {
 		t.logger.Debug("setting custom environment variable", zap.String("key", key))
 	}
+	return envMap
+}
 
+// BuildRuntimeEnvironment constructs the environment sent to every Claude CLI
+// process, including capability probes.
+func BuildRuntimeEnvironment(
+	options *types.ClaudeAgentOptions,
+	customEnv map[string]string,
+) map[string]string {
+	envMap := map[string]string{
+		"CLAUDE_CODE_ENTRYPOINT":   "agent",
+		"CLAUDE_AGENT_SDK_VERSION": SDKVersion,
+	}
+	if options != nil && options.Model != nil {
+		envMap["ANTHROPIC_MODEL"] = *options.Model
+	}
+	if options != nil && options.BaseURL != nil {
+		envMap["ANTHROPIC_BASE_URL"] = *options.BaseURL
+	}
+	for key, value := range customEnv {
+		envMap[key] = value
+	}
 	return envMap
 }

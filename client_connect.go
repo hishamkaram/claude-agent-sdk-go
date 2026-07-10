@@ -134,6 +134,8 @@ func (c *Client) commitConnect(
 	}
 	c.query = query
 	c.initResult = initResult
+	c.permissionModes = nil
+	c.permissionModeVersion = ""
 	c.connected = true
 	c.mu.Unlock()
 	return nil
