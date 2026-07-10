@@ -34,7 +34,7 @@ import (
 // Example usage:
 //
 //	ctx := context.Background()
-//	opts := types.NewClaudeAgentOptions().WithModel("claude-3-5-sonnet-latest")
+//	opts := types.NewClaudeAgentOptions()
 //	messages, err := Query(ctx, "What is 2+2?", opts)
 //	if err != nil {
 //	    if types.IsCLINotFoundError(err) {

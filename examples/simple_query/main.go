@@ -14,9 +14,8 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// Create options with a simple model
-	opts := types.NewClaudeAgentOptions().
-		WithModel("claude-sonnet-4-5-20250929")
+	// Use the model selected by the installed CLI.
+	opts := types.NewClaudeAgentOptions()
 
 	// Simple query
 	fmt.Println("Sending query: 'What is 2 + 2?'")

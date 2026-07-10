@@ -25,7 +25,6 @@ func main() {
 
 	// Create options with multiple hooks
 	opts := types.NewClaudeAgentOptions().
-		WithModel("claude-sonnet-4-5-20250929").
 		WithAllowedTools("Bash", "Read", "Write").
 		WithHook(types.HookEventPreToolUse, preToolHook).
 		WithHook(types.HookEventPostToolUse, postToolHook).

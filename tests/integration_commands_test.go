@@ -170,7 +170,11 @@ func TestCLI_PermissionModes(t *testing.T) {
 func supportedPermissionModeValues(modes []types.SupportedPermissionMode) map[string]bool {
 	values := make(map[string]bool, len(modes))
 	for _, mode := range modes {
-		values[mode.ProviderValue] = true
+		value := mode.ProviderValue
+		if mode.CanonicalValue != "" {
+			value = string(mode.CanonicalValue)
+		}
+		values[value] = true
 	}
 	return values
 }

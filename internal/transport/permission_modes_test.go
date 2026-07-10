@@ -2,9 +2,12 @@ package transport
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/hishamkaram/claude-agent-sdk-go/types"
 )
@@ -32,31 +35,34 @@ func TestParsePermissionModesFromHelp(t *testing.T) {
 	}
 }
 
-func TestFallbackPermissionModesExcludeUnsafeModes(t *testing.T) {
+func TestDiscoverPermissionModesCanonicalizesManualAlias(t *testing.T) {
 	t.Parallel()
 
-	got := FallbackPermissionModes("2.1.197")
-	want := []string{
-		string(types.PermissionModeDefault),
-		string(types.PermissionModePlan),
-		string(types.PermissionModeAcceptEdits),
-	}
-	if len(got) != len(want) {
-		t.Fatalf("FallbackPermissionModes() = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i].ProviderValue != want[i] {
-			t.Fatalf("FallbackPermissionModes()[%d].ProviderValue = %q, want %q", i, got[i].ProviderValue, want[i])
-		}
-		if got[i].Source != types.PermissionModeSourceFallback {
-			t.Fatalf("FallbackPermissionModes()[%d].Source = %q, want %q", i, got[i].Source, types.PermissionModeSourceFallback)
-		}
-	}
+	dir := t.TempDir()
+	cliPath := filepath.Join(dir, "claude")
+	writeFakeClaude(t, cliPath, "2.1.206", `"acceptEdits", "auto", "manual", "plan"`)
+
+	got := DiscoverPermissionModes(context.Background(), cliPath)
 	for _, mode := range got {
-		switch mode.ProviderValue {
-		case string(types.PermissionModeAuto), string(types.PermissionModeBypassPermissions), string(types.PermissionModeDontAsk):
-			t.Fatalf("FallbackPermissionModes() exposed unsafe mode %q", mode.ProviderValue)
+		if mode.ProviderValue != "manual" {
+			continue
 		}
+		if mode.CanonicalValue != types.PermissionModeDefault {
+			t.Fatalf("manual CanonicalValue = %q, want %q", mode.CanonicalValue, types.PermissionModeDefault)
+		}
+		return
+	}
+	t.Fatalf("DiscoverPermissionModes() = %v, want raw manual mode", got)
+}
+
+func TestDiscoverPermissionModesReturnsEmptyWhenHelpFails(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cliPath := filepath.Join(dir, "claude")
+	writeFakeClaudeFailingHelp(t, cliPath, "2.1.197")
+	if got := DiscoverPermissionModes(context.Background(), cliPath); len(got) != 0 {
+		t.Fatalf("DiscoverPermissionModes() = %v, want empty unavailable result", got)
 	}
 }
 
@@ -89,13 +95,8 @@ func TestDiscoverPermissionModesDoesNotCacheFallback(t *testing.T) {
 
 	ctx := context.Background()
 	first := DiscoverPermissionModes(ctx, cliPath)
-	if containsProviderMode(first, "auto") {
-		t.Fatalf("DiscoverPermissionModes() first = %v, want fallback without auto", first)
-	}
-	for _, mode := range first {
-		if mode.Source != types.PermissionModeSourceFallback {
-			t.Fatalf("DiscoverPermissionModes() first source = %q, want fallback (all = %v)", mode.Source, first)
-		}
+	if len(first) != 0 {
+		t.Fatalf("DiscoverPermissionModes() first = %v, want empty unavailable result", first)
 	}
 
 	writeFakeClaude(t, cliPath, "2.1.197", `"default", "plan", "auto"`)
@@ -103,10 +104,114 @@ func TestDiscoverPermissionModesDoesNotCacheFallback(t *testing.T) {
 	if !containsProviderMode(second, "auto") {
 		t.Fatalf("DiscoverPermissionModes() second = %v, want retry to discover auto", second)
 	}
-	for _, mode := range second {
-		if mode.Source == types.PermissionModeSourceFallback {
-			t.Fatalf("DiscoverPermissionModes() second still returned fallback mode %v", mode)
+}
+
+func TestDiscoverPermissionModesCacheIncludesInheritedEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	cliPath := filepath.Join(dir, "claude")
+	body := `#!/bin/sh
+if [ "$1" = "--version" ]; then echo '2.9.1 (Claude Code)'; exit 0; fi
+if [ "$1" = "--help" ]; then echo "--permission-mode <mode> (choices: \"$PERMISSION_MODE_CHOICE\")"; exit 0; fi
+exit 1
+`
+	if err := os.WriteFile(cliPath, []byte(body), 0o700); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+	t.Setenv("PERMISSION_MODE_CHOICE", "auto")
+	first := DiscoverPermissionModes(context.Background(), cliPath)
+	if !containsProviderMode(first, "auto") {
+		t.Fatalf("first discovery = %v, want inherited auto", first)
+	}
+	t.Setenv("PERMISSION_MODE_CHOICE", "plan")
+	second := DiscoverPermissionModes(context.Background(), cliPath)
+	if !containsProviderMode(second, "plan") || containsProviderMode(second, "auto") {
+		t.Fatalf("second discovery = %v, want cache invalidated for inherited plan", second)
+	}
+}
+
+func TestDiscoverPermissionModesCacheIncludesEffectiveWorkingDirectory(t *testing.T) {
+	originalWorkingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if chdirErr := os.Chdir(originalWorkingDirectory); chdirErr != nil {
+			t.Errorf("restore working directory: %v", chdirErr)
 		}
+	})
+
+	root := t.TempDir()
+	firstDirectory := filepath.Join(root, "auto")
+	secondDirectory := filepath.Join(root, "plan")
+	for _, directory := range []string{firstDirectory, secondDirectory} {
+		if err := os.Mkdir(directory, 0o700); err != nil {
+			t.Fatalf("create working directory: %v", err)
+		}
+	}
+	cliPath := filepath.Join(root, "claude")
+	body := `#!/bin/sh
+if [ "$1" = "--version" ]; then echo '2.9.1 (Claude Code)'; exit 0; fi
+if [ "$1" = "--help" ]; then echo "--permission-mode <mode> (choices: \"$(basename "$PWD")\")"; exit 0; fi
+exit 1
+`
+	if err := os.WriteFile(cliPath, []byte(body), 0o700); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+
+	if err := os.Chdir(firstDirectory); err != nil {
+		t.Fatalf("change to first working directory: %v", err)
+	}
+	first := DiscoverPermissionModes(context.Background(), cliPath)
+	if !containsProviderMode(first, "auto") {
+		t.Fatalf("first discovery = %v, want mode from auto working directory", first)
+	}
+	if err := os.Chdir(secondDirectory); err != nil {
+		t.Fatalf("change to second working directory: %v", err)
+	}
+	second := DiscoverPermissionModes(context.Background(), cliPath)
+	if !containsProviderMode(second, "plan") || containsProviderMode(second, "auto") {
+		t.Fatalf("second discovery = %v, want cache invalidated for plan working directory", second)
+	}
+}
+
+func TestBuildEffectiveProcessEnvironmentUsesWindowsKeySemantics(t *testing.T) {
+	t.Parallel()
+
+	got := buildEffectiveProcessEnvironmentForOS(
+		[]string{"Path=C:\\inherited", "HOME=C:\\home"},
+		map[string]string{"PATH": `C:\configured`},
+		"windows",
+	)
+
+	var pathEntries []string
+	for _, entry := range got {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok && strings.EqualFold(key, "PATH") {
+			pathEntries = append(pathEntries, entry)
+		}
+	}
+	if len(pathEntries) != 1 || pathEntries[0] != `PATH=C:\configured` {
+		t.Fatalf("Windows PATH entries = %v, want configured override only (all = %v)", pathEntries, got)
+	}
+}
+
+func TestDiscoverPermissionModesPreservesProbeTimeout(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cliPath := filepath.Join(dir, "claude")
+	body := `#!/bin/sh
+if [ "$1" = "--version" ]; then echo '2.9.1 (Claude Code)'; exit 0; fi
+sleep 1
+`
+	if err := os.WriteFile(cliPath, []byte(body), 0o700); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	_, _, err := DiscoverPermissionModesAndVersionWithEnvironment(ctx, cliPath, "", nil)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("discovery error = %v, want deadline exceeded", err)
 	}
 }
 

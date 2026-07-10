@@ -17,13 +17,11 @@ func main() {
 
 	// Create options with beta features enabled
 	opts := types.NewClaudeAgentOptions().
-		WithModel("claude-3-5-sonnet-latest").
 		// Add beta features - example: extended context window
 		WithBeta("context-1m-2025-08-07")
 
 	// Alternative: Set multiple betas at once
 	// opts := types.NewClaudeAgentOptions().
-	// 	WithModel("claude-3-5-sonnet-latest").
 	// 	WithBetas([]string{"context-1m-2025-08-07"})
 
 	fmt.Println("Claude Agent SDK - Beta Features Example")

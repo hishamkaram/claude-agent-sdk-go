@@ -23,12 +23,26 @@ type SlashCommand struct {
 // ModelInfo describes a model available in the current session.
 // It is populated from the CLI's initialize response.
 type ModelInfo struct {
-	// Value is the model identifier (e.g. "claude-3-5-haiku-latest").
+	// Value is the model identifier reported by the connected Claude CLI.
 	Value string `json:"value"`
-	// DisplayName is the human-readable model name (e.g. "Claude 3.5 Haiku").
+	// DisplayName is the human-readable model name reported by the CLI.
 	DisplayName string `json:"displayName"`
 	// Description is an optional short description of the model.
 	Description string `json:"description,omitempty"`
+	// ResolvedModel is the concrete provider model selected by an alias.
+	ResolvedModel string `json:"resolvedModel,omitempty"`
+	// SupportsEffort reports whether the model accepts an effort setting.
+	SupportsEffort bool `json:"supportsEffort,omitempty"`
+	// SupportedEffortLevels is the provider-reported effort set for this model.
+	SupportedEffortLevels []EffortLevel `json:"supportedEffortLevels,omitempty"`
+	// SupportsAdaptiveThinking reports adaptive-thinking support.
+	SupportsAdaptiveThinking bool `json:"supportsAdaptiveThinking,omitempty"`
+	// SupportsFastMode reports fast-mode support.
+	SupportsFastMode bool `json:"supportsFastMode,omitempty"`
+	// SupportsAutoMode reports auto-mode support.
+	SupportsAutoMode bool `json:"supportsAutoMode,omitempty"`
+	// Disabled reports that the provider exposed the model but made it unavailable.
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 // AgentInfo describes a supported agent type from the initialization response.

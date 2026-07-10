@@ -30,7 +30,8 @@ func main() {
 // newCalculatorServer creates an MCP server using the factory function.
 // This eliminates most boilerplate code compared to manual implementation.
 func newCalculatorServer() (*types.SDKMCPServer, error) {
-	return types.NewSDKMCPServer("calculator",
+	return types.NewSDKMCPServer(
+		"calculator",
 		calculatorTool("add", "Add two numbers together", "addition", func(a, b float64) float64 {
 			return a + b
 		}),
@@ -69,7 +70,6 @@ func numberPairInputSchema() map[string]interface{} {
 
 func newCalculatorOptions(calculator *types.SDKMCPServer) *types.ClaudeAgentOptions {
 	return types.NewClaudeAgentOptions().
-		WithModel("claude-opus-4-20250514").
 		WithMcpServers(map[string]interface{}{
 			"calculator": calculator,
 		}).

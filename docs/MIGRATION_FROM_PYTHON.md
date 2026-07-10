@@ -84,7 +84,6 @@ func main() {
 
 ```python
 options = AgentOptions(
-    model="claude-opus-4-20250514",
     allowed_tools=["Bash", "Read", "Write"],
     system_prompt="You are a helpful assistant",
     max_turns=10,
@@ -95,7 +94,6 @@ options = AgentOptions(
 
 ```go
 options := types.NewClaudeAgentOptions().
-    WithModel("claude-opus-4-20250514").
     WithAllowedTools("Bash", "Read", "Write").
     WithSystemPrompt("You are a helpful assistant").
     WithMaxTurns(10)

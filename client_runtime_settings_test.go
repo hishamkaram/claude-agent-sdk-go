@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -174,6 +175,57 @@ func TestClientSetEffort_ApplyFlagSettingsAndVerifiesReadback(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for SetEffort")
+	}
+}
+
+func TestClientListModels_UsesControlProtocol(t *testing.T) {
+	t.Parallel()
+	client, transport := newRuntimeSettingsClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	type result struct {
+		models []types.ModelInfo
+		err    error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		models, err := client.ListModels(ctx)
+		resultCh <- result{models: models, err: err}
+	}()
+
+	req := waitForControlRequest(t, transport, 0)
+	if subtype := controlRequestPayload(t, req)["subtype"]; subtype != "list_models" {
+		t.Fatalf("subtype = %q, want list_models", subtype)
+	}
+	transport.sendControlResponse(req, map[string]interface{}{
+		"models": []interface{}{
+			map[string]interface{}{
+				"value":                 "provider-model-a",
+				"displayName":           "Provider Model A",
+				"supportsEffort":        true,
+				"supportedEffortLevels": []interface{}{"low", "high"},
+			},
+			map[string]interface{}{
+				"value":       "provider-model-disabled",
+				"displayName": "Provider Model Disabled",
+				"disabled":    true,
+			},
+		},
+	})
+
+	got := <-resultCh
+	if got.err != nil {
+		t.Fatalf("ListModels: %v", got.err)
+	}
+	if len(got.models) != 2 || got.models[0].Value != "provider-model-a" {
+		t.Fatalf("ListModels = %+v", got.models)
+	}
+	if !slices.Equal(got.models[0].SupportedEffortLevels, []types.EffortLevel{types.EffortLow, types.EffortHigh}) {
+		t.Fatalf("efforts = %v", got.models[0].SupportedEffortLevels)
+	}
+	if len(got.models) != 2 || !got.models[1].Disabled {
+		t.Fatalf("disabled model metadata was not preserved: %+v", got.models)
 	}
 }
 
