@@ -205,6 +205,7 @@ func TestClientListModels_UsesControlProtocol(t *testing.T) {
 				"displayName":           "Provider Model A",
 				"supportsEffort":        true,
 				"supportedEffortLevels": []interface{}{"low", "high"},
+				"futureFlag":            "future-value",
 			},
 			map[string]interface{}{
 				"value":       "provider-model-disabled",
@@ -226,6 +227,56 @@ func TestClientListModels_UsesControlProtocol(t *testing.T) {
 	}
 	if len(got.models) != 2 || !got.models[1].Disabled {
 		t.Fatalf("disabled model metadata was not preserved: %+v", got.models)
+	}
+	if got.models[0].Raw["futureFlag"] != "future-value" {
+		t.Fatalf("raw model metadata was not preserved: %#v", got.models[0].Raw)
+	}
+}
+
+func TestClientListModels_RejectsMalformedModelMetadata(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		model map[string]interface{}
+	}{
+		{
+			name: "non-string value",
+			model: map[string]interface{}{
+				"value":       123,
+				"displayName": "Provider Model A",
+			},
+		},
+		{
+			name: "non-string effort level",
+			model: map[string]interface{}{
+				"value":                 "provider-model-a",
+				"supportedEffortLevels": []interface{}{"low", 123},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, transport := newRuntimeSettingsClient(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			errCh := make(chan error, 1)
+			go func() {
+				_, err := client.ListModels(ctx)
+				errCh <- err
+			}()
+
+			req := waitForControlRequest(t, transport, 0)
+			transport.sendControlResponse(req, map[string]interface{}{
+				"models": []interface{}{tt.model},
+			})
+
+			if err := <-errCh; err == nil {
+				t.Fatal("ListModels accepted malformed model metadata")
+			}
+		})
 	}
 }
 

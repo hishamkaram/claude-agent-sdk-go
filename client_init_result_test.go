@@ -302,6 +302,9 @@ func TestParseInitResult_WithModelCapabilities(t *testing.T) {
 	if !model.SupportsAdaptiveThinking || !model.SupportsFastMode || model.SupportsAutoMode || !model.Disabled {
 		t.Fatalf("model capability flags = %+v", model)
 	}
+	if model.Raw["resolvedModel"] != "provider-model-a-20260710" {
+		t.Fatalf("raw model row was not preserved: %#v", model.Raw)
+	}
 }
 
 // TestParseInitResult_ModelsEmptyArray verifies empty models array is handled.
@@ -406,14 +409,20 @@ func TestParseInitResult_ModelsAndCommandsTogether(t *testing.T) {
 	}
 }
 
-// TestParseInitResult_ModelsSkipsEmptyValue verifies models with no value are skipped.
-func TestParseInitResult_ModelsSkipsEmptyValue(t *testing.T) {
+// TestParseInitResult_ModelsKeepsCLIDefaultRow verifies CLI default rows can have
+// no concrete value and must still survive catalog discovery.
+func TestParseInitResult_ModelsKeepsCLIDefaultRow(t *testing.T) {
 	t.Parallel()
 	raw := map[string]interface{}{
 		"models": []interface{}{
 			map[string]interface{}{
-				"displayName": "No Value Model",
-				// value intentionally missing
+				"value":         "",
+				"displayName":   "Default",
+				"resolvedModel": "claude-sonnet-5-20260701",
+				"futureFlag":    "future-value",
+			},
+			map[string]interface{}{
+				// truly empty rows are ignored
 			},
 			map[string]interface{}{
 				"value":       "haiku",
@@ -426,11 +435,20 @@ func TestParseInitResult_ModelsSkipsEmptyValue(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected non-nil result")
 	}
-	if len(result.Models) != 1 {
-		t.Fatalf("expected 1 model (skipping empty value), got %d", len(result.Models))
+	if len(result.Models) != 2 {
+		t.Fatalf("expected 2 models (keeping CLI default row), got %d", len(result.Models))
 	}
-	if result.Models[0].Value != "haiku" {
-		t.Errorf("expected 'haiku', got %q", result.Models[0].Value)
+	if result.Models[0].Value != "" || result.Models[0].DisplayName != "Default" {
+		t.Fatalf("default row = %+v", result.Models[0])
+	}
+	if result.Models[0].ResolvedModel != "claude-sonnet-5-20260701" {
+		t.Fatalf("default row resolved model = %q", result.Models[0].ResolvedModel)
+	}
+	if result.Models[0].Raw["futureFlag"] != "future-value" {
+		t.Fatalf("future raw field not preserved: %#v", result.Models[0].Raw)
+	}
+	if result.Models[1].Value != "haiku" {
+		t.Errorf("expected 'haiku', got %q", result.Models[1].Value)
 	}
 }
 
