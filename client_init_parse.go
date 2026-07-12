@@ -73,7 +73,7 @@ func parseInitModels(raw map[string]interface{}) []types.ModelInfo {
 			continue
 		}
 		info := parseInitModel(m)
-		if info.Value != "" {
+		if shouldKeepInitModel(info) {
 			models = append(models, info)
 		}
 	}
@@ -93,7 +93,23 @@ func parseInitModel(raw map[string]interface{}) types.ModelInfo {
 		SupportsFastMode:         modelBoolField(raw, "supportsFastMode"),
 		SupportsAutoMode:         modelBoolField(raw, "supportsAutoMode"),
 		Disabled:                 modelBoolField(raw, "disabled"),
+		Raw:                      cloneInitMap(raw),
 	}
+}
+
+func shouldKeepInitModel(info types.ModelInfo) bool {
+	return info.Value != "" || info.DisplayName != "" || info.ResolvedModel != "" || info.Description != ""
+}
+
+func cloneInitMap(raw map[string]interface{}) map[string]interface{} {
+	if raw == nil {
+		return nil
+	}
+	out := make(map[string]interface{}, len(raw))
+	for key, value := range raw {
+		out[key] = value
+	}
+	return out
 }
 
 func modelStringField(raw map[string]interface{}, key string) string {

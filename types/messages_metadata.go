@@ -43,6 +43,8 @@ type ModelInfo struct {
 	SupportsAutoMode bool `json:"supportsAutoMode,omitempty"`
 	// Disabled reports that the provider exposed the model but made it unavailable.
 	Disabled bool `json:"disabled,omitempty"`
+	// Raw preserves the full CLI model row for forward compatibility.
+	Raw map[string]interface{} `json:"-"`
 }
 
 // AgentInfo describes a supported agent type from the initialization response.
