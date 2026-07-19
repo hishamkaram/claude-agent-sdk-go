@@ -5,6 +5,8 @@ All notable changes to the Claude Agent SDK for Go are documented in this file.
 ## [Unreleased]
 
 ### Changed
+- CI and the real-CLI integration workflow now run the declared Go 1.25.12
+  toolchain.
 - Permission-mode discovery now fails closed when the installed CLI cannot be
   inspected; the SDK no longer invents a static fallback set. Canonical
   `default` is translated to the provider spelling reported by the CLI and is
