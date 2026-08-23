@@ -136,6 +136,45 @@ func requireRunTurns(t *testing.T) {
 	}
 }
 
+const defaultIntegrationModel = "sonnet"
+
+// integrationModel selects an explicit CLI-supported model so real-CLI tests
+// do not inherit an unavailable interactive-session model from ~/.claude.
+func integrationModel(t *testing.T) string {
+	t.Helper()
+	return selectedIntegrationModel(os.Getenv("CLAUDE_SDK_INTEGRATION_MODEL"))
+}
+
+func selectedIntegrationModel(value string) string {
+	if value = strings.TrimSpace(value); value != "" {
+		return value
+	}
+	return defaultIntegrationModel
+}
+
+func TestSelectedIntegrationModel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "default", want: defaultIntegrationModel},
+		{name: "trims override", value: "  opus  ", want: "opus"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := selectedIntegrationModel(tt.value); got != tt.want {
+				t.Fatalf("selectedIntegrationModel(%q) = %q, want %q", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
 // safetyNetSettings snapshots and restores ~/.claude/settings.json around a
 // test that may mutate it.
 func safetyNetSettings(t *testing.T) {

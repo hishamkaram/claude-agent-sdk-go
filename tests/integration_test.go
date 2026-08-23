@@ -22,6 +22,8 @@
 //     OR the CLI has an existing login at ~/.claude/.credentials.json.
 //   - requireRunTurns(t) — skips unless CLAUDE_SDK_RUN_TURNS=1. Use for tests
 //     that actually drive the model through a turn (token cost).
+//   - CLAUDE_SDK_INTEGRATION_MODEL optionally overrides the default `sonnet`
+//     alias for a CLI account with a different supported model.
 //
 // Mock-based SDK tests (shell-script fake CLI) live in integration_mock_test.go
 // without the build tag. Those verify SDK plumbing but cannot catch wire-shape
@@ -76,7 +78,7 @@ func TestControlProtocol_FullFlow(t *testing.T) {
 
 	opts := types.NewClaudeAgentOptions().
 		WithCLIPath(cliPath).
-		WithModel("claude-3-5-sonnet-latest").
+		WithModel(integrationModel(t)).
 		WithCanUseTool(canUseTool)
 
 	client, err := claude.NewClient(ctx, opts)
@@ -134,7 +136,7 @@ func TestRealCLIIntegration(t *testing.T) {
 
 	opts := types.NewClaudeAgentOptions().
 		WithCLIPath(cliPath).
-		WithModel("claude-3-5-sonnet-latest").
+		WithModel(integrationModel(t)).
 		WithPermissionMode(types.PermissionModeBypassPermissions)
 
 	msgChan, err := claude.Query(ctx, "Say 'hello' and nothing else.", opts)

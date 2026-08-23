@@ -48,14 +48,9 @@ func TestRequestResponseCorrelation(t *testing.T) {
 		responseChan <- result
 	}()
 
-	// Wait a bit for the request to be sent
-	time.Sleep(50 * time.Millisecond)
-
-	// Get the written data to extract request ID
-	written := transport.getWrittenData()
-	if len(written) == 0 {
-		t.Fatal("no data written to transport")
-	}
+	// Wait for the asynchronous write instead of assuming the scheduler will
+	// run it within a fixed interval.
+	written := waitForTransportWrite(t, transport)
 
 	var sentRequest map[string]interface{}
 	if err := json.Unmarshal([]byte(written[0]), &sentRequest); err != nil {
@@ -92,6 +87,25 @@ func TestRequestResponseCorrelation(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for response")
+	}
+}
+
+func waitForTransportWrite(t *testing.T, transport *mockTransport) []string {
+	t.Helper()
+	timeout := time.NewTimer(2 * time.Second)
+	defer timeout.Stop()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if written := transport.getWrittenData(); len(written) > 0 {
+			return written
+		}
+		select {
+		case <-timeout.C:
+			t.Fatal("timed out waiting for transport write")
+		case <-ticker.C:
+		}
 	}
 }
 
