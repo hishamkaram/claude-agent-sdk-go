@@ -118,6 +118,9 @@ type AssistantMessage struct {
 	ParentToolUseID *string        `json:"parent_tool_use_id,omitempty"`
 	UUID            string         `json:"uuid,omitempty"`
 	SessionID       string         `json:"session_id,omitempty"`
+	// MessageID correlates completed content with stream_event.message_start.
+	// It is the provider message.id, not the CLI envelope UUID.
+	MessageID string `json:"message_id,omitempty"`
 }
 
 // GetMessageType returns the type of the message.
@@ -148,6 +151,11 @@ func (m *AssistantMessage) UnmarshalJSON(data []byte) error {
 	}
 
 	var contentBlocks []json.RawMessage
+	if idRaw, ok := aux.Message["id"]; ok {
+		if err := json.Unmarshal(idRaw, &m.MessageID); err != nil {
+			return fmt.Errorf("types.AssistantMessage.UnmarshalJSON: message id: %w", err)
+		}
+	}
 
 	// Check if content is in nested message.content (Claude CLI format)
 	if aux.Message != nil {

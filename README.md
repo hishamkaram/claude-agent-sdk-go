@@ -91,6 +91,12 @@ client, _ := claude.NewClient(ctx, opts)
 - Provides 23 hook event callbacks for intercepting tool use, permissions, and lifecycle events
 - Handles MCP (Model Context Protocol) server configuration and tool routing
 
+For incremental text, enable `WithIncludePartialMessages(true)` and handle
+`*types.StreamEvent` messages whose event is `content_block_delta` with a
+`text_delta`. Completed `AssistantMessage` objects still arrive: use their
+`MessageID` to reconcile the final content with the stream's `message_start`
+ID rather than displaying the same text twice. Partial messages are off by default.
+
 ## Project structure
 
 ```
