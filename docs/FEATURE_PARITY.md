@@ -298,8 +298,8 @@ Both SDKs use the same control protocol and are forward-compatible with differen
 ## Help Us Close the Gaps
 
 - Found a missing feature? [Open an issue](https://github.com/hishamkaram/claude-agent-sdk-go/issues)
-- Want to contribute? See [DEVELOPMENT.md](../DEVELOPMENT.md)
-- Have feedback? [Discussions](https://github.com/hishamkaram/claude-agent-sdk-go/discussions)
+- Want to contribute? See [CONTRIBUTING.md](../CONTRIBUTING.md)
+- Have feedback? [Open an issue](https://github.com/hishamkaram/claude-agent-sdk-go/issues)
 
 ---
 

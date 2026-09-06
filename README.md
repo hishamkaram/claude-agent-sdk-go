@@ -218,6 +218,9 @@ See `tests/coverage_matrix.md` for the per-method coverage table.
 
 ## Contributing
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and
+[SECURITY.md](SECURITY.md) for private vulnerability reporting.
+
 Issues and pull requests welcome. Run `make test` before submitting — no Claude CLI required for the unit test suite.
 
 ## License
