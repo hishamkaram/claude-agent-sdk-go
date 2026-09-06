@@ -17,6 +17,9 @@ func (t *SubprocessCLITransport) buildCommandArgs() []string {
 		"--output-format=stream-json",
 		"--verbose",
 	}
+	if t.options != nil && t.options.IncludePartialMessages {
+		args = append(args, "--include-partial-messages")
+	}
 
 	// Each helper appends its flag group in declaration order; the call order
 	// below is the canonical CLI argument order (pinned by the args oracle).
